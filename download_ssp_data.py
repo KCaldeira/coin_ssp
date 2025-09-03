@@ -10,7 +10,7 @@ import pickle
 print(pyam.iiasa.platforms())
 
 # 2) read country-level Population and GDP (PPP + MER) for all SSPs
-cache_file = "ssp_raw_data.pkl"
+cache_file = "./data/input/ssp_raw_data.pkl"
 
 if os.path.exists(cache_file):
     print(f"Loading cached data from {cache_file}...")

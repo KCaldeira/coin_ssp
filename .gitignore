@@ -61,3 +61,5 @@ Thumbs.db
 
 # Project specific
 tfp_test_results.png
+ssp_raw_data.pkl
+data/input/ssp_raw_data.pkl

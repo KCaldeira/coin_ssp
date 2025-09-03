@@ -2,7 +2,7 @@ import pickle
 import pandas as pd
 
 # Load the cached data
-with open('ssp_raw_data.pkl', 'rb') as f:
+with open('./data/input/ssp_raw_data.pkl', 'rb') as f:
     df = pickle.load(f)
 
 # Convert to pandas for easier filtering
