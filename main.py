@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from coin_ssp_core import ModelParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model
 from coin_ssp_utils import apply_time_series_filter
+import argparse
 
 def load_data(data_file="./data/input/Historical_SSP5_annual.csv"):
     """Load the merged climate-economic dataset."""
@@ -177,34 +178,54 @@ def save_country_results(country, results, output_dir="./data/output"):
     df.to_csv(output_file, index=False)
     print(f"    Saved results: {output_file}")
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="COIN-SSP Climate Economics Main Processing Script")
+    parser.add_argument("--max-countries", type=int, default=None, help="Maximum number of countries to process")
+    parser.add_argument("--k_tas1", type=float, default=0.0, help="Linear temperature sensitivity for capital loss")
+    parser.add_argument("--k_tas2", type=float, default=0.0, help="Quadratic temperature sensitivity for capital loss")
+    parser.add_argument("--k_pr1", type=float, default=0.0, help="Linear precipitation sensitivity for capital loss")
+    parser.add_argument("--k_pr2", type=float, default=0.0, help="Quadratic precipitation sensitivity for capital loss")
+    parser.add_argument("--tfp_tas1", type=float, default=0.0, help="Linear temperature sensitivity for TFP loss")
+    parser.add_argument("--tfp_tas2", type=float, default=0.0, help="Quadratic temperature sensitivity for TFP loss")
+    parser.add_argument("--tfp_pr1", type=float, default=0.0, help="Linear precipitation sensitivity for TFP loss")
+    parser.add_argument("--tfp_pr2", type=float, default=0.0, help="Quadratic precipitation sensitivity for TFP loss")
+    parser.add_argument("--y_tas1", type=float, default=0.0, help="Linear temperature sensitivity for output loss")
+    parser.add_argument("--y_tas2", type=float, default=0.0, help="Quadratic temperature sensitivity for output loss")
+    parser.add_argument("--y_pr1", type=float, default=0.0, help="Linear precipitation sensitivity for output loss")
+    parser.add_argument("--y_pr2", type=float, default=0.0, help="Quadratic precipitation sensitivity for output loss")
+    return parser.parse_args()
+
+
 def main():
     """Main processing function."""
     print("=== COIN-SSP Climate Economics Processing ===\n")
+    args = parse_args()
     
     # Parse command line argument for max countries
-    max_countries = None
-    if len(sys.argv) > 1:
-        max_countries = int(sys.argv[1])
-        print(f"Processing limited to {max_countries} countries for testing\n")
+    max_countries = args.max_countries
     
     # Load data
     data = load_data()
     
-    # Define model parameters
-    # Start with baseline parameters (no climate sensitivity for testing)
+    # Define model parameters using command-line arguments
     params = ModelParams(
         s=0.3,          # savings rate (30%)
         alpha=0.3,      # capital elasticity  
         delta=0.1,      # depreciation rate (10% per year)
         tas0=20.0,      # reference temperature (°C)
         pr0=1.0,        # reference precipitation (mm/day)
-        # Climate sensitivity parameters (start with zeros for testing)
-        k_tas1=0.0,     # linear temperature sensitivity for capital
-        k_tas2=0.0,     # quadratic temperature sensitivity for capital  
-        tfp_tas1=0.0,   # linear temperature sensitivity for TFP
-        tfp_tas2=0.0,   # quadratic temperature sensitivity for TFP
-        y_tas1=0.0,     # linear temperature sensitivity for output
-        y_tas2=0.0      # quadratic temperature sensitivity for output
+        k_tas1=args.k_tas1,
+        k_tas2=args.k_tas2,
+        k_pr1=args.k_pr1,
+        k_pr2=args.k_pr2,
+        tfp_tas1=args.tfp_tas1,
+        tfp_tas2=args.tfp_tas2,
+        tfp_pr1=args.tfp_pr1,
+        tfp_pr2=args.tfp_pr2,
+        y_tas1=args.y_tas1,
+        y_tas2=args.y_tas2,
+        y_pr1=args.y_pr1,
+        y_pr2=args.y_pr2
     )
     
     print(f"\nModel Parameters:")
