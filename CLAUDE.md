@@ -48,4 +48,10 @@ def calculate_growth_rate(values):
 ```
 
 ## Project Context
-This is a climate economics modeling project implementing the Solow-Swan growth model for climate impact assessment. Code should reflect the mathematical elegance of economic models while maintaining computational efficiency for grid-scale analysis.
+This is a climate economics modeling project implementing the Solow-Swan growth model for climate impact assessment. Code should reflect the mathematical elegance of economic models while maintaining computational efficiency for country-level analysis.
+
+## Data Processing Philosophy
+- **Interpolation over Extrapolation**: Use linear interpolation between known data points rather than extrapolating beyond available data
+- **Annual Resolution**: Process all time series at annual resolution for consistency between climate and economic data
+- **Country Completeness**: Include countries only when they have complete time series data across all required variables
+- **Quality Assurance**: Preserve exact values at original data points when interpolating (e.g., 5-year economic data points)
