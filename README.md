@@ -84,7 +84,7 @@ Implementation considerations:
 ## Implementation Status
 
 ### Core Components
-- ✅ **TFP Calculation Module** (`coin_ssp_determine_tfp.py`): Implements Solow-Swan model to derive total factor productivity time series from GDP and population data
+- ✅ **Core Functions Module** (`coin_ssp_core.py`): Implements Solow-Swan model to derive total factor productivity time series from GDP and population data, plus other core functions
 - ✅ **Test Framework** (`test_tfp.py`): Validation testing with synthetic 20-year scenarios
 
 ### Current Capabilities
@@ -106,7 +106,7 @@ pip install -r requirements.txt
 
 ### Usage Example
 ```python
-from coin_ssp_determine_tfp import calculate_tfp_coin_ssp
+from coin_ssp_core import calculate_tfp_coin_ssp
 import numpy as np
 
 # Example parameters

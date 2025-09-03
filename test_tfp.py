@@ -2,7 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from coin_ssp_determine_tfp import calculate_tfp_coin_ssp
+from coin_ssp_core import calculate_tfp_coin_ssp
 
 def test_tfp_calculation():
     """Test the TFP calculation with synthetic data over 20 years."""
