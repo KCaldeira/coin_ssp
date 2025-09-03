@@ -10,6 +10,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **No defensive programming** - let exceptions bubble up naturally
 - **Fail fast** - prefer code that crashes immediately on invalid inputs rather than continuing with bad data
 - **No try-catch blocks** unless absolutely necessary for program logic (not error suppression)
+- **Assume complete data** - do not check for missing data fields (e.g., precipitation). If required data is missing, let the code fail with natural Python errors rather than handling gracefully
 
 ### Code Elegance
 - **Minimize conditional statements** - prefer functional approaches, mathematical expressions, and numpy vectorization

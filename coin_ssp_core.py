@@ -35,7 +35,7 @@
 #  This makes it so that all of the year(0) values are known.
 #
 import numpy as np
-    from dataclasses import dataclass
+from dataclasses import dataclass
 
 @dataclass
 class ModelParams:
@@ -57,16 +57,16 @@ class ModelParams:
     y_pr1: float = 0  # linear precipitation sensitivity for output loss
     y_pr2: float = 0  # quadratic precipitation sensitivity for output loss
 
-def calculate_tfp_coin_ssp(gdp, pop, params):
+def calculate_tfp_coin_ssp(pop, gdp, params):
     """
     Calculate total factor productivity time series using the Solow-Swan growth model.
     
     Parameters
     ----------
-    gdp : array-like
-        Time series of gross domestic product (Y) in $/yr
     pop : array-like  
         Time series of population (L) in people
+    gdp : array-like
+        Time series of gross domestic product (Y) in $/yr
     params : dict
         Model parameters containing:
         - 's': savings rate (dimensionless)
@@ -116,7 +116,7 @@ def calculate_tfp_coin_ssp(gdp, pop, params):
 
     return a, k
 
-    def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params:ModelParams )
+def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams):
 
     # This function calculates the forward model for the COIN-SSP economic model.
     # It takes in total factor productivity (tfp), population (pop), gross domestic product
@@ -185,17 +185,15 @@ def calculate_tfp_coin_ssp(gdp, pop, params):
         # in year t, we are assume that the damage to capital stock occurs before production occurs
         # so that production in year t is based on the capital stock after climate damage
         # and before investment occurs
-        y[t] = a[t] * k[t]*k_climate[t]**alpha * l[t]**(1-alpha) * y_climate[t]
+        y[t] = a[t] * (k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
         # capital stock is then updated based on savings, depereciation, and climate damage
-        k[t+1] = k[t] + s * y[t] - delta * k[t] + k_climate * k[t]
+        k[t+1] = k[t] + s * y[t] - delta * k[t] * k_climate[t]
 
     # compute the last year's TFP and output
     t = len(y)-1
-    tfp_climate = tfp_tas1 * (tas[t] - tas0) + tfp_tas2 * (tas[t] - tas0)**2  # units of fraction of TFP
-    tfp_climate += tfp_pr1 * (pr[t] - pr0) + tfp_pr2 * (pr[t] - pr0)**2  
     a[t] = a[t-1] * tfp_growth[t-1] * tfp_climate[t]
-    y[t] = a[t] * k[t]*k_climate[t]**alpha * l[t]**(1-alpha) * y_climate[t]
+    y[t] = a[t] * (k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
     return y, a, k, y_climate, tfp_climate, k_climate
         

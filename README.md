@@ -57,7 +57,7 @@ All damage functions support both temperature and precipitation sensitivities.
 ### 3. Economic Processing
 **Step 1: Baseline TFP Calculation**
 ```python
-tfp_baseline, k_baseline = calculate_tfp_coin_ssp(gdp, population, params)
+tfp_baseline, k_baseline = calculate_tfp_coin_ssp(population, gdp, params)
 ```
 
 **Step 2: Climate-Integrated Forward Model**  
@@ -119,6 +119,10 @@ pip install -r requirements.txt
 # Process all countries for SSP5 scenario
 python main.py
 
+# Process limited number of countries for testing
+python main.py 1          # Process only first country
+python main.py 5          # Process first 5 countries
+
 # Results saved to ./data/output/[country]_results.csv
 ```
 
@@ -142,8 +146,8 @@ params = ModelParams(
 
 # Calculate baseline TFP (no climate effects)
 tfp, capital = calculate_tfp_coin_ssp(
+    country_data.population.values,
     country_data.GDP.values, 
-    country_data.population.values, 
     params
 )
 

@@ -2,7 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from coin_ssp_core import calculate_tfp_coin_ssp
+from coin_ssp_core import calculate_tfp_coin_ssp, ModelParams
 
 def test_tfp_calculation():
     """Test the TFP calculation with synthetic data over 20 years."""
@@ -17,14 +17,14 @@ def test_tfp_calculation():
     pop = 10 * (1.01 ** np.arange(years))
     
     # Updated parameters
-    params = {
-        "s": 0.3,       # savings rate (30%)
-        "alpha": 0.3,   # elasticity of output w.r.t. capital
-        "delta": 0.1    # depreciation rate (10% per year)
-    }
+    params = ModelParams(
+        s=0.3,       # savings rate (30%)
+        alpha=0.3,   # elasticity of output w.r.t. capital
+        delta=0.1    # depreciation rate (10% per year)
+    )
     
     # Calculate TFP and capital stock
-    a, k = calculate_tfp_coin_ssp(gdp, pop, params)
+    a, k = calculate_tfp_coin_ssp(pop, gdp, params)
     
     # Print results
     print("Year\tGDP\t\tPop\t\tTFP\t\tCapital")

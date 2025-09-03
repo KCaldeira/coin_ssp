@@ -9,15 +9,17 @@ This script processes climate-economic data for each country:
 4. Runs forward model with climate effects to get climate-adjusted economic outcomes
 
 Usage:
-    python main.py
+    python main.py [max_countries]
 """
 
 import pandas as pd
 import numpy as np
+import sys
 from pathlib import Path
 from coin_ssp_core import ModelParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model
+from coin_ssp_utils import apply_time_series_filter
 
-def load_data(data_file="./data/input/Historical_SSP5_mapped.csv"):
+def load_data(data_file="./data/input/Historical_SSP5_annual.csv"):
     """Load the merged climate-economic dataset."""
     print(f"Loading data from {data_file}...")
     data = pd.read_csv(data_file)
@@ -69,27 +71,45 @@ def process_country(country_data, params):
     # Step 1: Calculate baseline TFP without climate effects
     print(f"    Calculating baseline TFP...")
     tfp_baseline, k_baseline = calculate_tfp_coin_ssp(
-        country_data['gdp'], 
         country_data['population'], 
+        country_data['gdp'], 
         params
     )
     
     # Step 2: Run forward model with climate effects
     print(f"    Running forward model with climate effects...")
     
-    # Note: We need to handle the fact that calculate_coin_ssp_forward_model 
-    # expects 'pr' but we may not have it in all datasets
-    if 'pr' in country_data:
-        pr_data = country_data['pr']
-    else:
-        # If no precipitation data, create zeros
-        pr_data = np.zeros_like(country_data['tas'])
-        
+    # find location of year 2025 in years
+    year_2025_loc = np.where(country_data['years'] == 2025)[0][0]
+    # reference temperature and precipitation are set to the mean of the beginning of the dataset to 2025
+    params.tas0 = np.mean(country_data['tas'][:year_2025_loc+1])
+    params.pr0 = np.mean(country_data['pr'][:year_2025_loc+1])
+       
     y_climate, a_climate, k_climate, y_climate_factor, tfp_climate_factor, k_climate_factor = calculate_coin_ssp_forward_model(
         tfp_baseline,
         country_data['population'],
         country_data['gdp'], 
         country_data['tas'],
+        country_data['pr'],
+        params
+    )
+    
+    
+    # Step 3: Run forward model with weather only (no climate trends) after year 2025
+    print(f"    Running forward model with no climate effects after year 2025...")
+
+    filter_width = 30  # years
+
+    tas_weather = apply_time_series_filter(country_data['tas'], filter_width, year_2025_loc)
+    pr_weather = apply_time_series_filter(country_data['pr'], filter_width, year_2025_loc)
+    
+       
+    y_weather, a_weather, k_weather, y_weather_factor, tfp_weather_factor, k_weather_factor = calculate_coin_ssp_forward_model(
+        tfp_baseline,
+        country_data['population'],
+        country_data['gdp'], 
+        tas_weather,
+        pr_weather,
         params
     )
     
@@ -99,7 +119,9 @@ def process_country(country_data, params):
         'population': country_data['population'],
         'gdp_observed': country_data['gdp'],
         'tas': country_data['tas'],
-        'pr': pr_data,
+        'pr': country_data['pr'],
+        'tas_weather': tas_weather,
+        'pr_weather': pr_weather,
         # Baseline results (no climate)
         'tfp_baseline': tfp_baseline,
         'k_baseline': k_baseline,
@@ -110,7 +132,15 @@ def process_country(country_data, params):
         # Climate effect factors
         'y_climate_factor': y_climate_factor,
         'tfp_climate_factor': tfp_climate_factor, 
-        'k_climate_factor': k_climate_factor
+        'k_climate_factor': k_climate_factor,
+        # no-climate-adjusted (interannual weather variability only) results  
+        'gdp_weather': y_weather * country_data['gdp'][0],  # Convert back to absolute units
+        'tfp_weather': a_weather,
+        'k_weather': k_weather,
+        # Climate effect factors
+        'y_weather_factor': y_weather_factor,
+        'tfp_weather_factor': tfp_weather_factor, 
+        'k_weather_factor': k_weather_factor
     }
     
     return results
@@ -134,7 +164,13 @@ def save_country_results(country, results, output_dir="./data/output"):
         'k_climate': results['k_climate'],
         'y_climate_factor': results['y_climate_factor'],
         'tfp_climate_factor': results['tfp_climate_factor'],
-        'k_climate_factor': results['k_climate_factor']
+        'k_climate_factor': results['k_climate_factor'],
+        'gdp_weather': results['gdp_weather'],
+        'tfp_weather': results['tfp_weather'], 
+        'k_weather': results['k_weather'],
+        'y_weather_factor': results['y_weather_factor'],
+        'tfp_weather_factor': results['tfp_weather_factor'],
+        'k_weather_factor': results['k_weather_factor']
     })
     
     output_file = output_dir / f"{country.replace(' ', '_')}_results.csv"
@@ -144,6 +180,12 @@ def save_country_results(country, results, output_dir="./data/output"):
 def main():
     """Main processing function."""
     print("=== COIN-SSP Climate Economics Processing ===\n")
+    
+    # Parse command line argument for max countries
+    max_countries = None
+    if len(sys.argv) > 1:
+        max_countries = int(sys.argv[1])
+        print(f"Processing limited to {max_countries} countries for testing\n")
     
     # Load data
     data = load_data()
@@ -174,6 +216,8 @@ def main():
     
     # Process each country
     countries = sorted(data.country.unique())
+    if max_countries:
+        countries = countries[:max_countries]
     print(f"\nProcessing {len(countries)} countries...")
     
     all_results = {}
