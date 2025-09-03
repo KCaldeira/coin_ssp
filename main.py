@@ -9,16 +9,18 @@ This script processes climate-economic data for each country:
 4. Runs forward model with climate effects to get climate-adjusted economic outcomes
 
 Usage:
-    python main.py [max_countries]
+    python main.py [--max-countries N] [--k_tas2 -0.01] [other climate parameters...]
 """
 
 import pandas as pd
 import numpy as np
-import sys
 from pathlib import Path
 from coin_ssp_core import ModelParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model
 from coin_ssp_utils import apply_time_series_filter
 import argparse
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from datetime import datetime
 
 def load_data(data_file="./data/input/Historical_SSP5_annual.csv"):
     """Load the merged climate-economic dataset."""
@@ -146,10 +148,10 @@ def process_country(country_data, params):
     
     return results
 
-def save_country_results(country, results, output_dir="./data/output"):
+def save_country_results(country, results, output_dir, timestamp):
     """Save results for a single country to CSV."""
     output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Create DataFrame from results
     df = pd.DataFrame({
@@ -174,9 +176,82 @@ def save_country_results(country, results, output_dir="./data/output"):
         'k_weather_factor': results['k_weather_factor']
     })
     
-    output_file = output_dir / f"{country.replace(' ', '_')}_results.csv"
+    output_file = output_dir / f"{country.replace(' ', '_')}_results_{timestamp}.csv"
     df.to_csv(output_file, index=False)
     print(f"    Saved results: {output_file}")
+
+def create_country_page(country, results, params, fig):
+    """Create a single page with three panels for one country."""
+    fig.suptitle(f'{country}', fontsize=16, fontweight='bold')
+    
+    years = results['years']
+    
+    # Panel 1: GDP
+    ax1 = fig.add_subplot(3, 1, 1)
+    ax1.plot(years, results['gdp_observed'], 'k-', label='Baseline', linewidth=2)
+    ax1.plot(years, results['gdp_climate'], 'r-', label='Climate', linewidth=1.5)
+    ax1.plot(years, results['gdp_weather'], 'b--', label='Weather', linewidth=1.5)
+    ax1.set_ylabel('GDP (billion $)')
+    ax1.legend(loc='upper left')
+    ax1.grid(True, alpha=0.3)
+    
+    # Add parameter box in lower right corner
+    param_text = (f'Climate Parameters:\n'
+                  f'k_tas1={params.k_tas1:g}, k_tas2={params.k_tas2:g}\n'
+                  f'k_pr1={params.k_pr1:g}, k_pr2={params.k_pr2:g}\n'
+                  f'tfp_tas1={params.tfp_tas1:g}, tfp_tas2={params.tfp_tas2:g}\n'
+                  f'tfp_pr1={params.tfp_pr1:g}, tfp_pr2={params.tfp_pr2:g}\n'
+                  f'y_tas1={params.y_tas1:g}, y_tas2={params.y_tas2:g}\n'
+                  f'y_pr1={params.y_pr1:g}, y_pr2={params.y_pr2:g}')
+    
+    ax1.text(0.98, 0.02, param_text, transform=ax1.transAxes, fontsize=8,
+             verticalalignment='bottom', horizontalalignment='right',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    # Panel 2: TFP
+    ax2 = fig.add_subplot(3, 1, 2)
+    ax2.plot(years, results['tfp_baseline'], 'k-', label='Baseline', linewidth=2)
+    ax2.plot(years, results['tfp_climate'], 'r-', label='Climate', linewidth=1.5)
+    ax2.plot(years, results['tfp_weather'], 'b--', label='Weather', linewidth=1.5)
+    ax2.set_ylabel('Total Factor Productivity')
+    ax2.legend(loc='upper left')
+    ax2.grid(True, alpha=0.3)
+    
+    # Panel 3: Capital Stock
+    ax3 = fig.add_subplot(3, 1, 3)
+    ax3.plot(years, results['k_baseline'], 'k-', label='Baseline', linewidth=2)
+    ax3.plot(years, results['k_climate'], 'r-', label='Climate', linewidth=1.5)
+    ax3.plot(years, results['k_weather'], 'b--', label='Weather', linewidth=1.5)
+    ax3.set_ylabel('Capital Stock (normalized)')
+    ax3.set_xlabel('Year')
+    ax3.legend(loc='upper left')
+    ax3.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
+
+def create_results_pdf(all_results, params, output_dir, timestamp):
+    """Create a PDF book with one page per country showing results."""
+    output_dir = Path(output_dir)
+    pdf_file = output_dir / f"COIN_SSP_Results_Book_{timestamp}.pdf"
+    
+    print(f"\nCreating PDF results book...")
+    print(f"  Generating {len(all_results)} country pages...")
+    
+    with PdfPages(pdf_file) as pdf:
+        for i, (country, results) in enumerate(sorted(all_results.items()), 1):
+            print(f"  [{i}/{len(all_results)}] Adding {country}...")
+            
+            # Create figure for this country
+            fig = plt.figure(figsize=(8.5, 11))  # Letter size portrait
+            create_country_page(country, results, params, fig)
+            
+            # Save to PDF
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+    
+    print(f"  PDF book saved: {pdf_file}")
+    return pdf_file
 
 def parse_args():
     parser = argparse.ArgumentParser(description="COIN-SSP Climate Economics Main Processing Script")
@@ -200,6 +275,10 @@ def main():
     """Main processing function."""
     print("=== COIN-SSP Climate Economics Processing ===\n")
     args = parse_args()
+    
+    # Create timestamp for this run
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    print(f"Run timestamp: {timestamp}")
     
     # Parse command line argument for max countries
     max_countries = args.max_countries
@@ -235,6 +314,12 @@ def main():
     print(f"  Reference temperature: {params.tas0}°C")
     print(f"  Reference precipitation: {params.pr0} mm/day")
     
+    # Create timestamped output directory
+    base_output_dir = Path("./data/output")
+    output_dir = base_output_dir / f"run_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output directory: {output_dir}")
+    
     # Process each country
     countries = sorted(data.country.unique())
     if max_countries:
@@ -254,7 +339,7 @@ def main():
             results = process_country(country_data, params)
             
             # Save results
-            save_country_results(country, results)
+            save_country_results(country, results, output_dir, timestamp)
             
             # Store in memory for summary analysis
             all_results[country] = results
@@ -265,7 +350,11 @@ def main():
     
     print(f"\n=== Processing Complete ===")
     print(f"Successfully processed {len(all_results)} countries")
-    print(f"Results saved in ./data/output/")
+    print(f"Results saved in {output_dir}")
+    
+    # Create PDF results book
+    if all_results:
+        create_results_pdf(all_results, params, output_dir, timestamp)
     
     # Quick summary
     if all_results:

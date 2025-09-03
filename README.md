@@ -79,7 +79,7 @@ results = calculate_coin_ssp_forward_model(tfp_baseline, population, gdp, temper
   - `ModelParams` dataclass with all economic and climate sensitivity parameters
   - `calculate_tfp_coin_ssp()` - baseline TFP from observed GDP/population
   - `calculate_coin_ssp_forward_model()` - climate-integrated economic projections
-- **Utilities** (`coin_ssp_utils.py`): Time series filtering (Savitzky-Golay) for climate smoothing
+- **Utilities** (`coin_ssp_utils.py`): Time series filtering (LOESS) for climate smoothing
 - **Main Pipeline** (`main.py`): Complete country-by-country processing workflow
 
 #### Testing & Validation
@@ -116,15 +116,56 @@ pip install -r requirements.txt
 
 ### Running the Model
 ```bash
-# Process all countries for SSP5 scenario
+# Process all countries for SSP5 scenario (default: no climate effects)
 python main.py
 
 # Process limited number of countries for testing
-python main.py 1          # Process only first country
-python main.py 5          # Process first 5 countries
+python main.py --max-countries 1          # Process only first country
+python main.py --max-countries 5          # Process first 5 countries
 
-# Results saved to ./data/output/[country]_results.csv
+# Run with climate sensitivity parameters
+python main.py --tfp_tas2 -0.01           # Quadratic temperature sensitivity for TFP
+python main.py --k_tas2 -0.005 --y_tas2 -0.02  # Multiple climate parameters
+
+# See all available options
+python main.py --help
+
+# Results saved to timestamped directory: ./data/output/run_YYYYMMDD_HHMMSS/
+# Individual CSV files: [country]_results_YYYYMMDD_HHMMSS.csv
+# PDF summary book: COIN_SSP_Results_Book_YYYYMMDD_HHMMSS.pdf
 ```
+
+### Climate Sensitivity Parameters
+All climate damage parameters default to 0.0 (no climate effects). Available options:
+
+**Temperature Sensitivity:**
+- `--k_tas1`, `--k_tas2`: Linear/quadratic temperature effects on capital stock
+- `--tfp_tas1`, `--tfp_tas2`: Linear/quadratic temperature effects on TFP growth  
+- `--y_tas1`, `--y_tas2`: Linear/quadratic temperature effects on output
+
+**Precipitation Sensitivity:**
+- `--k_pr1`, `--k_pr2`: Linear/quadratic precipitation effects on capital stock
+- `--tfp_pr1`, `--tfp_pr2`: Linear/quadratic precipitation effects on TFP growth
+- `--y_pr1`, `--y_pr2`: Linear/quadratic precipitation effects on output
+
+### Output Files
+The model generates timestamped output in `./data/output/run_YYYYMMDD_HHMMSS/`:
+
+1. **Individual CSV files**: `[Country_Name]_results_YYYYMMDD_HHMMSS.csv` - Complete time series data for each country containing:
+   - Baseline economic variables (GDP, TFP, capital stock)
+   - Climate-affected projections (with full climate trends)
+   - Weather-only projections (interannual variability, trends removed after 2025)
+   - Climate effect factors and reference climate data
+
+2. **PDF Summary Book**: `COIN_SSP_Results_Book_YYYYMMDD_HHMMSS.pdf` - Visual summary with one page per country showing:
+   - **GDP Panel**: Baseline vs Climate vs Weather projections
+   - **TFP Panel**: Baseline vs Climate vs Weather projections  
+   - **Capital Stock Panel**: Baseline vs Climate vs Weather projections
+
+Each model run creates a separate timestamped subdirectory, allowing you to:
+- Compare results from different parameter configurations
+- Maintain a complete history of model runs  
+- Easily organize and archive results
 
 ### Usage Example
 ```python
@@ -174,7 +215,7 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 - **Climate Impact Assessment**: Quantify economic losses under different warming scenarios
 - **Policy Analysis**: Compare adaptation strategies across SSP pathways  
 - **Uncertainty Quantification**: Sensitivity analysis of climate damage parameters
-- **Counterfactual Studies**: Climate vs. no-climate economic projections
+- **Counterfactual Studies**: Climate vs. weather-only vs. baseline economic projections
 
 ## Data Quality
 
@@ -197,14 +238,19 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 ```
 coin_ssp/
 ├── coin_ssp_core.py          # Main economic model functions
-├── coin_ssp_utils.py         # Time series filtering utilities  
+├── coin_ssp_utils.py         # LOESS time series filtering utilities  
 ├── main.py                   # Complete processing pipeline
 ├── data/
-│   └── input/                # Processed country-level datasets
-│       ├── Historical_SSP1_annual.csv
-│       ├── Historical_SSP2_annual.csv
-│       └── ...
-└── data/output/              # Country-level results (created by main.py)
+│   ├── input/                # Processed country-level datasets
+│   │   ├── Historical_SSP1_annual.csv
+│   │   ├── Historical_SSP2_annual.csv
+│   │   └── ...
+│   └── output/               # Timestamped model run results
+│       ├── run_20250903_143052/
+│       │   ├── [country]_results_20250903_143052.csv
+│       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
+│       └── run_20250903_151234/
+│           └── ...
 ```
 
 ## Contributing

@@ -188,7 +188,7 @@ def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams
         y[t] = a[t] * (k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
         # capital stock is then updated based on savings, depereciation, and climate damage
-        k[t+1] = k[t] + s * y[t] - delta * k[t] * k_climate[t]
+        k[t+1] = (k[t] * k_climate[t]) + s * y[t] - delta * k[t] 
 
     # compute the last year's TFP and output
     t = len(y)-1

@@ -51,6 +51,10 @@ def calculate_growth_rate(values):
 ## Project Context
 This is a climate economics modeling project implementing the Solow-Swan growth model for climate impact assessment. Code should reflect the mathematical elegance of economic models while maintaining computational efficiency for country-level analysis.
 
+### Time Series Processing
+- **LOESS Filtering**: Use locally weighted scatterplot smoothing (LOESS) for separating climate trends from weather variability
+- **Trend Preservation**: Maintain long-term climate trends while filtering out interannual variability after reference year (2025)
+
 ## Data Processing Philosophy
 - **Interpolation over Extrapolation**: Use linear interpolation between known data points rather than extrapolating beyond available data
 - **Annual Resolution**: Process all time series at annual resolution for consistency between climate and economic data
