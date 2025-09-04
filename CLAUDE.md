@@ -17,7 +17,8 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Favor mathematical clarity** over defensive checks
 - **Use numpy operations** instead of loops and conditionals where possible
 - **Prefer concise, readable expressions** over verbose defensive code
-- **Move invariant calculations outside loops** - compute once, use many times for better performance
+- **Compute once, use many times** - move invariant calculations outside loops and create centralized helper functions
+- **Centralize repeated logic** - extract common operations into utility functions to prevent bugs and inconsistencies
 
 ### Function Design
 - Functions should assume valid inputs and focus on their core mathematical/logical purpose
@@ -52,6 +53,13 @@ def calculate_growth_rate(values):
 ## Project Context
 This is a climate economics modeling project implementing the Solow-Swan growth model for climate impact assessment. Code should reflect the mathematical elegance of economic models while maintaining computational efficiency for country-level analysis.
 
+### Module Organization
+- **`coin_ssp_core.py`**: Core economic model functions and parameter classes
+- **`coin_ssp_utils.py`**: Utility functions for mathematical operations, visualization, and data processing
+- **`main.py`**: Workflow orchestration and I/O operations
+
+Keep helper functions organized in utils to maintain clean separation of concerns.
+
 ### Time Series Processing
 - **LOESS Filtering**: Use locally weighted scatterplot smoothing (LOESS) for separating climate trends from weather variability
 - **Trend Preservation**: Maintain long-term climate trends while filtering out interannual variability after reference year (2025)
@@ -61,3 +69,8 @@ This is a climate economics modeling project implementing the Solow-Swan growth 
 - **Annual Resolution**: Process all time series at annual resolution for consistency between climate and economic data
 - **Country Completeness**: Include countries only when they have complete time series data across all required variables
 - **Quality Assurance**: Preserve exact values at original data points when interpolating (e.g., 5-year economic data points)
+
+## Mathematical Robustness
+- **Handle Edge Cases Mathematically**: Use `np.maximum(0, value)` to prevent negative capital stock rather than conditional checks
+- **L-BFGS-B Optimization**: Prefer gradient-based optimization with proper bounds for parameter calibration
+- **Direct Parameter Scaling**: Use `param = scale * base_value` rather than multiplicative scaling to avoid zero-multiplication issues

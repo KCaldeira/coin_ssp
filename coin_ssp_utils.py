@@ -82,12 +82,17 @@ def create_country_scaling_page(country, scaling_name, results, scaling_result, 
     ax1.legend(loc='upper left')
     ax1.grid(True, alpha=0.3)
     
-    # Add scaling info box in lower right corner
+    # Add scaling info box in lower right corner with all climate parameters
+    ps = scaling_result["params_scaled"]
     scaling_text = (f'Scaling: {scaling_name}\n'
-                   f'Optimal scale: {scaling_result["optimal_scale"]:.4f}\n'
-                   f'Final error: {scaling_result["final_error"]:.6f}\n'
-                   f'Target year: {params.year_scale}\n'
-                   f'Target amount: {params.amount_scale:.3f}')
+                   f'Scale factor: {scaling_result["optimal_scale"]:.4f}\n'
+                   f'Target: {params.amount_scale:.1%} by {params.year_scale}\n'
+                   f'k_tas1: {ps.k_tas1:.6f}  k_tas2: {ps.k_tas2:.6f}\n'
+                   f'tfp_tas1: {ps.tfp_tas1:.6f}  tfp_tas2: {ps.tfp_tas2:.6f}\n'
+                   f'y_tas1: {ps.y_tas1:.6f}  y_tas2: {ps.y_tas2:.6f}\n'
+                   f'k_pr1: {ps.k_pr1:.6f}  k_pr2: {ps.k_pr2:.6f}\n'
+                   f'tfp_pr1: {ps.tfp_pr1:.6f}  tfp_pr2: {ps.tfp_pr2:.6f}\n'
+                   f'y_pr1: {ps.y_pr1:.6f}  y_pr2: {ps.y_pr2:.6f}')
     
     ax1.text(0.98, 0.02, scaling_text, transform=ax1.transAxes, fontsize=8,
              verticalalignment='bottom', horizontalalignment='right',

@@ -184,7 +184,8 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
             'k_weather': k_weather,
             'y_weather_factor': y_weather_factor,
             'tfp_weather_factor': tfp_weather_factor,
-            'k_weather_factor': k_weather_factor
+            'k_weather_factor': k_weather_factor,
+            'params_scaled': params_scaled
         }
         
         results['scaling_results'][scaling_params.scaling_name] = scaling_result

@@ -76,15 +76,22 @@ results = calculate_coin_ssp_forward_model(tfp_baseline, population, gdp, temper
 
 #### Core Model
 - **Economic Core** (`coin_ssp_core.py`): 
-  - `ModelParams` dataclass with all economic and climate sensitivity parameters
+  - `ModelParams` and `ScalingParams` dataclasses with all economic and climate sensitivity parameters
   - `calculate_tfp_coin_ssp()` - baseline TFP from observed GDP/population
-  - `calculate_coin_ssp_forward_model()` - climate-integrated economic projections
-- **Utilities** (`coin_ssp_utils.py`): Time series filtering (LOESS) for climate smoothing
-- **Main Pipeline** (`main.py`): Complete country-by-country processing workflow
+  - `calculate_coin_ssp_forward_model()` - climate-integrated economic projections with robust capital stock handling
+  - `optimize_climate_response_scaling()` - L-BFGS-B optimization for climate parameter calibration
+- **Utilities** (`coin_ssp_utils.py`): 
+  - `apply_time_series_filter()` - LOESS filtering for climate trend separation
+  - `create_scaled_params()` - centralized parameter scaling (compute once, use many times)
+  - `create_country_scaling_page()` - three-panel visualization generation
+  - `create_country_pdf_books()` - automated PDF report generation
+- **Main Pipeline** (`main.py`): JSON-configured workflow with timestamped outputs
 
-#### Testing & Validation
-- **TFP Testing** (`test_tfp.py`): Synthetic 20-year validation scenarios
-- **Data Verification**: Interpolation quality checks, country coverage analysis
+#### Optimization & Calibration
+- **Climate Parameter Scaling**: Automated optimization to achieve target economic impacts
+- **Multiple Damage Functions**: Capital, TFP, and output damage mechanisms with linear/quadratic temperature and precipitation responses
+- **Robust Optimization**: L-BFGS-B with proper bounds and convergence handling
+- **Flexible Scaling Modes**: Both optimization-based and direct parameter specification
 
 ### 📊 Current Datasets
 
@@ -247,15 +254,19 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 ### ✅ Current Capabilities
 - **Country-level Analysis**: 146 countries with complete 1980-2100 time series
 - **Multi-scenario Support**: All 5 SSP economic scenarios
-- **Climate Integration**: Temperature and precipitation damage functions
-- **Flexible Parameters**: Configurable economic and climate sensitivities
+- **Climate Integration**: Temperature and precipitation damage functions with automatic parameter calibration
+- **Flexible Configuration**: JSON-based workflow definition with multiple scaling parameter sets
+- **Robust Economic Modeling**: Negative capital stock protection and fail-fast error handling
+- **Automated Visualization**: Multi-page PDF books with three-panel charts per scaling scenario
+- **Optimization Framework**: L-BFGS-B optimization for achieving target economic impacts
 - **Quality Assurance**: Comprehensive data validation and interpolation
 
 ### 🔄 Research Applications
-- **Climate Impact Assessment**: Quantify economic losses under different warming scenarios
-- **Policy Analysis**: Compare adaptation strategies across SSP pathways  
-- **Uncertainty Quantification**: Sensitivity analysis of climate damage parameters
-- **Counterfactual Studies**: Climate vs. weather-only vs. baseline economic projections
+- **Climate Impact Assessment**: Quantify economic losses under different warming scenarios with optimized damage functions
+- **Policy Analysis**: Compare adaptation strategies across SSP pathways and scaling mechanisms
+- **Parameter Sensitivity**: Automated scaling to achieve specific economic impact targets (e.g., 5%, 10%, 20% GDP losses)
+- **Counterfactual Studies**: Climate vs. weather-only vs. baseline economic projections with visual comparison
+- **Damage Function Comparison**: Capital, TFP, and output damage mechanisms with linear and quadratic responses
 
 ## Data Quality
 
