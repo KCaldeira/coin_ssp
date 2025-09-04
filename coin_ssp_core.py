@@ -38,6 +38,7 @@ import numpy as np
 from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
+from coin_ssp_utils import create_scaled_params
 
 @dataclass
 # parametes for the COIN-SSP model
@@ -203,7 +204,7 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
         # in year t, we are assume that the damage to capital stock occurs before production occurs
         # so that production in year t is based on the capital stock after climate damage
         # and before investment occurs
-        y[t] = a[t] * (k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
+        y[t] = a[t] * np.maximum(0, k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
         # capital stock is then updated based on savings, depereciation, and climate damage
         k[t+1] = (k[t] * k_climate[t]) + s * y[t] - delta * k[t] 
@@ -213,19 +214,20 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
     # compute the last year's output
     t = len(y)-1
-    y[t] = a[t] * (k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
+    y[t] = a[t] * np.maximum(0, k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
     return y, a, k, y_climate, tfp_climate, k_climate
+
 
 def optimize_climate_response_scaling(
         country_data, params: ModelParams, scaling: ScalingParams,
         x0: float = -0.001,  # starting guess for the scale
-        bounds: tuple = (-1.0, 1.0),  # keeping current bounds as default
+        bounds: tuple = (-0.1, 0.1),  # keeping current bounds as default
         maxiter: int = 200,
         tol: float = None):
     """
     Optimize the scaling factor with a starting guess and bound constraints.
-    Returns (optimal_scale, final_error).
+    Returns (optimal_scale, final_error, scaled_params).
     """
     # Ensure starting guess is inside bounds
     lo, hi = bounds
@@ -241,22 +243,8 @@ def optimize_climate_response_scaling(
         # xarr is a length-1 array because we're using scipy.optimize.minimize
         scale = float(xarr[0])
 
-        # Use a fresh copy each evaluation to avoid cross-call side effects
-        pc = copy.copy(params)
-
-        # Apply scaled parameters
-        pc.k_tas1   = params.k_tas1   * (scale * scaling.k_tas1)
-        pc.k_tas2   = params.k_tas2   * (scale * scaling.k_tas2)
-        pc.tfp_tas1 = params.tfp_tas1 * (scale * scaling.tfp_tas1)
-        pc.tfp_tas2 = params.tfp_tas2 * (scale * scaling.tfp_tas2)
-        pc.y_tas1   = params.y_tas1   * (scale * scaling.y_tas1)
-        pc.y_tas2   = params.y_tas2   * (scale * scaling.y_tas2)
-        pc.k_pr1    = params.k_pr1    * (scale * scaling.k_pr1)
-        pc.k_pr2    = params.k_pr2    * (scale * scaling.k_pr2)
-        pc.tfp_pr1  = params.tfp_pr1  * (scale * scaling.tfp_pr1)
-        pc.tfp_pr2  = params.tfp_pr2  * (scale * scaling.tfp_pr2)
-        pc.y_pr1    = params.y_pr1    * (scale * scaling.y_pr1)
-        pc.y_pr2    = params.y_pr2    * (scale * scaling.y_pr2)
+        # Create scaled parameters using helper function
+        pc = create_scaled_params(params, scaling, scale)
 
         # Climate run
         y_climate, *_ = calculate_coin_ssp_forward_model(
@@ -287,4 +275,5 @@ def optimize_climate_response_scaling(
 
     optimal_scale = float(res.x[0])
     final_error = float(res.fun)
-    return optimal_scale, final_error
+    scaled_params = create_scaled_params(params, scaling, optimal_scale)
+    return optimal_scale, final_error, scaled_params

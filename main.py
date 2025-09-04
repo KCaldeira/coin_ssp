@@ -18,10 +18,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from coin_ssp_core import ModelParams, ScalingParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model, optimize_climate_response_scaling
-from coin_ssp_utils import apply_time_series_filter
+from coin_ssp_utils import apply_time_series_filter, create_scaled_params, create_country_scaling_page, create_country_pdf_books
 import argparse
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 from datetime import datetime
 import json
 import copy
@@ -141,28 +139,14 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         if scaling_params.scale_factor is not None:
             print(f"      Using provided scale factor: {scaling_params.scale_factor:.6f}")
             optimal_scale = scaling_params.scale_factor
+            params_scaled = create_scaled_params(params, scaling_params, optimal_scale)
             final_error = None
         else:
             print(f"      Optimizing climate response scaling...")
-            optimal_scale, final_error = optimize_climate_response_scaling(
+            optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
                 country_data, params, scaling_params
             )
             print(f"      Scale factor: {optimal_scale:.6f}, error: {final_error:.6f}")
-        
-        # Create scaled parameters for this optimization
-        params_scaled = copy.deepcopy(params)
-        params_scaled.k_tas1 *= optimal_scale * scaling_params.k_tas1
-        params_scaled.k_tas2 *= optimal_scale * scaling_params.k_tas2
-        params_scaled.k_pr1 *= optimal_scale * scaling_params.k_pr1
-        params_scaled.k_pr2 *= optimal_scale * scaling_params.k_pr2
-        params_scaled.tfp_tas1 *= optimal_scale * scaling_params.tfp_tas1
-        params_scaled.tfp_tas2 *= optimal_scale * scaling_params.tfp_tas2
-        params_scaled.tfp_pr1 *= optimal_scale * scaling_params.tfp_pr1
-        params_scaled.tfp_pr2 *= optimal_scale * scaling_params.tfp_pr2
-        params_scaled.y_tas1 *= optimal_scale * scaling_params.y_tas1
-        params_scaled.y_tas2 *= optimal_scale * scaling_params.y_tas2
-        params_scaled.y_pr1 *= optimal_scale * scaling_params.y_pr1
-        params_scaled.y_pr2 *= optimal_scale * scaling_params.y_pr2
         
         # Run forward model with scaled climate effects
         print(f"      Running forward model with scaled climate effects...")
@@ -240,83 +224,6 @@ def save_country_results(country, results, output_dir, run_name, timestamp):
     df.to_csv(output_file, index=False)
     print(f"    Saved results: {output_file}")
 
-def create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig):
-    """Create a single page with three panels for one country and scaling set."""
-    fig.suptitle(f'{country} - {scaling_name}', fontsize=16, fontweight='bold')
-    
-    years = results['years']
-    
-    # Panel 1: GDP
-    ax1 = fig.add_subplot(3, 1, 1)
-    ax1.plot(years, results['gdp_observed'], 'k-', label='Baseline', linewidth=2)
-    ax1.plot(years, scaling_result['gdp_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax1.plot(years, scaling_result['gdp_weather'], 'b--', label='Weather', linewidth=1.5)
-    ax1.set_ylabel('GDP (billion $)')
-    ax1.legend(loc='upper left')
-    ax1.grid(True, alpha=0.3)
-    
-    # Add scaling info box in lower right corner
-    scaling_text = (f'Scaling: {scaling_name}\n'
-                   f'Optimal scale: {scaling_result["optimal_scale"]:.4f}\n'
-                   f'Final error: {scaling_result["final_error"]:.6f}\n'
-                   f'Target year: {params.year_scale}\n'
-                   f'Target amount: {params.amount_scale:.3f}')
-    
-    ax1.text(0.98, 0.02, scaling_text, transform=ax1.transAxes, fontsize=8,
-             verticalalignment='bottom', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # Panel 2: TFP
-    ax2 = fig.add_subplot(3, 1, 2)
-    ax2.plot(years, results['tfp_baseline'], 'k-', label='Baseline', linewidth=2)
-    ax2.plot(years, scaling_result['tfp_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax2.plot(years, scaling_result['tfp_weather'], 'b--', label='Weather', linewidth=1.5)
-    ax2.set_ylabel('Total Factor Productivity')
-    ax2.legend(loc='upper left')
-    ax2.grid(True, alpha=0.3)
-    
-    # Panel 3: Capital Stock
-    ax3 = fig.add_subplot(3, 1, 3)
-    ax3.plot(years, results['k_baseline'], 'k-', label='Baseline', linewidth=2)
-    ax3.plot(years, scaling_result['k_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax3.plot(years, scaling_result['k_weather'], 'b--', label='Weather', linewidth=1.5)
-    ax3.set_ylabel('Capital Stock (normalized)')
-    ax3.set_xlabel('Year')
-    ax3.legend(loc='upper left')
-    ax3.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    return fig
-
-def create_country_pdf_books(all_results, params, output_dir, run_name, timestamp):
-    """Create PDF books with one book per country, one page per scaling set."""
-    output_dir = Path(output_dir)
-    
-    print(f"\nCreating PDF books for {len(all_results)} countries...")
-    
-    pdf_files = []
-    for i, (country, results) in enumerate(sorted(all_results.items()), 1):
-        print(f"  [{i}/{len(all_results)}] Creating book for {country}...")
-        
-        pdf_file = output_dir / f"COIN_SSP_{country.replace(' ', '_')}_Book_{run_name}_{timestamp}.pdf"
-        
-        with PdfPages(pdf_file) as pdf:
-            for j, (scaling_name, scaling_result) in enumerate(results['scaling_results'].items(), 1):
-                print(f"    Page {j}: {scaling_name}")
-                
-                # Create figure for this scaling set
-                fig = plt.figure(figsize=(8.5, 11))  # Letter size portrait
-                create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig)
-                
-                # Save to PDF
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
-        
-        pdf_files.append(pdf_file)
-        print(f"    Saved: {pdf_file}")
-    
-    print(f"  Created {len(pdf_files)} PDF books")
-    return pdf_files
 
 def parse_args():
     parser = argparse.ArgumentParser(description="COIN-SSP Climate Economics Main Processing Script")

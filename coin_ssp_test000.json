@@ -5,6 +5,6 @@
       "amount_scale": -0.05
     },
     "scaling_params": [
-      {"scaling_name": "y_lin_only", "y_tas2": 1.0}
+      {"scaling_name": "y_lin_only", "y_tas1": 1.0}
     ]
   }
