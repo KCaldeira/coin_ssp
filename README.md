@@ -115,57 +115,81 @@ pip install -r requirements.txt
 ```
 
 ### Running the Model
+The model now uses JSON configuration files for complete workflow definition:
+
 ```bash
-# Process all countries for SSP5 scenario (default: no climate effects)
-python main.py
+# Process all countries using JSON configuration
+python main.py coin_ssp_experiment1.json
 
 # Process limited number of countries for testing
-python main.py --max-countries 1          # Process only first country
-python main.py --max-countries 5          # Process first 5 countries
+python main.py coin_ssp_experiment1.json --max-countries 5
 
-# Run with climate sensitivity parameters
-python main.py --tfp_tas2 -0.01           # Quadratic temperature sensitivity for TFP
-python main.py --k_tas2 -0.005 --y_tas2 -0.02  # Multiple climate parameters
-
-# See all available options
-python main.py --help
-
-# Results saved to timestamped directory: ./data/output/run_YYYYMMDD_HHMMSS/
-# Individual CSV files: [country]_results_YYYYMMDD_HHMMSS.csv
-# PDF summary book: COIN_SSP_Results_Book_YYYYMMDD_HHMMSS.pdf
+# Results saved to: ./data/output/run_{run_name}_{timestamp}/
+# Individual CSV files: [country]_results_{run_name}_{timestamp}.csv
+# PDF books: COIN_SSP_{country}_Book_{run_name}_{timestamp}.pdf
 ```
 
-### Climate Sensitivity Parameters
-All climate damage parameters default to 0.0 (no climate effects). Available options:
+### JSON Configuration Structure
 
-**Temperature Sensitivity:**
-- `--k_tas1`, `--k_tas2`: Linear/quadratic temperature effects on capital stock
-- `--tfp_tas1`, `--tfp_tas2`: Linear/quadratic temperature effects on TFP growth  
-- `--y_tas1`, `--y_tas2`: Linear/quadratic temperature effects on output
+The model uses JSON files named `coin_ssp_*.json` containing two main sections:
 
-**Precipitation Sensitivity:**
-- `--k_pr1`, `--k_pr2`: Linear/quadratic precipitation effects on capital stock
-- `--tfp_pr1`, `--tfp_pr2`: Linear/quadratic precipitation effects on TFP growth
-- `--y_pr1`, `--y_pr2`: Linear/quadratic precipitation effects on output
+```json
+{
+  "model_params": {
+    "year_diverge": 2025,
+    "year_scale": 2100,
+    "amount_scale": -0.05,
+    "s": 0.3,
+    "alpha": 0.3,
+    "delta": 0.1
+  },
+  "scaling_params": [
+    {
+      "scaling_name": "capital_only",
+      "k_tas2": 1.0
+    },
+    {
+      "scaling_name": "tfp_only", 
+      "tfp_tas2": 1.0
+    },
+    {
+      "scaling_name": "output_only",
+      "y_tas2": 1.0
+    }
+  ]
+}
+```
+
+**Model Parameters** (optional - uses defaults if not specified):
+- `year_diverge`: Year when climate effects begin (default: 2025)
+- `year_scale`: Target year for optimization (default: 2100)  
+- `amount_scale`: Target climate impact on GDP (e.g., -0.05 for 5% loss)
+- Economic parameters: `s`, `alpha`, `delta`
+
+**Scaling Parameters** (required list):
+- `scaling_name`: Unique identifier for this parameter set
+- Climate sensitivity parameters: `k_tas1/2`, `tfp_tas1/2`, `y_tas1/2`, `k_pr1/2`, `tfp_pr1/2`, `y_pr1/2`
 
 ### Output Files
-The model generates timestamped output in `./data/output/run_YYYYMMDD_HHMMSS/`:
+The model generates timestamped output in `./data/output/run_{run_name}_{timestamp}/`:
 
-1. **Individual CSV files**: `[Country_Name]_results_YYYYMMDD_HHMMSS.csv` - Complete time series data for each country containing:
-   - Baseline economic variables (GDP, TFP, capital stock)
-   - Climate-affected projections (with full climate trends)
-   - Weather-only projections (interannual variability, trends removed after 2025)
-   - Climate effect factors and reference climate data
+1. **Individual CSV files**: `[Country_Name]_results_{run_name}_{timestamp}.csv` - Complete time series data for each country:
+   - **Common columns**: `year`, `population`, `gdp_observed`, `tas`, `pr`, `tas_weather`, `pr_weather`, `tfp_baseline`, `k_baseline`
+   - **Per-scaling columns**: `gdp_climate_{scaling_name}`, `tfp_climate_{scaling_name}`, `k_climate_{scaling_name}`, `gdp_weather_{scaling_name}`, etc.
 
-2. **PDF Summary Book**: `COIN_SSP_Results_Book_YYYYMMDD_HHMMSS.pdf` - Visual summary with one page per country showing:
-   - **GDP Panel**: Baseline vs Climate vs Weather projections
-   - **TFP Panel**: Baseline vs Climate vs Weather projections  
-   - **Capital Stock Panel**: Baseline vs Climate vs Weather projections
+2. **PDF Books**: `COIN_SSP_{Country}_Book_{run_name}_{timestamp}.pdf` - One book per country:
+   - **One page per scaling set** within each country book
+   - Each page shows three panels: GDP, TFP, Capital Stock
+   - Each panel shows: Baseline vs Climate vs Weather projections
+   - Page title: `{Country} - {scaling_name}`
+   - Info box shows optimization results and target parameters
 
-Each model run creates a separate timestamped subdirectory, allowing you to:
-- Compare results from different parameter configurations
-- Maintain a complete history of model runs  
-- Easily organize and archive results
+### Workflow Structure
+The model processes data with the following structure:
+- **Outer loop**: Countries (optimized for comparing scaling sets within countries)
+- **Inner loop**: Scaling parameter sets
+- **Optimization**: Each scaling set is calibrated to achieve target climate impact
+- **Three scenarios**: Baseline (no climate), Climate (full trends), Weather (variability only)
 
 ### Usage Example
 ```python

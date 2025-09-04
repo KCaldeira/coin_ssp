@@ -17,6 +17,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Favor mathematical clarity** over defensive checks
 - **Use numpy operations** instead of loops and conditionals where possible
 - **Prefer concise, readable expressions** over verbose defensive code
+- **Move invariant calculations outside loops** - compute once, use many times for better performance
 
 ### Function Design
 - Functions should assume valid inputs and focus on their core mathematical/logical purpose

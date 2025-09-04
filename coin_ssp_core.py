@@ -221,9 +221,9 @@ def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams
     return y, a, k, y_climate, tfp_climate, k_climate
 
 def optimize_climate_response_scaling(
-        years, tfp, pop, gdp, tas, pr, params: ModelParams, scaling: ScalingParams,
-        x0: float = 0.5,  # starting guess for the scale
-        bounds: tuple = (0.0, 10.0),  # keeping current bounds as default
+        country_data, params: ModelParams, scaling: ScalingParams,
+        x0: float = -0.001,  # starting guess for the scale
+        bounds: tuple = (-1.0, 1.0),  # keeping current bounds as default
         maxiter: int = 200,
         tol: float = None):
     """
@@ -235,7 +235,7 @@ def optimize_climate_response_scaling(
     x0 = float(np.clip(x0, lo, hi))
 
     # Precompute target year index once
-    idx = np.where(years == params.year_scale)[0]
+    idx = np.where(country_data['years'] == params.year_scale)[0]
     if idx.size == 0:
         raise ValueError(f"Year {params.year_scale} not found in years array")
     idx = int(idx[0])
@@ -262,16 +262,22 @@ def optimize_climate_response_scaling(
         pc.y_pr2    = params.y_pr2    * (scale * scaling.y_pr2)
 
         # Climate run
-        y_climate, *_ = calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, pc)
+        y_climate, *_ = calculate_coin_ssp_forward_model(
+            country_data['tfp_baseline'], country_data['population'], country_data['gdp'], 
+            country_data['tas'], country_data['pr'], pc
+        )
 
         # Weather (baseline) run
         y_weather, *_ = calculate_coin_ssp_forward_model(
-            tfp, pop, gdp, tas*0.0 + params.tas0, pr*0.0 + params.pr0, params
+            country_data['tfp_baseline'], country_data['population'], country_data['gdp'], 
+            country_data['tas_weather'], country_data['pr_weather'], params
         )
 
         ratio = y_climate[idx] / y_weather[idx]
         target = 1.0 + params.amount_scale
-        return (ratio - target) ** 2
+        objective_value = (ratio - target) ** 2
+        print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")
+        return objective_value
 
     res = minimize(
         objective,

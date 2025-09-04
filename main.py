@@ -198,10 +198,14 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         year_diverge_loc = np.where(country_data['years'] == params.year_diverge)[0][0]
     params.tas0 = np.mean(country_data['tas'][:year_diverge_loc+1])
     params.pr0 = np.mean(country_data['pr'][:year_diverge_loc+1])
+    # Pre-calculate weather data and add to country_data (same for all scaling sets within this country)
+    filter_width = 30  # years
+    country_data['tas_weather'] = apply_time_series_filter(country_data['tas'], filter_width, year_diverge_loc)
+    country_data['pr_weather'] = apply_time_series_filter(country_data['pr'], filter_width, year_diverge_loc)
     
     # Step 1: Calculate baseline TFP without climate effects (once per country)
     print(f"    Calculating baseline TFP...")
-    tfp_baseline, k_baseline = calculate_tfp_coin_ssp(
+    country_data['tfp_baseline'], country_data['k_baseline'] = calculate_tfp_coin_ssp(
         country_data['population'], 
         country_data['gdp'], 
         params
@@ -214,8 +218,10 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         'gdp_observed': country_data['gdp'],
         'tas': country_data['tas'],
         'pr': country_data['pr'],
-        'tfp_baseline': tfp_baseline,
-        'k_baseline': k_baseline,
+        'tas_weather': country_data['tas_weather'],
+        'pr_weather': country_data['pr_weather'],
+        'tfp_baseline': country_data['tfp_baseline'],
+        'k_baseline': country_data['k_baseline'],
         'scaling_results': {}  # Will contain results for each scaling set
     }
     
@@ -226,10 +232,7 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         # Run optimization to find optimal scaling factor
         print(f"      Optimizing climate response scaling...")
         optimal_scale, final_error = optimize_climate_response_scaling(
-            country_data['years'], tfp_baseline, 
-            country_data['population'], country_data['gdp'],
-            country_data['tas'], country_data['pr'],
-            params, scaling_params
+            country_data, params, scaling_params
         )
         
         print(f"      Optimal scale: {optimal_scale:.6f}, error: {final_error:.6f}")
@@ -252,7 +255,7 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         # Run forward model with scaled climate effects
         print(f"      Running forward model with scaled climate effects...")
         y_climate, a_climate, k_climate, y_climate_factor, tfp_climate_factor, k_climate_factor = calculate_coin_ssp_forward_model(
-            tfp_baseline,
+            country_data['tfp_baseline'],
             country_data['population'],
             country_data['gdp'], 
             country_data['tas'],
@@ -262,16 +265,13 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         
         # Run forward model with weather only (no climate trends after year_diverge)
         print(f"      Running forward model with weather effects only...")
-        filter_width = 30  # years
-        tas_weather = apply_time_series_filter(country_data['tas'], filter_width, year_diverge_loc)
-        pr_weather = apply_time_series_filter(country_data['pr'], filter_width, year_diverge_loc)
         
         y_weather, a_weather, k_weather, y_weather_factor, tfp_weather_factor, k_weather_factor = calculate_coin_ssp_forward_model(
-            tfp_baseline,
+            country_data['tfp_baseline'],
             country_data['population'],
             country_data['gdp'], 
-            tas_weather,
-            pr_weather,
+            country_data['tas_weather'],
+            country_data['pr_weather'],
             params_scaled
         )
         
@@ -279,8 +279,6 @@ def process_country_with_scaling(country_data, params, scaling_param_sets):
         scaling_result = {
             'optimal_scale': optimal_scale,
             'final_error': final_error,
-            'tas_weather': tas_weather,
-            'pr_weather': pr_weather,
             'gdp_climate': y_climate * country_data['gdp'][0],
             'tfp_climate': a_climate,
             'k_climate': k_climate,
@@ -311,6 +309,8 @@ def save_country_results(country, results, output_dir, run_name, timestamp):
         'gdp_observed': results['gdp_observed'],
         'tas': results['tas'],
         'pr': results['pr'],
+        'tas_weather': results['tas_weather'],
+        'pr_weather': results['pr_weather'],
         'tfp_baseline': results['tfp_baseline'],
         'k_baseline': results['k_baseline']
     }
@@ -323,8 +323,6 @@ def save_country_results(country, results, output_dir, run_name, timestamp):
         df_data[f'gdp_weather_{scaling_name}'] = scaling_result['gdp_weather']
         df_data[f'tfp_weather_{scaling_name}'] = scaling_result['tfp_weather']
         df_data[f'k_weather_{scaling_name}'] = scaling_result['k_weather']
-        df_data[f'tas_weather_{scaling_name}'] = scaling_result['tas_weather']
-        df_data[f'pr_weather_{scaling_name}'] = scaling_result['pr_weather']
     
     df = pd.DataFrame(df_data)
     
@@ -504,12 +502,16 @@ def main():
     if all_results:
         sample_country = list(all_results.keys())[0]
         sample_results = all_results[sample_country]
-        print(f"\nSample results for {sample_country}:")
+        sample_scaling = list(sample_results['scaling_results'].keys())[0]
+        sample_scaling_result = sample_results['scaling_results'][sample_scaling]
+        
+        print(f"\nSample results for {sample_country} (scaling: {sample_scaling}):")
         print(f"  Years: {sample_results['years'][0]}-{sample_results['years'][-1]}")
         print(f"  GDP observed (final): {sample_results['gdp_observed'][-1]:.1f}")
-        print(f"  GDP with climate (final): {sample_results['gdp_climate'][-1]:.1f}")
+        print(f"  GDP with climate (final): {sample_scaling_result['gdp_climate'][-1]:.1f}")
         print(f"  TFP baseline (final): {sample_results['tfp_baseline'][-1]:.3f}")
-        print(f"  TFP with climate (final): {sample_results['tfp_climate'][-1]:.3f}")
+        print(f"  TFP with climate (final): {sample_scaling_result['tfp_climate'][-1]:.3f}")
+        print(f"  Optimal scale factor: {sample_scaling_result['optimal_scale']:.6f}")
 
 if __name__ == "__main__":
     main()
