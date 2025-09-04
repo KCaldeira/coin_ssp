@@ -37,11 +37,14 @@
 import numpy as np
 from dataclasses import dataclass
 import copy
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize
 
 @dataclass
 # parametes for the COIN-SSP model
 class ModelParams:
+    year_diverge: int = 2025 # year at which climate starts to affect the economy (e.g., 2025)
+    year_scale: int = 2100 # reference year for when to check climate amount (e.g., 2100)
+    amount_scale: float = 0 # target amount of climate impact on gdp in year_scale (e.g., -0.1 for 10% gdp losses in year_scale)
     s: float = 0.3  # savings rate
     alpha: float = 0.3  # elasticity of output with respect to capital
     delta: float = 0.1  # depreciation rate in 1/yr
@@ -63,6 +66,7 @@ class ModelParams:
 @dataclass
 # parameters for scaling climate impacts for damage optimization runs
 class ScalingParams:
+    scaling_name: str = "default"  # name for this scaling parameter set
     k_tas1: float = 0 # linear temperature sensitivity for capital loss
     k_tas2: float = 0  # quadratic temperature sensitivity for capital loss
     k_pr1: float = 0  # linear precipitation sensitivity for capital loss
@@ -216,51 +220,68 @@ def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams
 
     return y, a, k, y_climate, tfp_climate, k_climate
 
-def optimize_climate_response_scaling(year, amount, 
-        years, tfp, pop, gdp, tas, pr, params: ModelParams, scaling:ScalingParams):
-    # This function optimizes the scaling of climate response parameters to minimize to achieve a target difference
-    # between climate and weather GDP at a specified year.
+def optimize_climate_response_scaling(
+        years, tfp, pop, gdp, tas, pr, params: ModelParams, scaling: ScalingParams,
+        x0: float = 0.5,  # starting guess for the scale
+        bounds: tuple = (0.0, 10.0),  # keeping current bounds as default
+        maxiter: int = 200,
+        tol: float = None):
+    """
+    Optimize the scaling factor with a starting guess and bound constraints.
+    Returns (optimal_scale, final_error).
+    """
+    # Ensure starting guess is inside bounds
+    lo, hi = bounds
+    x0 = float(np.clip(x0, lo, hi))
 
-    params_copy = copy.copy(params)
+    # Precompute target year index once
+    idx = np.where(years == params.year_scale)[0]
+    if idx.size == 0:
+        raise ValueError(f"Year {params.year_scale} not found in years array")
+    idx = int(idx[0])
 
-    # now we want to find the value of <scale> such that if idx is the index of <year> in <years>,
-    # then we want to minimize (() y_climate[idx]/y_weather[idx] ) - (1 + amount) )**2
-    # where y_climate and y_weather are the outputs of the calculate_coin_ssp_forward
-    def objective_function(scale):
-        # scale is a vector of length 4, with the scaling factors for k_tas1, k_tas2, tfp_tas1, tfp_tas2
-        params_copy.k_tas1 = params.k_tas1 * (scale * scaling.k_tas1)
-        params_copy.k_tas2 = params.k_tas2 * (scale * scaling.k_tas2)
-        params_copy.tfp_tas1 = params.tfp_tas1 * (scale * scaling.tfp_tas1)
-        params_copy.tfp_tas2 = params.tfp_tas2 * (scale * scaling.tfp_tas2)
-        params_copy.y_tas1 = params.y_tas1 * (scale * scaling.y_tas1)
-        params_copy.y_tas2 = params.y_tas2 * (scale * scaling.y_tas2)
-        params_copy.k_pr1 = params.k_pr1 * (scale * scaling.k_pr1)
-        params_copy.k_pr2 = params.k_pr2 * (scale * scaling.k_pr2)
-        params_copy.tfp_pr1 = params.tfp_pr1 * (scale * scaling.tfp_pr1)
-        params_copy.tfp_pr2 = params.tfp_pr2 * (scale * scaling.tfp_pr2)
-        params_copy.y_pr1 = params.y_pr1 * (scale * scaling.y_pr1)
-        params_copy.y_pr2 = params.y_pr2 * (scale * scaling.y_pr2)
+    def objective(xarr):
+        # xarr is a length-1 array because we're using scipy.optimize.minimize
+        scale = float(xarr[0])
 
-        y_climate, a_climate, k_climate, _, _, _ = calculate_coin_ssp_forward_model(
-            tfp, pop, gdp, tas, pr, params_copy)
+        # Use a fresh copy each evaluation to avoid cross-call side effects
+        pc = copy.copy(params)
 
-        y_weather, a_weather, k_weather, _, _, _ = calculate_coin_ssp_forward_model(
-            tfp, pop, gdp, tas*0.0 + params.tas0, pr*0.0 + params.pr0, params)
+        # Apply scaled parameters
+        pc.k_tas1   = params.k_tas1   * (scale * scaling.k_tas1)
+        pc.k_tas2   = params.k_tas2   * (scale * scaling.k_tas2)
+        pc.tfp_tas1 = params.tfp_tas1 * (scale * scaling.tfp_tas1)
+        pc.tfp_tas2 = params.tfp_tas2 * (scale * scaling.tfp_tas2)
+        pc.y_tas1   = params.y_tas1   * (scale * scaling.y_tas1)
+        pc.y_tas2   = params.y_tas2   * (scale * scaling.y_tas2)
+        pc.k_pr1    = params.k_pr1    * (scale * scaling.k_pr1)
+        pc.k_pr2    = params.k_pr2    * (scale * scaling.k_pr2)
+        pc.tfp_pr1  = params.tfp_pr1  * (scale * scaling.tfp_pr1)
+        pc.tfp_pr2  = params.tfp_pr2  * (scale * scaling.tfp_pr2)
+        pc.y_pr1    = params.y_pr1    * (scale * scaling.y_pr1)
+        pc.y_pr2    = params.y_pr2    * (scale * scaling.y_pr2)
 
-        idx = np.where(years == year)[0]
-        if len(idx) == 0:
-            raise ValueError(f"Year {year} not found in years array")
-        idx = idx[0]
+        # Climate run
+        y_climate, *_ = calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, pc)
 
-        ratio = y_climate[idx]/y_weather[idx]
-        target = 1.0 + amount
+        # Weather (baseline) run
+        y_weather, *_ = calculate_coin_ssp_forward_model(
+            tfp, pop, gdp, tas*0.0 + params.tas0, pr*0.0 + params.pr0, params
+        )
 
-        return (ratio - target)**2
-    
-    # Perform optimization to find optimal scaling factor
-    result = minimize_scalar(objective_function, bounds=(0.0, 10.0), method='bounded')
-    
-    optimal_scale = result.x
-    final_error = result.fun
-    
+        ratio = y_climate[idx] / y_weather[idx]
+        target = 1.0 + params.amount_scale
+        return (ratio - target) ** 2
+
+    res = minimize(
+        objective,
+        x0=[x0],
+        bounds=[bounds],                # keeps search inside [lo, hi]
+        method="L-BFGS-B",              # supports bounds + numeric gradient
+        options={"maxiter": maxiter},
+        tol=tol
+    )
+
+    optimal_scale = float(res.x[0])
+    final_error = float(res.fun)
     return optimal_scale, final_error

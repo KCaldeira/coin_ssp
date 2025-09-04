@@ -2,25 +2,49 @@
 """
 COIN-SSP Climate Economics Main Processing Script
 
-This script processes climate-economic data for each country:
-1. Loads Historical/SSP merged dataset
-2. For each country, extracts time series data (population, GDP, temperature, precipitation)
-3. Calculates baseline TFP without climate effects using Solow-Swan model
-4. Runs forward model with climate effects to get climate-adjusted economic outcomes
+This script processes climate-economic data for each country using JSON configuration:
+1. Loads JSON configuration file with model parameters and scaling workflow
+2. Loads Historical/SSP merged dataset
+3. For each country, extracts time series data (population, GDP, temperature, precipitation)
+4. Calculates baseline TFP without climate effects using Solow-Swan model
+5. Runs optimization workflow to calibrate climate sensitivity parameters
+6. Runs forward model with climate effects to get climate-adjusted economic outcomes
 
 Usage:
-    python main.py [--max-countries N] [--k_tas2 -0.01] [other climate parameters...]
+    python main.py <config.json> [--max-countries N]
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from coin_ssp_core import ModelParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model
+from coin_ssp_core import ModelParams, ScalingParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model, optimize_climate_response_scaling
 from coin_ssp_utils import apply_time_series_filter
 import argparse
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from datetime import datetime
+import json
+import copy
+
+def load_config(config_file):
+    """Load JSON configuration file containing model parameters and workflow."""
+    print(f"Loading configuration from {config_file}...")
+    
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+    
+    # Extract model parameters section (optional)
+    model_params_config = config.get('model_params', {})
+    
+    # Extract scaling parameters section (required) - should be a list of parameter sets
+    if 'scaling_params' not in config:
+        raise ValueError("Configuration file must contain 'scaling_params' section")
+    scaling_params_list = config['scaling_params']
+    
+    if not isinstance(scaling_params_list, list):
+        raise ValueError("'scaling_params' section must be a list of parameter sets")
+    
+    return model_params_config, scaling_params_list
 
 def load_data(data_file="./data/input/Historical_SSP5_annual.csv"):
     """Load the merged climate-economic dataset."""
@@ -70,6 +94,15 @@ def process_country(country_data, params):
     --------
     dict: Results containing baseline and climate-adjusted time series
     """
+    # Step 0: Create variables needed for later processing.
+    # find location of year_diverge in years
+    if params.year_diverge < country_data['years'][0]:
+        year_diverge_loc = 0
+    else:
+        year_diverge_loc = np.where(country_data['years'] == params.year_diverge)[0][0]
+    # reference temperature and precipitation are set to the mean of the beginning of the dataset to year_diverge
+    params.tas0 = np.mean(country_data['tas'][:year_diverge_loc+1])
+    params.pr0 = np.mean(country_data['pr'][:year_diverge_loc+1])
     
     # Step 1: Calculate baseline TFP without climate effects
     print(f"    Calculating baseline TFP...")
@@ -81,12 +114,6 @@ def process_country(country_data, params):
     
     # Step 2: Run forward model with climate effects
     print(f"    Running forward model with climate effects...")
-    
-    # find location of year 2025 in years
-    year_2025_loc = np.where(country_data['years'] == 2025)[0][0]
-    # reference temperature and precipitation are set to the mean of the beginning of the dataset to 2025
-    params.tas0 = np.mean(country_data['tas'][:year_2025_loc+1])
-    params.pr0 = np.mean(country_data['pr'][:year_2025_loc+1])
        
     y_climate, a_climate, k_climate, y_climate_factor, tfp_climate_factor, k_climate_factor = calculate_coin_ssp_forward_model(
         tfp_baseline,
@@ -98,13 +125,13 @@ def process_country(country_data, params):
     )
     
     
-    # Step 3: Run forward model with weather only (no climate trends) after year 2025
-    print(f"    Running forward model with no climate effects after year 2025...")
+    # Step 3: Run forward model with weather only (no climate trends) after year_diverge
+    print(f"    Running forward model with no climate effects after year {params.year_diverge}...")
 
     filter_width = 30  # years
 
-    tas_weather = apply_time_series_filter(country_data['tas'], filter_width, year_2025_loc)
-    pr_weather = apply_time_series_filter(country_data['pr'], filter_width, year_2025_loc)
+    tas_weather = apply_time_series_filter(country_data['tas'], filter_width, year_diverge_loc)
+    pr_weather = apply_time_series_filter(country_data['pr'], filter_width, year_diverge_loc)
     
        
     y_weather, a_weather, k_weather, y_weather_factor, tfp_weather_factor, k_weather_factor = calculate_coin_ssp_forward_model(
@@ -148,71 +175,194 @@ def process_country(country_data, params):
     
     return results
 
-def save_country_results(country, results, output_dir, timestamp):
-    """Save results for a single country to CSV."""
+def process_country_with_scaling(country_data, params, scaling_param_sets):
+    """
+    Process a single country through the complete COIN-SSP pipeline with multiple scaling sets.
+    
+    Steps:
+    1. Calculate baseline TFP without climate effects (once per country)
+    2. For each scaling set:
+       - Run optimization to find optimal scaling factor
+       - Run forward model with optimized climate effects
+       - Run forward model with weather-only effects
+    
+    Returns:
+    --------
+    dict: Results containing baseline and all scaling set results
+    """
+    
+    # Step 0: Create variables needed for later processing
+    if params.year_diverge < country_data['years'][0]:
+        year_diverge_loc = 0
+    else:
+        year_diverge_loc = np.where(country_data['years'] == params.year_diverge)[0][0]
+    params.tas0 = np.mean(country_data['tas'][:year_diverge_loc+1])
+    params.pr0 = np.mean(country_data['pr'][:year_diverge_loc+1])
+    
+    # Step 1: Calculate baseline TFP without climate effects (once per country)
+    print(f"    Calculating baseline TFP...")
+    tfp_baseline, k_baseline = calculate_tfp_coin_ssp(
+        country_data['population'], 
+        country_data['gdp'], 
+        params
+    )
+    
+    # Initialize results structure
+    results = {
+        'years': country_data['years'],
+        'population': country_data['population'],
+        'gdp_observed': country_data['gdp'],
+        'tas': country_data['tas'],
+        'pr': country_data['pr'],
+        'tfp_baseline': tfp_baseline,
+        'k_baseline': k_baseline,
+        'scaling_results': {}  # Will contain results for each scaling set
+    }
+    
+    # Step 2: Process each scaling set
+    for scaling_params in scaling_param_sets:
+        print(f"    Processing scaling set: {scaling_params.scaling_name}")
+        
+        # Run optimization to find optimal scaling factor
+        print(f"      Optimizing climate response scaling...")
+        optimal_scale, final_error = optimize_climate_response_scaling(
+            country_data['years'], tfp_baseline, 
+            country_data['population'], country_data['gdp'],
+            country_data['tas'], country_data['pr'],
+            params, scaling_params
+        )
+        
+        print(f"      Optimal scale: {optimal_scale:.6f}, error: {final_error:.6f}")
+        
+        # Create scaled parameters for this optimization
+        params_scaled = copy.deepcopy(params)
+        params_scaled.k_tas1 *= optimal_scale * scaling_params.k_tas1
+        params_scaled.k_tas2 *= optimal_scale * scaling_params.k_tas2
+        params_scaled.k_pr1 *= optimal_scale * scaling_params.k_pr1
+        params_scaled.k_pr2 *= optimal_scale * scaling_params.k_pr2
+        params_scaled.tfp_tas1 *= optimal_scale * scaling_params.tfp_tas1
+        params_scaled.tfp_tas2 *= optimal_scale * scaling_params.tfp_tas2
+        params_scaled.tfp_pr1 *= optimal_scale * scaling_params.tfp_pr1
+        params_scaled.tfp_pr2 *= optimal_scale * scaling_params.tfp_pr2
+        params_scaled.y_tas1 *= optimal_scale * scaling_params.y_tas1
+        params_scaled.y_tas2 *= optimal_scale * scaling_params.y_tas2
+        params_scaled.y_pr1 *= optimal_scale * scaling_params.y_pr1
+        params_scaled.y_pr2 *= optimal_scale * scaling_params.y_pr2
+        
+        # Run forward model with scaled climate effects
+        print(f"      Running forward model with scaled climate effects...")
+        y_climate, a_climate, k_climate, y_climate_factor, tfp_climate_factor, k_climate_factor = calculate_coin_ssp_forward_model(
+            tfp_baseline,
+            country_data['population'],
+            country_data['gdp'], 
+            country_data['tas'],
+            country_data['pr'],
+            params_scaled
+        )
+        
+        # Run forward model with weather only (no climate trends after year_diverge)
+        print(f"      Running forward model with weather effects only...")
+        filter_width = 30  # years
+        tas_weather = apply_time_series_filter(country_data['tas'], filter_width, year_diverge_loc)
+        pr_weather = apply_time_series_filter(country_data['pr'], filter_width, year_diverge_loc)
+        
+        y_weather, a_weather, k_weather, y_weather_factor, tfp_weather_factor, k_weather_factor = calculate_coin_ssp_forward_model(
+            tfp_baseline,
+            country_data['population'],
+            country_data['gdp'], 
+            tas_weather,
+            pr_weather,
+            params_scaled
+        )
+        
+        # Store results for this scaling set
+        scaling_result = {
+            'optimal_scale': optimal_scale,
+            'final_error': final_error,
+            'tas_weather': tas_weather,
+            'pr_weather': pr_weather,
+            'gdp_climate': y_climate * country_data['gdp'][0],
+            'tfp_climate': a_climate,
+            'k_climate': k_climate,
+            'y_climate_factor': y_climate_factor,
+            'tfp_climate_factor': tfp_climate_factor,
+            'k_climate_factor': k_climate_factor,
+            'gdp_weather': y_weather * country_data['gdp'][0],
+            'tfp_weather': a_weather,
+            'k_weather': k_weather,
+            'y_weather_factor': y_weather_factor,
+            'tfp_weather_factor': tfp_weather_factor,
+            'k_weather_factor': k_weather_factor
+        }
+        
+        results['scaling_results'][scaling_params.scaling_name] = scaling_result
+    
+    return results
+
+def save_country_results(country, results, output_dir, run_name, timestamp):
+    """Save results for a single country to CSV with all scaling sets."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Create DataFrame from results
-    df = pd.DataFrame({
+    # Start with common columns
+    df_data = {
         'year': results['years'],
         'population': results['population'],
         'gdp_observed': results['gdp_observed'],
         'tas': results['tas'],
         'pr': results['pr'],
         'tfp_baseline': results['tfp_baseline'],
-        'k_baseline': results['k_baseline'],
-        'gdp_climate': results['gdp_climate'],
-        'tfp_climate': results['tfp_climate'], 
-        'k_climate': results['k_climate'],
-        'y_climate_factor': results['y_climate_factor'],
-        'tfp_climate_factor': results['tfp_climate_factor'],
-        'k_climate_factor': results['k_climate_factor'],
-        'gdp_weather': results['gdp_weather'],
-        'tfp_weather': results['tfp_weather'], 
-        'k_weather': results['k_weather'],
-        'y_weather_factor': results['y_weather_factor'],
-        'tfp_weather_factor': results['tfp_weather_factor'],
-        'k_weather_factor': results['k_weather_factor']
-    })
+        'k_baseline': results['k_baseline']
+    }
     
-    output_file = output_dir / f"{country.replace(' ', '_')}_results_{timestamp}.csv"
+    # Add columns for each scaling set
+    for scaling_name, scaling_result in results['scaling_results'].items():
+        df_data[f'gdp_climate_{scaling_name}'] = scaling_result['gdp_climate']
+        df_data[f'tfp_climate_{scaling_name}'] = scaling_result['tfp_climate']
+        df_data[f'k_climate_{scaling_name}'] = scaling_result['k_climate']
+        df_data[f'gdp_weather_{scaling_name}'] = scaling_result['gdp_weather']
+        df_data[f'tfp_weather_{scaling_name}'] = scaling_result['tfp_weather']
+        df_data[f'k_weather_{scaling_name}'] = scaling_result['k_weather']
+        df_data[f'tas_weather_{scaling_name}'] = scaling_result['tas_weather']
+        df_data[f'pr_weather_{scaling_name}'] = scaling_result['pr_weather']
+    
+    df = pd.DataFrame(df_data)
+    
+    output_file = output_dir / f"{country.replace(' ', '_')}_results_{run_name}_{timestamp}.csv"
     df.to_csv(output_file, index=False)
     print(f"    Saved results: {output_file}")
 
-def create_country_page(country, results, params, fig):
-    """Create a single page with three panels for one country."""
-    fig.suptitle(f'{country}', fontsize=16, fontweight='bold')
+def create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig):
+    """Create a single page with three panels for one country and scaling set."""
+    fig.suptitle(f'{country} - {scaling_name}', fontsize=16, fontweight='bold')
     
     years = results['years']
     
     # Panel 1: GDP
     ax1 = fig.add_subplot(3, 1, 1)
     ax1.plot(years, results['gdp_observed'], 'k-', label='Baseline', linewidth=2)
-    ax1.plot(years, results['gdp_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax1.plot(years, results['gdp_weather'], 'b--', label='Weather', linewidth=1.5)
+    ax1.plot(years, scaling_result['gdp_climate'], 'r-', label='Climate', linewidth=1.5)
+    ax1.plot(years, scaling_result['gdp_weather'], 'b--', label='Weather', linewidth=1.5)
     ax1.set_ylabel('GDP (billion $)')
     ax1.legend(loc='upper left')
     ax1.grid(True, alpha=0.3)
     
-    # Add parameter box in lower right corner
-    param_text = (f'Climate Parameters:\n'
-                  f'k_tas1={params.k_tas1:g}, k_tas2={params.k_tas2:g}\n'
-                  f'k_pr1={params.k_pr1:g}, k_pr2={params.k_pr2:g}\n'
-                  f'tfp_tas1={params.tfp_tas1:g}, tfp_tas2={params.tfp_tas2:g}\n'
-                  f'tfp_pr1={params.tfp_pr1:g}, tfp_pr2={params.tfp_pr2:g}\n'
-                  f'y_tas1={params.y_tas1:g}, y_tas2={params.y_tas2:g}\n'
-                  f'y_pr1={params.y_pr1:g}, y_pr2={params.y_pr2:g}')
+    # Add scaling info box in lower right corner
+    scaling_text = (f'Scaling: {scaling_name}\n'
+                   f'Optimal scale: {scaling_result["optimal_scale"]:.4f}\n'
+                   f'Final error: {scaling_result["final_error"]:.6f}\n'
+                   f'Target year: {params.year_scale}\n'
+                   f'Target amount: {params.amount_scale:.3f}')
     
-    ax1.text(0.98, 0.02, param_text, transform=ax1.transAxes, fontsize=8,
+    ax1.text(0.98, 0.02, scaling_text, transform=ax1.transAxes, fontsize=8,
              verticalalignment='bottom', horizontalalignment='right',
              bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     # Panel 2: TFP
     ax2 = fig.add_subplot(3, 1, 2)
     ax2.plot(years, results['tfp_baseline'], 'k-', label='Baseline', linewidth=2)
-    ax2.plot(years, results['tfp_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax2.plot(years, results['tfp_weather'], 'b--', label='Weather', linewidth=1.5)
+    ax2.plot(years, scaling_result['tfp_climate'], 'r-', label='Climate', linewidth=1.5)
+    ax2.plot(years, scaling_result['tfp_weather'], 'b--', label='Weather', linewidth=1.5)
     ax2.set_ylabel('Total Factor Productivity')
     ax2.legend(loc='upper left')
     ax2.grid(True, alpha=0.3)
@@ -220,8 +370,8 @@ def create_country_page(country, results, params, fig):
     # Panel 3: Capital Stock
     ax3 = fig.add_subplot(3, 1, 3)
     ax3.plot(years, results['k_baseline'], 'k-', label='Baseline', linewidth=2)
-    ax3.plot(years, results['k_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax3.plot(years, results['k_weather'], 'b--', label='Weather', linewidth=1.5)
+    ax3.plot(years, scaling_result['k_climate'], 'r-', label='Climate', linewidth=1.5)
+    ax3.plot(years, scaling_result['k_weather'], 'b--', label='Weather', linewidth=1.5)
     ax3.set_ylabel('Capital Stock (normalized)')
     ax3.set_xlabel('Year')
     ax3.legend(loc='upper left')
@@ -230,44 +380,40 @@ def create_country_page(country, results, params, fig):
     plt.tight_layout()
     return fig
 
-def create_results_pdf(all_results, params, output_dir, timestamp):
-    """Create a PDF book with one page per country showing results."""
+def create_country_pdf_books(all_results, params, output_dir, run_name, timestamp):
+    """Create PDF books with one book per country, one page per scaling set."""
     output_dir = Path(output_dir)
-    pdf_file = output_dir / f"COIN_SSP_Results_Book_{timestamp}.pdf"
     
-    print(f"\nCreating PDF results book...")
-    print(f"  Generating {len(all_results)} country pages...")
+    print(f"\nCreating PDF books for {len(all_results)} countries...")
     
-    with PdfPages(pdf_file) as pdf:
-        for i, (country, results) in enumerate(sorted(all_results.items()), 1):
-            print(f"  [{i}/{len(all_results)}] Adding {country}...")
-            
-            # Create figure for this country
-            fig = plt.figure(figsize=(8.5, 11))  # Letter size portrait
-            create_country_page(country, results, params, fig)
-            
-            # Save to PDF
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close(fig)
+    pdf_files = []
+    for i, (country, results) in enumerate(sorted(all_results.items()), 1):
+        print(f"  [{i}/{len(all_results)}] Creating book for {country}...")
+        
+        pdf_file = output_dir / f"COIN_SSP_{country.replace(' ', '_')}_Book_{run_name}_{timestamp}.pdf"
+        
+        with PdfPages(pdf_file) as pdf:
+            for j, (scaling_name, scaling_result) in enumerate(results['scaling_results'].items(), 1):
+                print(f"    Page {j}: {scaling_name}")
+                
+                # Create figure for this scaling set
+                fig = plt.figure(figsize=(8.5, 11))  # Letter size portrait
+                create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig)
+                
+                # Save to PDF
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+        
+        pdf_files.append(pdf_file)
+        print(f"    Saved: {pdf_file}")
     
-    print(f"  PDF book saved: {pdf_file}")
-    return pdf_file
+    print(f"  Created {len(pdf_files)} PDF books")
+    return pdf_files
 
 def parse_args():
     parser = argparse.ArgumentParser(description="COIN-SSP Climate Economics Main Processing Script")
+    parser.add_argument("config_file", help="JSON configuration file containing model parameters and workflow")
     parser.add_argument("--max-countries", type=int, default=None, help="Maximum number of countries to process")
-    parser.add_argument("--k_tas1", type=float, default=0.0, help="Linear temperature sensitivity for capital loss")
-    parser.add_argument("--k_tas2", type=float, default=0.0, help="Quadratic temperature sensitivity for capital loss")
-    parser.add_argument("--k_pr1", type=float, default=0.0, help="Linear precipitation sensitivity for capital loss")
-    parser.add_argument("--k_pr2", type=float, default=0.0, help="Quadratic precipitation sensitivity for capital loss")
-    parser.add_argument("--tfp_tas1", type=float, default=0.0, help="Linear temperature sensitivity for TFP loss")
-    parser.add_argument("--tfp_tas2", type=float, default=0.0, help="Quadratic temperature sensitivity for TFP loss")
-    parser.add_argument("--tfp_pr1", type=float, default=0.0, help="Linear precipitation sensitivity for TFP loss")
-    parser.add_argument("--tfp_pr2", type=float, default=0.0, help="Quadratic precipitation sensitivity for TFP loss")
-    parser.add_argument("--y_tas1", type=float, default=0.0, help="Linear temperature sensitivity for output loss")
-    parser.add_argument("--y_tas2", type=float, default=0.0, help="Quadratic temperature sensitivity for output loss")
-    parser.add_argument("--y_pr1", type=float, default=0.0, help="Linear precipitation sensitivity for output loss")
-    parser.add_argument("--y_pr2", type=float, default=0.0, help="Quadratic precipitation sensitivity for output loss")
     return parser.parse_args()
 
 
@@ -276,9 +422,19 @@ def main():
     print("=== COIN-SSP Climate Economics Processing ===\n")
     args = parse_args()
     
+    # Extract run name from JSON filename (coin_ssp_*.json -> *)
+    config_path = Path(args.config_file)
+    if not config_path.name.startswith('coin_ssp_') or not config_path.name.endswith('.json'):
+        raise ValueError("Config file must be named coin_ssp_*.json")
+    run_name = config_path.stem[9:]  # Remove 'coin_ssp_' prefix
+    
     # Create timestamp for this run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    print(f"Run name: {run_name}")
     print(f"Run timestamp: {timestamp}")
+    
+    # Load configuration from JSON file
+    model_params_config, scaling_params_list = load_config(args.config_file)
     
     # Parse command line argument for max countries
     max_countries = args.max_countries
@@ -286,26 +442,11 @@ def main():
     # Load data
     data = load_data()
     
-    # Define model parameters using command-line arguments
-    params = ModelParams(
-        s=0.3,          # savings rate (30%)
-        alpha=0.3,      # capital elasticity  
-        delta=0.1,      # depreciation rate (10% per year)
-        tas0=20.0,      # reference temperature (°C)
-        pr0=1.0,        # reference precipitation (mm/day)
-        k_tas1=args.k_tas1,
-        k_tas2=args.k_tas2,
-        k_pr1=args.k_pr1,
-        k_pr2=args.k_pr2,
-        tfp_tas1=args.tfp_tas1,
-        tfp_tas2=args.tfp_tas2,
-        tfp_pr1=args.tfp_pr1,
-        tfp_pr2=args.tfp_pr2,
-        y_tas1=args.y_tas1,
-        y_tas2=args.y_tas2,
-        y_pr1=args.y_pr1,
-        y_pr2=args.y_pr2
-    )
+    # Create ModelParams with defaults, overridden by config file
+    params = ModelParams(**model_params_config)
+    
+    # Create list of ScalingParams from config file
+    scaling_param_sets = [ScalingParams(**scaling_config) for scaling_config in scaling_params_list]
     
     print(f"\nModel Parameters:")
     print(f"  Savings rate: {params.s}")
@@ -313,10 +454,18 @@ def main():
     print(f"  Depreciation rate: {params.delta}")
     print(f"  Reference temperature: {params.tas0}°C")
     print(f"  Reference precipitation: {params.pr0} mm/day")
+    print(f"  Year diverge: {params.year_diverge}")
+    print(f"  Year scale: {params.year_scale}")
+    print(f"  Amount scale: {params.amount_scale}")
     
-    # Create timestamped output directory
+    print(f"\nScaling Parameter Sets: {len(scaling_param_sets)} loaded")
+    for i, scaling_params in enumerate(scaling_param_sets):
+        print(f"  Set {i+1}: k_tas2={scaling_params.k_tas2}, tfp_tas2={scaling_params.tfp_tas2}, y_tas2={scaling_params.y_tas2}")
+        # Show key non-zero parameters for each set
+    
+    # Create timestamped output directory with run name
     base_output_dir = Path("./data/output")
-    output_dir = base_output_dir / f"run_{timestamp}"
+    output_dir = base_output_dir / f"run_{run_name}_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
     
@@ -331,30 +480,25 @@ def main():
     for i, country in enumerate(countries, 1):
         print(f"\n[{i}/{len(countries)}] Processing {country}...")
         
-        try:
-            # Extract country data
-            country_data = extract_country_data(data, country)
-            
-            # Process country through COIN-SSP pipeline
-            results = process_country(country_data, params)
-            
-            # Save results
-            save_country_results(country, results, output_dir, timestamp)
-            
-            # Store in memory for summary analysis
-            all_results[country] = results
-            
-        except Exception as e:
-            print(f"    ERROR processing {country}: {e}")
-            continue
+        # Extract country data
+        country_data = extract_country_data(data, country)
+        
+        # Process country through COIN-SSP pipeline with all scaling sets
+        results = process_country_with_scaling(country_data, params, scaling_param_sets)
+        
+        # Save results
+        save_country_results(country, results, output_dir, run_name, timestamp)
+        
+        # Store in memory for summary analysis
+        all_results[country] = results
     
     print(f"\n=== Processing Complete ===")
     print(f"Successfully processed {len(all_results)} countries")
     print(f"Results saved in {output_dir}")
     
-    # Create PDF results book
+    # Create PDF books for each country  
     if all_results:
-        create_results_pdf(all_results, params, output_dir, timestamp)
+        create_country_pdf_books(all_results, params, output_dir, run_name, timestamp)
     
     # Quick summary
     if all_results:
