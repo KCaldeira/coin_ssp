@@ -67,6 +67,7 @@ class ModelParams:
 # parameters for scaling climate impacts for damage optimization runs
 class ScalingParams:
     scaling_name: str = "default"  # name for this scaling parameter set
+    scale_factor: float = None  # if provided, use this instead of optimization
     k_tas1: float = 0 # linear temperature sensitivity for capital loss
     k_tas2: float = 0  # quadratic temperature sensitivity for capital loss
     k_pr1: float = 0  # linear precipitation sensitivity for capital loss
@@ -139,11 +140,11 @@ def calculate_tfp_coin_ssp(pop, gdp, params):
 
     return a, k
 
-def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams):
+def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
     # This function calculates the forward model for the COIN-SSP economic model.
-    # It takes in total factor productivity (tfp), population (pop), gross domestic product
-    # (gdp), temperature (tas), and a set of model parameters (params).
+    # It takes in total factor productivity (tfp), population (pop), 
+    # temperature (tas), and a set of model parameters (params).
     # The function returns the adjusted total factor productivity (tfp_adj),
     # capital stock (k), and output (y) time series.
 
@@ -171,17 +172,16 @@ def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams
     tfp_growth = tfp[1:]/tfp[:-1] # note that this is one element shorter than the other vectors
 
     # non-dimensionalize the input data
-    y = gdp/gdp[0] # output normalized to year 0
+    y = np.ones_like(pop)  # output normalized to 1 at year 0
     l = pop/pop[0] # population normalized to year 0
+    k = np.copy(y) # capital stock normalized to year 0
+    a = np.copy(y) # total factor productivity normalized to year 0
 
     # assume that at year 0, the system is in steady-state, do d k / dt = 0 at year 0, and a[0] = 1.
     # 0 == s * y[0] - delta * k[0]
-    k0 = (s/delta) # everything is non0dimensionalized to 1 at year 0
+    k[0] = (s/delta) # everything is non0dimensionalized to 1 at year 0
     # y[0] ==  a[0] * k[0]**alpha * l[0]**(1-alpha)
-    a0 = k0**(-alpha) # nondimensionalized Total Factor Productivity is 0 in year 0
-    # since we are assuming steady state, the capital stock will be the same at the start of year 1
-    k = np.copy(y) # capital stock normalized to year 0
-    a = np.copy(y) # total factor productivity normalized to year 0
+    a0 = k[0]**(-alpha) # nondimensionalized Total Factor Productivity in year 0 in steady state without climate impacts
 
     # compute climate effect on capital stock, tfp growth rate, and output
     #note that these are all defined so a positive number means a positive economic impact
@@ -192,18 +192,13 @@ def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams
     y_climate = 1.0 + y_tas1 * (tas - tas0) + y_tas2 * (tas - tas0)**2  # units of fraction of output
     y_climate += y_pr1 * (pr - pr0) + y_pr2 * (pr - pr0)**2
 
-    
+    a[0] = a0 * tfp_climate[0] # initial TFP adjusted for climate in year 0
+
     for t in range(len(y)-1):
 
         # compute climate responses
         # Note that the climate response is computed at the start of year t, and then applied
         # to the change in capital stock and TFP over year t to year t+1
-
-        # apply climate effect to tfp growth rate
-        if t==0:
-            a[t] = a0 * tfp_climate[t]
-        else:
-            a[t] = a[t-1] * tfp_growth[t-1] * tfp_climate[t]
         
         # in year t, we are assume that the damage to capital stock occurs before production occurs
         # so that production in year t is based on the capital stock after climate damage
@@ -213,9 +208,11 @@ def calculate_coin_ssp_forward_model(tfp, pop, gdp, tas, pr, params: ModelParams
         # capital stock is then updated based on savings, depereciation, and climate damage
         k[t+1] = (k[t] * k_climate[t]) + s * y[t] - delta * k[t] 
 
-    # compute the last year's TFP and output
+        # apply climate effect to tfp growth rate
+        a[t+1] = a[t] * tfp_growth[t] * tfp_climate[t+1]  # tfp is during the year t to t+1
+
+    # compute the last year's output
     t = len(y)-1
-    a[t] = a[t-1] * tfp_growth[t-1] * tfp_climate[t]
     y[t] = a[t] * (k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
     return y, a, k, y_climate, tfp_climate, k_climate
@@ -263,14 +260,14 @@ def optimize_climate_response_scaling(
 
         # Climate run
         y_climate, *_ = calculate_coin_ssp_forward_model(
-            country_data['tfp_baseline'], country_data['population'], country_data['gdp'], 
+            country_data['tfp_baseline'], country_data['population'], 
             country_data['tas'], country_data['pr'], pc
         )
 
         # Weather (baseline) run
         y_weather, *_ = calculate_coin_ssp_forward_model(
-            country_data['tfp_baseline'], country_data['population'], country_data['gdp'], 
-            country_data['tas_weather'], country_data['pr_weather'], params
+            country_data['tfp_baseline'], country_data['population'], 
+            country_data['tas_weather'], country_data['pr_weather'], pc
         )
 
         ratio = y_climate[idx] / y_weather[idx]

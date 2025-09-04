@@ -145,15 +145,16 @@ The model uses JSON files named `coin_ssp_*.json` containing two main sections:
   },
   "scaling_params": [
     {
-      "scaling_name": "capital_only",
+      "scaling_name": "capital_optimized",
       "k_tas2": 1.0
     },
     {
-      "scaling_name": "tfp_only", 
-      "tfp_tas2": 1.0
+      "scaling_name": "tfp_direct", 
+      "tfp_tas2": 1.0,
+      "scale_factor": -0.005
     },
     {
-      "scaling_name": "output_only",
+      "scaling_name": "output_optimized",
       "y_tas2": 1.0
     }
   ]
@@ -168,6 +169,7 @@ The model uses JSON files named `coin_ssp_*.json` containing two main sections:
 
 **Scaling Parameters** (required list):
 - `scaling_name`: Unique identifier for this parameter set
+- `scale_factor`: Optional - if provided, uses this value directly instead of optimization
 - Climate sensitivity parameters: `k_tas1/2`, `tfp_tas1/2`, `y_tas1/2`, `k_pr1/2`, `tfp_pr1/2`, `y_pr1/2`
 
 ### Output Files
@@ -184,11 +186,25 @@ The model generates timestamped output in `./data/output/run_{run_name}_{timesta
    - Page title: `{Country} - {scaling_name}`
    - Info box shows optimization results and target parameters
 
+### Scaling Modes
+
+The model supports two modes for determining scale factors:
+
+**1. Optimization Mode** (when `scale_factor` is not provided):
+- Automatically finds the optimal scale factor to achieve target climate impact
+- Uses `year_scale` and `amount_scale` from model parameters
+- Shows: `"Optimizing climate response scaling..." → "Scale factor: X, error: Y"`
+
+**2. Direct Mode** (when `scale_factor` is provided):
+- Uses the specified scale factor directly, skipping optimization
+- Faster execution for testing or when optimal values are known
+- Shows: `"Using provided scale factor: X"`
+
 ### Workflow Structure
 The model processes data with the following structure:
 - **Outer loop**: Countries (optimized for comparing scaling sets within countries)
 - **Inner loop**: Scaling parameter sets
-- **Optimization**: Each scaling set is calibrated to achieve target climate impact
+- **Scale determination**: Either optimized or directly specified per scaling set
 - **Three scenarios**: Baseline (no climate), Climate (full trends), Weather (variability only)
 
 ### Usage Example
