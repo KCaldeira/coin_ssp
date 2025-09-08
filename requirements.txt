@@ -3,4 +3,4 @@ matplotlib
 scipy
 pyam-iamc
 pandas
-statsmodels=0.14.5
+statsmodels==0.14.5
