@@ -1,17 +1,17 @@
-# COIN_SSP: Climate-Integrated Economic Growth Model
+# COIN_SSP: Gridded Climate-Economic Impact Model
 
-A country-level implementation of the Solow-Swan growth model designed to assess climate impacts on economic growth under various SSP scenarios and climate trajectories.
+A spatially-explicit implementation of the Solow-Swan growth model that processes gridded climate and economic data to assess climate impacts on economic growth at the grid cell level under various SSP scenarios and RCP climate trajectories.
 
 ## Project Overview
 
 This project implements a forward-looking Solow-Swan growth model that integrates:
 
-- **SSP Economic Scenarios** (GDP and population projections)
-- **Annual Climate Data** (temperature and precipitation time series)  
+- **SSP Economic Scenarios** (gridded GDP and population projections)
+- **NetCDF Climate Data** (gridded temperature and precipitation time series)  
 - **Climate Damage Functions** with multiple response mechanisms
 - **Total Factor Productivity** calculations from observed economic data
 
-The model processes country-level data to understand how climate change affects economic growth through impacts on capital stock, productivity, and output.
+The model processes gridded NetCDF data to understand how climate change affects economic growth at the spatial scale of climate models through impacts on capital stock, productivity, and output.
 
 ## Model Framework
 
@@ -45,34 +45,75 @@ All damage functions support both temperature and precipitation sensitivities.
 ## Data Processing Pipeline
 
 ### 1. Raw Data Sources
-- **Climate Data**: Historical (1850-2014) + SSP585 (2015-2100) annual temperature/precipitation
-- **Economic Data**: SSP scenarios with GDP and population (5-year intervals, 1950-2100)
-- **Coverage**: 146 countries with complete data across all sources
+- **Climate Data**: Gridded NetCDF files with historical (1850-2014) + RCP scenarios (2015-2100) annual temperature/precipitation
+- **Economic Data**: Gridded NetCDF files with SSP scenarios for GDP and population (annual resolution, 1950-2100)
+- **Storage**: NetCDF input files located in `./data/input/`
+- **Coverage**: Global grid coverage at climate model resolution
 
 ### 2. Data Harmonization
-- **Country Name Mapping**: Resolves naming differences between climate and economic datasets
-- **Annual Interpolation**: Linear interpolation of economic data to match annual climate resolution
-- **Quality Assurance**: Removes countries with incomplete time series
+- **Spatial Alignment**: Ensures consistent grid cell indexing between climate and economic NetCDF files
+- **Temporal Alignment**: Synchronizes annual time series across all data sources
+- **Quality Assurance**: Validates grid cell completeness and data continuity
 
-### 3. Economic Processing
-**Step 1: Baseline TFP Calculation**
+### 3. Grid Cell Processing
+**Step 1: Grid Cell TFP Calculation**
 ```python
-tfp_baseline, k_baseline = calculate_tfp_coin_ssp(population, gdp, params)
+# Applied to each grid cell independently
+tfp_baseline, k_baseline = calculate_tfp_coin_ssp(population_grid, gdp_grid, params)
 ```
 
 **Step 2: Climate-Integrated Forward Model**  
 ```python
-results = calculate_coin_ssp_forward_model(tfp_baseline, population, gdp, temperature, params)
+# Vectorized across all grid cells
+results = calculate_coin_ssp_forward_model(tfp_baseline, population_grid, gdp_grid, temperature_grid, params)
+```
+
+**Step 3: NetCDF Output Generation**
+```python
+# Save gridded results to NetCDF with proper metadata
+save_gridded_results(results, output_path, grid_metadata)
 ```
 
 ## Implementation Status
 
 ### ✅ Completed Components
 
-#### Data Infrastructure
-- **SSP Data Download** (`download_ssp_data.py`): Automated retrieval of economic scenarios
-- **Data Harmonization** (`create_annual_datasets.py`): Country mapping and annual interpolation
-- **Quality Datasets**: 5 Historical/SSP scenario files with 146 countries, annual resolution (1980-2100)
+#### Foundation Economic Model  
+- **TFP Calculation Module** (`coin_ssp_determine_tfp.py`): Core Solow-Swan TFP calculation from GDP/population time series
+- **Test Framework** (`test_tfp.py`): Validation testing with synthetic 20-year scenarios  
+- **Economic Model Core**: Functional implementation of baseline economic calculations
+
+#### Gridded Data Infrastructure
+- **NetCDF Data Loaders** (`coin_ssp_netcdf.py`): Reads gridded climate and economic data from `./data/input/`
+  - Handles 4 NetCDF files: temperature, precipitation, GDP, population
+  - Automatic Kelvin to Celsius conversion using physical constant
+  - Area-weighted global means using cosine of latitude
+  - Temporal averaging over user-specified year ranges
+
+#### Target GDP Reduction System
+- **Target Calculation Utility** (`calculate_target_gdp_reductions.py`): Standalone tool for creating spatially-explicit economic impact targets
+  - JSON configuration system (`target_gdp_config_example.json`)
+  - Three reduction types: constant, linear (temperature-dependent), quadratic (temperature-dependent)
+  - GDP-weighted global constraint satisfaction 
+  - NetCDF output (3×lat×lon array) saved to `./data/output/`
+  - Global map visualization with red-white-blue colormap
+  - Fixed color scale (-1 to +1) with actual range annotations
+
+### ⚠️ Known Issues
+
+#### Target GDP Reduction Algorithm
+- **Temperature dependency issue**: Linear function currently shows backwards relationship (more damage at colder temperatures)
+- **Root cause**: Constraint system mathematically correct but produces physically unrealistic temperature dependence  
+- **Status**: Requires reformulation of constraint system to ensure damage increases with temperature
+- **Mathematical details**: Extensively documented in code comments showing constraint equations and solution methods
+
+### 🚧 Future Development
+
+#### Next Priority Items
+- **Fix temperature dependency**: Redesign linear/quadratic constraint systems for realistic climate damage patterns
+- **Grid Cell Economic Model**: Extend TFP calculation to vectorized grid processing
+- **Climate-Integrated Forward Model**: Apply damage functions spatially across grid cells
+- **Full Pipeline Integration**: Connect target reduction tools with main economic modeling workflow
 
 #### Core Model
 - **Economic Core** (`coin_ssp_core.py`): 

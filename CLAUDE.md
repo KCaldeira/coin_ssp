@@ -51,12 +51,13 @@ def calculate_growth_rate(values):
 ```
 
 ## Project Context
-This is a climate economics modeling project implementing the Solow-Swan growth model for climate impact assessment. Code should reflect the mathematical elegance of economic models while maintaining computational efficiency for country-level analysis.
+This is a climate economics modeling project implementing the Solow-Swan growth model for gridded climate impact assessment. Code should reflect the mathematical elegance of economic models while maintaining computational efficiency for grid-scale analysis.
 
 ### Module Organization
 - **`coin_ssp_core.py`**: Core economic model functions and parameter classes
 - **`coin_ssp_utils.py`**: Utility functions for mathematical operations, visualization, and data processing
-- **`main.py`**: Workflow orchestration and I/O operations
+- **`coin_ssp_netcdf.py`**: NetCDF I/O operations for gridded data loading and saving
+- **`main.py`**: Workflow orchestration and grid cell processing
 
 Keep helper functions organized in utils to maintain clean separation of concerns.
 
@@ -74,3 +75,36 @@ Keep helper functions organized in utils to maintain clean separation of concern
 - **Handle Edge Cases Mathematically**: Use `np.maximum(0, value)` to prevent negative capital stock rather than conditional checks
 - **L-BFGS-B Optimization**: Prefer gradient-based optimization with proper bounds for parameter calibration
 - **Direct Parameter Scaling**: Use `param = scale * base_value` rather than multiplicative scaling to avoid zero-multiplication issues
+
+### NetCDF Data Handling
+- **xarray Integration**: Use xarray for elegant NetCDF operations and coordinate handling
+- **Vectorized Operations**: Apply economic calculations across entire spatial grids simultaneously
+- **Memory Efficiency**: Process large gridded datasets using chunking and lazy evaluation where appropriate
+- **Metadata Preservation**: Maintain proper coordinate systems, units, and attributes in output files
+- **Unit Conversion**: Convert temperature from Kelvin to Celsius using physical constant 273.15
+- **Area Weighting**: Use cosine of latitude for proper global mean calculations
+
+## Lessons Learned: Constraint System Design
+
+### Target GDP Reduction Implementation
+The implementation of spatially-explicit target reduction functions revealed important lessons about constraint system design in climate economics:
+
+#### Mathematical vs. Physical Consistency
+- **Issue**: Constraint systems can be mathematically correct but produce physically unrealistic results
+- **Example**: Linear temperature-damage function showing backwards relationship (more damage at colder temperatures)
+- **Root Cause**: GDP-weighted constraints combined with spatial temperature patterns can create counterintuitive solutions
+- **Solution**: Always verify that mathematical solutions align with physical/economic expectations
+
+#### Debugging Complex Algorithms
+- **Document Mathematical Basis**: Extensive comments showing constraint equations, solution methods, and expected behavior
+- **Add Debug Output**: Print intermediate calculations (coefficients, constraint values) to verify algorithm correctness  
+- **Spatial Diagnosis**: Create diagnostic tools to examine spatial patterns and validate temperature-damage relationships
+- **Point-wise Verification**: Test specific temperature points to confirm constraint satisfaction
+
+#### Temperature Dependency in Climate Damage
+- **Physical Expectation**: Climate damage should generally increase with temperature
+- **Constraint Design**: Ensure constraint systems enforce realistic temperature dependencies
+- **Spatial Considerations**: Account for how GDP distribution across temperature gradients affects global constraints
+- **Alternative Approaches**: Consider reformulating constraints to use cold-temperature reference points with zero damage
+
+These lessons emphasize the importance of validating not just mathematical correctness but also physical realism in climate-economic modeling algorithms.
