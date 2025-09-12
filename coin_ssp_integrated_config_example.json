@@ -1,0 +1,142 @@
+{
+  "run_metadata": {
+    "run_name": "CanESM5_ssp245_reference_experiment",
+    "description": "Full processing pipeline for CanESM5 using SSP245 as reference scenario",
+    "created_date": "2025-09-12"
+  },
+  
+  "climate_model": {
+    "model_name": "CanESM5",
+    "netcdf_file_patterns": {
+      "temperature": "gridRaw_tas",
+      "precipitation": "gridRaw_pr", 
+      "gdp": "gridded_gdp_regrid",
+      "population": "gridded_pop_regrid",
+      "target_reductions": "target_gdp_reductions"
+    },
+    "input_directory": "data/input",
+    "description": "Files will be resolved as {input_directory}/{prefix}_{model_name}_{ssp_name}.nc"
+  },
+
+  "ssp_scenarios": {
+    "reference_ssp": "ssp245",
+    "forward_simulation_ssps": ["ssp245", "ssp370", "ssp585"],
+    "description": "Reference SSP used for scaling factor calibration, forward simulation SSPs for TFP and projections"
+  },
+
+  "time_periods": {
+    "reference_period": {
+      "start_year": 2015,
+      "end_year": 2025,
+      "description": "Reference period for temperature and baseline calculations"
+    },
+    "target_period": {
+      "start_year": 2080, 
+      "end_year": 2100,
+      "description": "Target period for constraint satisfaction and impact assessment"
+    },
+    "projection_period": {
+      "start_year": 2025,
+      "end_year": 2100,
+      "description": "Period for forward model projections"
+    }
+  },
+
+  "model_params": {
+    "year_diverge": 2025,
+    "year_scale": 2100,
+    "amount_scale": -0.05,
+    "s": 0.3,
+    "alpha": 0.3,
+    "delta": 0.1,
+    "tas0": 20.0,
+    "pr0": 1.0
+  },
+
+  "damage_function_scalings": [
+    {
+      "scaling_name": "capital_quadratic_optimized",
+      "description": "Quadratic temperature sensitivity for capital stock with optimization",
+      "k_tas2": 1.0,
+      "optimization_target": {
+        "year": 2100,
+        "amount": -0.05
+      }
+    },
+    {
+      "scaling_name": "tfp_linear_direct", 
+      "description": "Linear temperature sensitivity for TFP with direct scaling",
+      "tfp_tas1": 1.0,
+      "scale_factor": -0.003,
+      "optimization_target": null
+    },
+    {
+      "scaling_name": "output_combined_optimized",
+      "description": "Combined temperature and precipitation sensitivity for output",
+      "y_tas1": 0.5,
+      "y_tas2": 1.0,
+      "y_pr1": 0.3,
+      "optimization_target": {
+        "year": 2100,
+        "amount": -0.10
+      }
+    }
+  ],
+
+  "gdp_reduction_targets": [
+    {
+      "target_name": "constant_10pct",
+      "target_type": "constant",
+      "gdp_reduction": -0.10,
+      "description": "Uniform 10% GDP reduction across all grid cells"
+    },
+    {
+      "target_name": "linear_temperature_dependent",
+      "target_type": "linear",
+      "global_mean_reduction": -0.10,
+      "reference_temperature": 30.0,
+      "reduction_at_reference_temp": -0.25,
+      "description": "Linear temperature-dependent reduction, -25% at 30°C, -10% GDP-weighted global mean"
+    },
+    {
+      "target_name": "quadratic_bounded",
+      "target_type": "quadratic", 
+      "global_mean_reduction": -0.10,
+      "reference_temperature": 30.0,
+      "reduction_at_reference_temp": -0.75,
+      "zero_reduction_temperature": 13.5,
+      "max_reduction": -0.80,
+      "description": "Quadratic temperature-dependent reduction with 80% maximum loss bound"
+    }
+  ],
+
+  "processing_options": {
+    "grid_cell_processing": {
+      "enabled": true,
+      "parallel_processing": true,
+      "chunk_size": 1000
+    },
+    "output_formats": {
+      "netcdf": true,
+      "csv": false,
+      "pdf_maps": true,
+      "pdf_line_plots": true
+    },
+    "validation": {
+      "constraint_verification": true,
+      "economic_bounds_check": true,
+      "temperature_damage_relationship": true
+    }
+  },
+
+  "output_configuration": {
+    "output_directory": "data/output",
+    "filename_patterns": {
+      "target_reductions": "{model_name}_{reference_ssp}_target_reductions_{timestamp}.nc",
+      "forward_results": "{model_name}_{ssp}_{scaling_name}_results_{timestamp}.nc",
+      "maps": "{model_name}_{reference_ssp}_maps_{timestamp}.pdf",
+      "diagnostics": "{model_name}_{reference_ssp}_diagnostics_{timestamp}.pdf"
+    },
+    "include_timestamp": true
+  }
+}

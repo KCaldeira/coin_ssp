@@ -114,7 +114,7 @@ save_gridded_results(results, output_path, grid_metadata)
 
 #### Target GDP Reduction System
 - **Target Calculation Utility** (`calculate_target_gdp_reductions.py`): Standalone tool for creating spatially-explicit economic impact targets
-  - JSON configuration system (`target_gdp_config_example.json`)
+  - JSON configuration system (`target_gdp_config_0000.json`)
   - Three reduction types: constant, linear (temperature-dependent), quadratic (temperature-dependent)
   - GDP-weighted global constraint satisfaction using weighted least squares (OLS)
   - NetCDF output (3×lat×lon array) saved to `./data/output/`
@@ -122,6 +122,24 @@ save_gridded_results(results, output_path, grid_metadata)
   - Global map headers show GDP-weighted global means (not area-weighted)
   - Fixed color scale (-1 to +1) with actual range annotations
   - Comprehensive constraint verification with 10+ decimal precision
+
+#### Integrated Configuration System
+- **Unified JSON Schema** (`coin_ssp_integrated_config_example.json`): Complete workflow configuration combining all processing components
+  - **Climate Models**: Flexible NetCDF file naming convention `{prefix}_{model_name}_{ssp_name}.nc`
+  - **Damage Function Scalings**: Enhanced scaling parameters with optimization targets from `coin_ssp*.json` files
+  - **GDP Reduction Targets**: Integrated target specifications from `target_gdp_config*.json` files with bounded options
+  - **SSP Scenarios**: Reference SSP for calibration + list of forward simulation scenarios
+  - **Processing Control**: Grid processing options, validation settings, output formats
+
+#### Integrated Processing Pipeline Implementation
+- **Main Integrated Pipeline** (`main_integrated.py`): Complete 5-step processing workflow following README Section 3
+  - **Step 1**: Calculate target GDP changes using reference SSP (global constraint satisfaction)
+  - **Step 2**: Generate baseline TFP for all SSPs (per grid cell, no climate effects)
+  - **Step 3**: **Per-grid-cell scaling factor optimization** - runs `optimize_climate_response_scaling` for each grid cell
+  - **Step 4**: Forward model integration for all SSPs using per-cell scaling factors
+  - **Step 5**: NetCDF output generation with comprehensive metadata
+  - **Flexible Dimensions**: All arrays sized dynamically based on JSON configuration
+  - **Status**: Architecture complete with detailed stubs ready for implementation
 
 ### ⚠️ Known Issues
 
@@ -135,33 +153,35 @@ save_gridded_results(results, output_path, grid_metadata)
 
 ### 🚧 Next Development Phase
 
-#### Upcoming Grid Cell Processing Implementation
-The next major development will implement comprehensive grid cell processing for each climate model:
+#### Integrated Processing Pipeline Implementation
+The next major development will implement the complete processing pipeline using the unified JSON configuration:
 
-**Phase 1: Scaling Factor Calculation (SSP245 Reference)**
-- Calculate scaling factors once per model for each damage function case and target GDP change
-- Based on SSP245 scenario as calibration reference
-- 6 damage function cases: linear/quadratic × (output, capital stock, TFP growth)  
-- 3 target GDP change cases: constant, linear, quadratic
-- Total: 18 scaling factor combinations per model
+**Phase 1: Implement Existing Code Integration** 
+- Integrate existing functions into `main_integrated.py` stub framework:
+  - Step 1: Adapt `calculate_target_gdp_reductions.py` for integrated workflow
+  - Step 2: Vectorize `calculate_tfp_coin_ssp` for gridded data processing
+  - Step 3: Apply `optimize_climate_response_scaling` per grid cell (most complex step)
+  - Step 4: Vectorize `calculate_coin_ssp_forward_model` across spatial grids
+  - Step 5: Implement NetCDF output with proper coordinate systems
 
-**Phase 2: Multi-SSP TFP Time Series**
-- Calculate TFP time series for each model and SSP pathway combination
-- Baseline TFP calculation (no climate effects) for all scenarios
+**Phase 2: Per-Grid-Cell Optimization**
+- Handle computational complexity of Step 3 (most intensive step):
+  - Nested loops: grid cells × damage functions × GDP targets
+  - Consider parallel processing for large grids
+  - Implement robust error handling for optimization failures
+  - Memory management for large scaling factor arrays `[lat, lon, damage_func, target]`
 
-**Phase 3: Forward Integration**
-- Run forward model for each grid cell using Phase 1 scaling factors
-- Process all available SSP scenarios for each model
-- Apply climate-integrated damage functions spatially
-- Generate 18 result cases per grid cell per model
+**Phase 3: Validation and Testing**
+- Test with small grid subsets before full processing
+- Validate constraint satisfaction and economic bounds across grid cells  
+- Implement comprehensive error reporting and convergence diagnostics
+- Generate validation reports comparing per-cell results with global targets
 
-**Technical Approach**:
-- Leverage existing scaling optimization from `main.py:145-147` (`optimize_climate_response_scaling`)
-- Extend current grid cell infrastructure to handle parameter calibration
-- Vectorized processing across spatial grids for computational efficiency
-
-#### Lower Priority Items
-- **Bounded damage functions**: Implement realistic bounds for quadratic reduction (e.g., max -80% GDP loss)
+**Technical Implementation**:
+- Leverage existing economic model core (`optimize_climate_response_scaling` from `main.py`)
+- Extend NetCDF utilities for multi-scenario gridded processing
+- Maintain vectorized processing for computational efficiency across spatial grids
+- Comprehensive validation including constraint satisfaction and economic bounds checking
 - **Alternative constraint formulations**: Explore cold-region reference points or piecewise functions
 
 #### Core Model
@@ -345,11 +365,14 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 - **Country-level Analysis**: 146 countries with complete 1980-2100 time series
 - **Multi-scenario Support**: All 5 SSP economic scenarios
 - **Climate Integration**: Temperature and precipitation damage functions with automatic parameter calibration
-- **Flexible Configuration**: JSON-based workflow definition with multiple scaling parameter sets
+- **Gridded Data Processing**: NetCDF utilities for spatial climate and economic data with standardized naming conventions
+- **Target GDP Reduction System**: Spatially-explicit constraint satisfaction with GDP-weighted global means
+- **Unified Configuration**: Integrated JSON schema combining climate models, damage functions, targets, and SSP scenarios
+- **Flexible Configuration**: Multiple scaling parameter sets with both optimization and direct scaling modes
 - **Robust Economic Modeling**: Negative capital stock protection and fail-fast error handling
-- **Automated Visualization**: Multi-page PDF books with three-panel charts per scaling scenario
+- **Automated Visualization**: Multi-page PDF books with spatial maps and function plots
 - **Optimization Framework**: L-BFGS-B optimization for achieving target economic impacts
-- **Quality Assurance**: Comprehensive data validation and interpolation
+- **Quality Assurance**: Comprehensive data validation, constraint verification, and economic bounds checking
 
 ### 🔄 Research Applications
 - **Climate Impact Assessment**: Quantify economic losses under different warming scenarios with optimized damage functions
@@ -383,7 +406,9 @@ coin_ssp/
 ├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations  
 ├── test_target_gdp.py                  # Test script for target GDP reductions
 ├── main.py                             # Country-level processing pipeline
-├── target_gdp_config_example.json      # Configuration for target GDP reduction calculations
+├── main_integrated.py                  # Integrated grid-cell processing pipeline (5-step workflow)
+├── coin_ssp_integrated_config_example.json  # Unified configuration for complete processing workflow
+├── target_gdp_config_0000.json         # Configuration for target GDP reduction calculations
 ├── data/
 │   ├── input/                          # NetCDF gridded climate/economic data + country datasets
 │   │   ├── gridRaw_tas_CanESM5_ssp585.nc      # Gridded temperature data
