@@ -42,7 +42,9 @@ def calculate_target_reductions(config_file):
     
     # Load gridded data
     print("Loading gridded data...")
-    data = load_gridded_data()
+    model_name = config.get('model_name', 'CanESM5')
+    case_name = config.get('case_name', 'ssp585')
+    data = load_gridded_data(model_name, case_name)
     
     # Extract configuration parameters
     ref_start = config['reference_period']['start_year']
@@ -536,12 +538,16 @@ if __name__ == "__main__":
     config = load_config(config_file)
     results = calculate_target_reductions(config_file)
     
-    # Save results to NetCDF with wildcard in filename
-    netcdf_filename = f"target_gdp_reductions_{wildcard}.nc"
+    # Extract model_name and case_name for output filenames
+    model_name = config.get('model_name', 'CanESM5')
+    case_name = config.get('case_name', 'ssp585')
+    
+    # Save results to NetCDF with model_name, case_name, and wildcard in filename
+    netcdf_filename = f"target_gdp_reductions_{model_name}_{case_name}_{wildcard}.nc"
     save_results_netcdf(results, netcdf_filename)
     
-    # Create global maps and save to PDF with wildcard in filename
-    pdf_filename = f"target_gdp_reductions_maps_{wildcard}.pdf"
+    # Create global maps and save to PDF with model_name, case_name, and wildcard in filename
+    pdf_filename = f"target_gdp_reductions_maps_{model_name}_{case_name}_{wildcard}.pdf"
     create_global_maps(results, config, pdf_filename)
     
     # Print summary statistics

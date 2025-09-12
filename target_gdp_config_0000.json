@@ -1,4 +1,6 @@
 {
+  "model_name": "CanESM5",
+  "case_name": "ssp585",
   "reference_period": {
     "start_year": 2015,
     "end_year": 2025

@@ -155,9 +155,16 @@ def create_country_pdf_books(all_results, params, output_dir, run_name, timestam
 # Target GDP Utilities (moved from coin_ssp_target_gdp.py)
 # =============================================================================
 
-def load_gridded_data():
+def load_gridded_data(model_name="CanESM5", case_name="ssp585"):
     """
     Load all four NetCDF files and return as a unified dataset.
+    
+    Parameters
+    ----------
+    model_name : str, optional
+        Climate model name (default: "CanESM5")
+    case_name : str, optional
+        Scenario case name (default: "ssp585")
     
     Returns
     -------
@@ -176,19 +183,19 @@ def load_gridded_data():
     """
     
     # Load temperature data
-    tas_ds = xr.open_dataset('data/input/gridRaw_tas_CanESM5_ssp585.nc', decode_times=False)
+    tas_ds = xr.open_dataset(f'data/input/gridRaw_tas_{model_name}_{case_name}.nc', decode_times=False)
     tas = tas_ds.tas.values - 273.15  # Convert from Kelvin to Celsius
     
     # Load precipitation data  
-    pr_ds = xr.open_dataset('data/input/gridRaw_pr_CanESM5_ssp585.nc', decode_times=False)
+    pr_ds = xr.open_dataset(f'data/input/gridRaw_pr_{model_name}_{case_name}.nc', decode_times=False)
     pr = pr_ds.pr.values  # (86, 64, 128)
     
     # Load GDP data
-    gdp_ds = xr.open_dataset('data/input/gridded_gdp_regrid_CanESM5.nc', decode_times=False)
+    gdp_ds = xr.open_dataset(f'data/input/gridded_gdp_regrid_{model_name}.nc', decode_times=False)
     gdp = gdp_ds.gdp_20202100ssp5.values  # (18, 64, 128)
     
     # Load population data
-    pop_ds = xr.open_dataset('data/input/gridded_pop_regrid_CanESM5.nc', decode_times=False)
+    pop_ds = xr.open_dataset(f'data/input/gridded_pop_regrid_{model_name}.nc', decode_times=False)
     pop = pop_ds.pop_20062100ssp5.values  # (95, 64, 128)
     
     # Get coordinate arrays
