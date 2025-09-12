@@ -6,7 +6,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import os
-from coin_ssp_netcdf import load_gridded_data, calculate_time_means, calculate_global_mean
+from coin_ssp_utils import load_gridded_data, calculate_time_means, calculate_global_mean
 
 def load_config(config_file):
     """Load configuration from JSON file."""
@@ -109,18 +109,58 @@ def calculate_target_reductions(config_file):
     T_ref_linear = linear_config['reference_temperature']
     value_at_ref_linear = linear_config['reduction_at_reference_temp']
     
-    # Calculate GDP-weighted global mean temperature
-    gdp_weighted_temp_mean = calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target
+    # Calculate GDP-weighted global mean temperature with higher precision
+    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target)
     
     print(f"Linear algorithm check:")
     print(f"  T_ref_linear: {T_ref_linear}°C")
-    print(f"  GDP-weighted temp mean: {gdp_weighted_temp_mean:.2f}°C")
+    print(f"  GDP-weighted temp mean: {gdp_weighted_temp_mean:.6f}°C")
     print(f"  value_at_ref_linear: {value_at_ref_linear}")
     print(f"  global_mean_linear: {global_mean_linear}")
     
-    # Solve the 2x2 system
-    a1_linear = (value_at_ref_linear - (global_mean_linear - 1)) / (T_ref_linear - gdp_weighted_temp_mean)
-    a0_linear = value_at_ref_linear - a1_linear * T_ref_linear
+    # Set up as weighted least squares regression problem
+    # We have two constraints to fit exactly:
+    # 1. Point constraint: reduction(T_ref) = value_at_ref_linear  
+    # 2. GDP-weighted constraint: weighted_mean(reduction(T)) = global_mean_linear - 1
+    
+    # Create design matrix and target values
+    # Row 1: Point constraint (give it high weight to ensure exact fit)
+    # Row 2: GDP-weighted constraint (weight by total GDP)
+    
+    T_ref_linear = np.float64(T_ref_linear)
+    value_at_ref_linear = np.float64(value_at_ref_linear)
+    global_mean_linear = np.float64(global_mean_linear)
+    
+    # Design matrix X: [1, T] for each constraint
+    X = np.array([
+        [1.0, T_ref_linear],                    # Point constraint
+        [1.0, gdp_weighted_temp_mean]           # GDP-weighted constraint
+    ], dtype=np.float64)
+    
+    # Target values y
+    y = np.array([
+        value_at_ref_linear,                    # -0.25 at 30°C
+        global_mean_linear                      # -0.10 for GDP-weighted mean
+    ], dtype=np.float64)
+    
+    # Weights w (could be equal, or emphasize point constraint)
+    w = np.array([1.0, 1.0], dtype=np.float64)
+    
+    # Solve weighted least squares: (X^T W X)^(-1) X^T W y
+    W = np.diag(w)
+    XtWX = X.T @ W @ X
+    XtWy = X.T @ W @ y
+    
+    coeffs = np.linalg.solve(XtWX, XtWy)
+    a0_linear, a1_linear = coeffs
+    
+    # Verification: Check that constraints are satisfied
+    constraint1_check = a0_linear + a1_linear * T_ref_linear
+    constraint2_check = a0_linear + a1_linear * gdp_weighted_temp_mean
+    print(f"  OLS solution verification:")
+    print(f"    At T_ref: {constraint1_check:.10f} (target: {value_at_ref_linear})")
+    print(f"    Global mean: {constraint2_check:.10f} (target: {global_mean_linear:.10f})")
+    print(f"  Linear coefficients: a0={a0_linear:.10f}, a1={a1_linear:.10f}")
     
     linear_reduction = a0_linear + a1_linear * temp_ref
     
@@ -164,30 +204,49 @@ def calculate_target_reductions(config_file):
     value_at_ref_quad = quad_config['reduction_at_reference_temp']
     T0 = quad_config['zero_reduction_temperature']
     
-    # Calculate GDP-weighted global mean temperature and temperature squared
-    gdp_weighted_temp_mean = calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target
-    gdp_weighted_temp2_mean = calculate_global_mean(gdp_target * temp_ref**2, data['lat']) / global_gdp_target
+    # Calculate GDP-weighted global mean temperature and temperature squared with higher precision
+    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target)
+    gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, data['lat']) / global_gdp_target)
     
     print(f"Quadratic algorithm check:")
     print(f"  T0 (zero point): {T0}°C")
     print(f"  T_ref_quad: {T_ref_quad}°C")
-    print(f"  GDP-weighted temp mean: {gdp_weighted_temp_mean:.2f}°C")
-    print(f"  GDP-weighted temp² mean: {gdp_weighted_temp2_mean:.2f}°C²")
+    print(f"  GDP-weighted temp mean: {gdp_weighted_temp_mean:.6f}°C")
+    print(f"  GDP-weighted temp² mean: {gdp_weighted_temp2_mean:.6f}°C²")
     print(f"  value_at_ref_quad: {value_at_ref_quad}")
     print(f"  global_mean_quad: {global_mean_quad}")
     
-    # Solve 2x2 system for b and c (after eliminating a)
+    # Solve 2x2 system for b and c (after eliminating a) with higher precision
+    T0 = np.float64(T0)
+    T_ref_quad = np.float64(T_ref_quad)
+    value_at_ref_quad = np.float64(value_at_ref_quad)
+    global_mean_quad = np.float64(global_mean_quad)
+    
     M = np.array([
         [T_ref_quad - T0, T_ref_quad**2 - T0**2],
         [gdp_weighted_temp_mean - T0, gdp_weighted_temp2_mean - T0**2]
-    ])
+    ], dtype=np.float64)
     rhs = np.array([
         value_at_ref_quad,
-        global_mean_quad - 1
-    ])
+        global_mean_quad
+    ], dtype=np.float64)
+    
+    # Check condition number for numerical stability
+    cond = np.linalg.cond(M)
+    if cond > 1e12:
+        print(f"  Warning: Quadratic system is ill-conditioned (cond = {cond:.2e})")
     
     b_quad, c_quad = np.linalg.solve(M, rhs)
     a_quad = -b_quad * T0 - c_quad * T0**2
+    
+    # Verification: Check that all three constraints are satisfied
+    constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0
+    constraint2_check = a_quad + b_quad * T_ref_quad + c_quad * T_ref_quad**2  # Should be value_at_ref_quad
+    constraint3_check = a_quad + b_quad * gdp_weighted_temp_mean + c_quad * gdp_weighted_temp2_mean  # Should be global_mean_quad
+    print(f"  Constraint verification:")
+    print(f"    At T0=0: {constraint1_check:.10f} (target: 0.0)")
+    print(f"    At T_ref: {constraint2_check:.10f} (target: {value_at_ref_quad})")
+    print(f"    Global mean: {constraint3_check:.10f} (target: {global_mean_quad:.10f})")
     
     quadratic_reduction = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
     
@@ -209,8 +268,8 @@ def calculate_target_reductions(config_file):
     }
     
     print("Target GDP reduction calculations completed.")
-    print(f"Linear coefficients: a0={a0_linear:.6f}, a1={a1_linear:.6f}")
-    print(f"Quadratic coefficients: a={a_quad:.6f}, b={b_quad:.6f}, c={c_quad:.8f}")
+    print(f"Linear coefficients: a0={a0_linear:.10f}, a1={a1_linear:.10f}")
+    print(f"Quadratic coefficients: a={a_quad:.10f}, b={b_quad:.10f}, c={c_quad:.12f}")
     
     return results
 
@@ -293,6 +352,7 @@ def create_global_maps(results, pdf_filename):
     constant = results['constant']
     linear = results['linear']
     quadratic = results['quadratic']
+    gdp_target = results['gdp_target']
     lat = results['lat']
     lon = results['lon']
     
@@ -303,61 +363,123 @@ def create_global_maps(results, pdf_filename):
     vmin = -1.0
     vmax = 1.0
     
-    # Calculate actual data ranges for annotation
+    # Calculate actual data ranges and global means for annotation
     all_data = np.concatenate([constant.flatten(), linear.flatten(), quadratic.flatten()])
     actual_min = np.min(all_data)
     actual_max = np.max(all_data)
+    
+    # Calculate global means for each reduction type
+    global_mean_constant = np.mean(constant)
+    global_mean_linear = np.mean(linear) 
+    global_mean_quadratic = np.mean(quadratic)
+    
+    # Calculate GDP-weighted global means
+    total_gdp = calculate_global_mean(gdp_target, lat)
+    gdp_weighted_constant = calculate_global_mean(gdp_target * (1 + constant), lat) / total_gdp - 1
+    gdp_weighted_linear = calculate_global_mean(gdp_target * (1 + linear), lat) / total_gdp - 1
+    gdp_weighted_quadratic = calculate_global_mean(gdp_target * (1 + quadratic), lat) / total_gdp - 1
     
     # Create red-white-blue colormap centered at zero
     colors = ['red', 'white', 'blue']
     n_bins = 256
     cmap = mcolors.LinearSegmentedColormap.from_list('rwb', colors, N=n_bins)
     
-    # Create figure with 3 subplots
-    fig, axes = plt.subplots(3, 1, figsize=(12, 16))
-    fig.suptitle(f'Target GDP Reductions\nActual Range: {actual_min:.3f} to {actual_max:.3f}', 
-                fontsize=16, fontweight='bold')
+    # Create multi-page PDF
+    from matplotlib.backends.backend_pdf import PdfPages
     
-    # Plot constant reduction
-    im1 = axes[0].pcolormesh(lon_grid, lat_grid, constant, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
-    const_min, const_max = constant.min(), constant.max()
-    axes[0].set_title(f'Constant Reduction\nRange: {const_min:.4f} to {const_max:.4f}', 
-                     fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Longitude')
-    axes[0].set_ylabel('Latitude')
-    axes[0].grid(True, alpha=0.3)
-    cbar1 = plt.colorbar(im1, ax=axes[0], shrink=0.8)
-    cbar1.set_label('Fractional GDP Reduction\n(Scale: -1 to +1)', rotation=270, labelpad=25)
+    with PdfPages(pdf_path) as pdf:
+        # Page 1: Maps
+        fig, axes = plt.subplots(3, 1, figsize=(12, 16))
+        fig.suptitle(f'Target GDP Reductions\nActual Range: {actual_min:.3f} to {actual_max:.3f}', 
+                    fontsize=16, fontweight='bold')
     
-    # Plot linear reduction
-    im2 = axes[1].pcolormesh(lon_grid, lat_grid, linear, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
-    linear_min, linear_max = linear.min(), linear.max()
-    axes[1].set_title(f'Linear Reduction (Temperature-Dependent)\nRange: {linear_min:.4f} to {linear_max:.4f}', 
-                     fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('Longitude')
-    axes[1].set_ylabel('Latitude')
-    axes[1].grid(True, alpha=0.3)
-    cbar2 = plt.colorbar(im2, ax=axes[1], shrink=0.8)
-    cbar2.set_label('Fractional GDP Reduction\n(Scale: -1 to +1)', rotation=270, labelpad=25)
+        # Plot constant reduction
+        im1 = axes[0].pcolormesh(lon_grid, lat_grid, constant, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+        const_min, const_max = constant.min(), constant.max()
+        axes[0].set_title(f'Constant Reduction\nRange: {const_min:.4f} to {const_max:.4f}, GDP-weighted: {gdp_weighted_constant:.4f}', 
+                         fontsize=14, fontweight='bold')
+        axes[0].set_xlabel('Longitude')
+        axes[0].set_ylabel('Latitude')
+        axes[0].grid(True, alpha=0.3)
+        cbar1 = plt.colorbar(im1, ax=axes[0], shrink=0.8)
+        cbar1.set_label('Fractional GDP Reduction\n(Scale: -1 to +1)', rotation=270, labelpad=25)
+        
+        # Plot linear reduction
+        im2 = axes[1].pcolormesh(lon_grid, lat_grid, linear, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+        linear_min, linear_max = linear.min(), linear.max()
+        axes[1].set_title(f'Linear Reduction (Temperature-Dependent)\nRange: {linear_min:.4f} to {linear_max:.4f}, GDP-weighted: {gdp_weighted_linear:.4f}', 
+                         fontsize=14, fontweight='bold')
+        axes[1].set_xlabel('Longitude')
+        axes[1].set_ylabel('Latitude')
+        axes[1].grid(True, alpha=0.3)
+        cbar2 = plt.colorbar(im2, ax=axes[1], shrink=0.8)
+        cbar2.set_label('Fractional GDP Reduction\n(Scale: -1 to +1)', rotation=270, labelpad=25)
+        
+        # Plot quadratic reduction
+        im3 = axes[2].pcolormesh(lon_grid, lat_grid, quadratic, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+        quad_min, quad_max = quadratic.min(), quadratic.max()
+        axes[2].set_title(f'Quadratic Reduction (Temperature-Dependent)\nRange: {quad_min:.4f} to {quad_max:.4f}, GDP-weighted: {gdp_weighted_quadratic:.4f}', 
+                         fontsize=14, fontweight='bold')
+        axes[2].set_xlabel('Longitude')
+        axes[2].set_ylabel('Latitude')
+        axes[2].grid(True, alpha=0.3)
+        cbar3 = plt.colorbar(im3, ax=axes[2], shrink=0.8)
+        cbar3.set_label('Fractional GDP Reduction\n(Scale: -1 to +1)', rotation=270, labelpad=25)
+        
+        # Adjust layout and save page 1
+        plt.tight_layout()
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close(fig)
+        
+        # Page 2: Line plot of functions vs temperature
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        
+        # Temperature range for plotting
+        temp_range = np.linspace(-15, 40, 1000)
+        
+        # Extract coefficients from results for function evaluation
+        global_stats = results['global_stats']
+        a0, a1 = global_stats['linear_coeffs']['a0'], global_stats['linear_coeffs']['a1']
+        a_quad, b_quad, c_quad = global_stats['quadratic_coeffs']['a'], global_stats['quadratic_coeffs']['b'], global_stats['quadratic_coeffs']['c']
+        
+        # Calculate function values
+        constant_values = np.full_like(temp_range, -0.1)  # Constant reduction
+        linear_values = a0 + a1 * temp_range
+        quadratic_values = a_quad + b_quad * temp_range + c_quad * temp_range**2
+        
+        # Plot the three functions
+        ax.plot(temp_range, constant_values, 'k-', linewidth=2, label='Constant', alpha=0.8)
+        ax.plot(temp_range, linear_values, 'r-', linewidth=2, label='Linear', alpha=0.8)
+        ax.plot(temp_range, quadratic_values, 'b-', linewidth=2, label='Quadratic', alpha=0.8)
+        
+        # Add reference points
+        ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+        ax.axvline(x=30, color='gray', linestyle='--', alpha=0.5, label='30°C reference')
+        ax.axvline(x=13.5, color='orange', linestyle='--', alpha=0.5, label='13.5°C zero point')
+        
+        # Mark key points
+        ax.plot(30, -0.25, 'ro', markersize=8, label='Linear: 30°C = -0.25')
+        ax.plot(30, -0.75, 'bo', markersize=8, label='Quadratic: 30°C = -0.75')
+        ax.plot(13.5, 0, 'bs', markersize=8, label='Quadratic: 13.5°C = 0')
+        
+        # Format plot
+        ax.set_xlabel('Temperature (°C)', fontsize=14)
+        ax.set_ylabel('Fractional GDP Reduction', fontsize=14)
+        ax.set_title('Target GDP Reduction Functions vs Temperature', fontsize=16, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=12)
+        
+        # Set y-axis limits to show the range nicely
+        all_values = np.concatenate([constant_values, linear_values, quadratic_values])
+        y_min, y_max = all_values.min(), all_values.max()
+        y_range = y_max - y_min
+        ax.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+        
+        plt.tight_layout()
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close(fig)
     
-    # Plot quadratic reduction
-    im3 = axes[2].pcolormesh(lon_grid, lat_grid, quadratic, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
-    quad_min, quad_max = quadratic.min(), quadratic.max()
-    axes[2].set_title(f'Quadratic Reduction (Temperature-Dependent)\nRange: {quad_min:.4f} to {quad_max:.4f}', 
-                     fontsize=14, fontweight='bold')
-    axes[2].set_xlabel('Longitude')
-    axes[2].set_ylabel('Latitude')
-    axes[2].grid(True, alpha=0.3)
-    cbar3 = plt.colorbar(im3, ax=axes[2], shrink=0.8)
-    cbar3.set_label('Fractional GDP Reduction\n(Scale: -1 to +1)', rotation=270, labelpad=25)
-    
-    # Adjust layout
-    plt.tight_layout()
-    
-    # Save to PDF
-    plt.savefig(pdf_path, dpi=300, bbox_inches='tight')
     print(f"Global maps saved to {pdf_path}")
-    plt.close()
     
     return pdf_path
 

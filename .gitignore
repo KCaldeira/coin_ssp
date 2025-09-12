@@ -46,9 +46,12 @@ venv.bak/
 *.jpeg
 *.pdf
 *.csv
-*.nc
 *.h5
 *.hdf5
+
+# Allow input NetCDF files in data/input/
+*.nc
+!data/input/*.nc
 
 # OS
 .DS_Store

@@ -2,10 +2,19 @@
 
 import xarray as xr
 import numpy as np
-from coin_ssp_netcdf import calculate_global_mean
+import json
+from coin_ssp_utils import calculate_global_mean
 
 def test_target_gdp_results():
     """Test and verify the target GDP reduction results."""
+    
+    # Load config to get reference temperatures
+    with open('target_gdp_config_example.json', 'r') as f:
+        config = json.load(f)
+    
+    linear_ref_temp = config['linear_target']['reference_temperature']
+    quad_ref_temp = config['quadratic_target']['reference_temperature']
+    quad_zero_temp = config['quadratic_target']['zero_reduction_temperature']
     
     # Load results
     results = xr.open_dataset('data/output/target_gdp_reductions.nc')
@@ -32,15 +41,17 @@ def test_target_gdp_results():
     gdp_global = calculate_global_mean(gdp_target, lat)
     
     # Test GDP-weighted global means to verify constraints
-    gdp_weighted_linear = calculate_global_mean(gdp_target * (1 + reductions[1]), lat) / gdp_global
-    gdp_weighted_quadratic = calculate_global_mean(gdp_target * (1 + reductions[2]), lat) / gdp_global
+    gdp_weighted_constant = calculate_global_mean(gdp_target * (1 + reductions[0]), lat) / gdp_global - 1
+    gdp_weighted_linear = calculate_global_mean(gdp_target * (1 + reductions[1]), lat) / gdp_global - 1
+    gdp_weighted_quadratic = calculate_global_mean(gdp_target * (1 + reductions[2]), lat) / gdp_global - 1
     
     print(f"Global mean reference temperature: {temp_global:.2f}°C")
     print(f"Global mean constant reduction: {constant_global:.4f}")
     print(f"Global mean linear reduction: {linear_global:.4f}")  
     print(f"Global mean quadratic reduction: {quadratic_global:.4f}")
-    print(f"GDP-weighted linear reduction: {gdp_weighted_linear:.4f} (target: -0.10)")
-    print(f"GDP-weighted quadratic reduction: {gdp_weighted_quadratic:.4f} (target: -0.15)")
+    print(f"GDP-weighted constant reduction: {gdp_weighted_constant:.4f} (target: {config['constant_target']['gdp_reduction']})")
+    print(f"GDP-weighted linear reduction: {gdp_weighted_linear:.4f} (target: {config['linear_target']['global_mean_reduction']})")
+    print(f"GDP-weighted quadratic reduction: {gdp_weighted_quadratic:.4f} (target: {config['quadratic_target']['global_mean_reduction']})")
     print()
     
     # Test specific temperature points
@@ -49,23 +60,23 @@ def test_target_gdp_results():
     # Find grid cells closest to specific temperatures
     temp_flatten = temp_ref.flatten()
     
-    # Test at ~30°C
-    idx_30C = np.argmin(np.abs(temp_flatten - 30.0))
-    temp_30C = temp_flatten[idx_30C]
-    lat_idx, lon_idx = np.unravel_index(idx_30C, temp_ref.shape)
+    # Test at reference temperature
+    idx_ref = np.argmin(np.abs(temp_flatten - linear_ref_temp))
+    temp_ref_actual = temp_flatten[idx_ref]
+    lat_idx, lon_idx = np.unravel_index(idx_ref, temp_ref.shape)
     
-    print(f"At T ≈ 30°C (actual: {temp_30C:.1f}°C):")
+    print(f"At T ≈ {linear_ref_temp}°C (actual: {temp_ref_actual:.1f}°C):")
     print(f"  Constant: {reductions[0, lat_idx, lon_idx]:.4f}")
-    print(f"  Linear: {reductions[1, lat_idx, lon_idx]:.4f} (config target: -0.25)")
-    print(f"  Quadratic: {reductions[2, lat_idx, lon_idx]:.4f} (config target: -0.75)")
+    print(f"  Linear: {reductions[1, lat_idx, lon_idx]:.4f} (config target: {config['linear_target']['reduction_at_reference_temp']})")
+    print(f"  Quadratic: {reductions[2, lat_idx, lon_idx]:.4f} (config target: {config['quadratic_target']['reduction_at_reference_temp']})")
     print()
     
-    # Test at ~13.5°C - should be zero for quadratic
-    idx_zero = np.argmin(np.abs(temp_flatten - 13.5))
+    # Test at zero reduction temperature for quadratic
+    idx_zero = np.argmin(np.abs(temp_flatten - quad_zero_temp))
     temp_zero = temp_flatten[idx_zero]
     lat_idx_zero, lon_idx_zero = np.unravel_index(idx_zero, temp_ref.shape)
     
-    print(f"At T ≈ 13.5°C (actual: {temp_zero:.1f}°C):")
+    print(f"At T ≈ {quad_zero_temp}°C (actual: {temp_zero:.1f}°C):")
     print(f"  Constant: {reductions[0, lat_idx_zero, lon_idx_zero]:.4f}")
     print(f"  Linear: {reductions[1, lat_idx_zero, lon_idx_zero]:.4f}")
     print(f"  Quadratic: {reductions[2, lat_idx_zero, lon_idx_zero]:.4f} (should be ≈ 0)")
