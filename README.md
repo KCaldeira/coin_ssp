@@ -71,7 +71,10 @@ calculate_target_reductions(config_file)
 tfp_baseline, k_baseline = calculate_tfp_coin_ssp(population_grid, gdp_grid, params)
 ```
 
-**Step 3: Calculate the scaling factors for each grid cell for each damage function case for SSP245**
+**Step 3: Calculate the scaling factors for each grid cell for each damage function case and each target gdp change for SSP245**
+
+Note that as the json file is now configured we are considering 6 damage function cases (linear and quadratic on output, capital stock and growth rate in total factor productivity) and 3 target gdp changes (constant, linear, and quadratic).
+
 ```python
 # Applied to each grid cell independently
 optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(country_data, params, scaling_params)
