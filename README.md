@@ -133,14 +133,36 @@ save_gridded_results(results, output_path, grid_metadata)
 - **Status**: Requires reformulation with realistic bounds or alternative functional forms
 - **Documentation**: Extensively documented constraint equations and verification methods in code
 
-### 🚧 Future Development
+### 🚧 Next Development Phase
 
-#### Next Priority Items
+#### Upcoming Grid Cell Processing Implementation
+The next major development will implement comprehensive grid cell processing for each climate model:
+
+**Phase 1: Scaling Factor Calculation (SSP245 Reference)**
+- Calculate scaling factors once per model for each damage function case and target GDP change
+- Based on SSP245 scenario as calibration reference
+- 6 damage function cases: linear/quadratic × (output, capital stock, TFP growth)  
+- 3 target GDP change cases: constant, linear, quadratic
+- Total: 18 scaling factor combinations per model
+
+**Phase 2: Multi-SSP TFP Time Series**
+- Calculate TFP time series for each model and SSP pathway combination
+- Baseline TFP calculation (no climate effects) for all scenarios
+
+**Phase 3: Forward Integration**
+- Run forward model for each grid cell using Phase 1 scaling factors
+- Process all available SSP scenarios for each model
+- Apply climate-integrated damage functions spatially
+- Generate 18 result cases per grid cell per model
+
+**Technical Approach**:
+- Leverage existing scaling optimization from `main.py:145-147` (`optimize_climate_response_scaling`)
+- Extend current grid cell infrastructure to handle parameter calibration
+- Vectorized processing across spatial grids for computational efficiency
+
+#### Lower Priority Items
 - **Bounded damage functions**: Implement realistic bounds for quadratic reduction (e.g., max -80% GDP loss)
 - **Alternative constraint formulations**: Explore cold-region reference points or piecewise functions
-- **Grid Cell Economic Model**: Extend TFP calculation to vectorized grid processing
-- **Climate-Integrated Forward Model**: Apply damage functions spatially across grid cells
-- **Full Pipeline Integration**: Connect target reduction tools with main economic modeling workflow
 
 #### Core Model
 - **Economic Core** (`coin_ssp_core.py`): 

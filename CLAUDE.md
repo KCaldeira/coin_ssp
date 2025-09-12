@@ -121,3 +121,39 @@ The implementation of spatially-explicit target reduction functions revealed imp
 - **Trade-offs**: Balance mathematical tractability with economic plausibility across full spatial temperature range
 
 These lessons emphasize the importance of validating not just mathematical correctness but also physical realism and economic plausibility in climate-economic modeling algorithms.
+
+## Next Development Phase: Grid Cell Processing
+
+### Planned Implementation Strategy
+The next major development will transition from the current target GDP reduction utilities to comprehensive grid cell processing for climate-economic modeling:
+
+#### Phase 1: SSP245-Based Scaling Factor Calibration
+**Objective**: Calculate scaling factors once per climate model using SSP245 as the calibration scenario
+- **Scope**: 6 damage function cases × 3 target GDP cases = 18 scaling factor combinations per model
+- **Damage Functions**: Linear/quadratic variants for output, capital stock, and TFP growth mechanisms
+- **Target GDP Cases**: Constant, linear (temperature-dependent), quadratic (temperature-dependent)
+- **Technical Foundation**: Leverage existing `optimize_climate_response_scaling` function from `main.py:145-147`
+
+#### Phase 2: Multi-SSP TFP Time Series Generation  
+**Objective**: Calculate baseline TFP time series for each model and SSP pathway combination
+- **Scope**: All available SSP scenarios per climate model
+- **Method**: Apply existing `calculate_tfp_coin_ssp` to gridded economic data
+- **Output**: Baseline TFP arrays (no climate effects) for forward model initialization
+
+#### Phase 3: Comprehensive Forward Integration
+**Objective**: Run climate-integrated forward model for each grid cell across all scenarios
+- **Scope**: All SSP pathways using Phase 1 scaling factors
+- **Processing**: Apply `calculate_coin_ssp_forward_model` spatially across grids
+- **Output**: 18 result cases per grid cell per model (damage function × target GDP combinations)
+
+### Implementation Principles
+- **Vectorized Processing**: Maintain computational efficiency for grid-scale calculations
+- **Parameter Reuse**: Compute scaling factors once, apply across multiple SSP scenarios
+- **Modular Design**: Build on existing economic model core and gridded data infrastructure
+- **Quality Assurance**: Extend current validation approaches to spatial processing
+
+### Technical Requirements
+- **Memory Management**: Handle large gridded arrays efficiently with chunking strategies
+- **Parallel Processing**: Consider grid cell independence for computational optimization  
+- **Output Structure**: Design NetCDF output schemas for multi-scenario, multi-damage function results
+- **Validation Tools**: Extend diagnostic capabilities to spatial patterns and cross-scenario consistency
