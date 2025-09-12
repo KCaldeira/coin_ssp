@@ -55,11 +55,11 @@ This is a climate economics modeling project implementing the Solow-Swan growth 
 
 ### Module Organization
 - **`coin_ssp_core.py`**: Core economic model functions and parameter classes
-- **`coin_ssp_utils.py`**: Utility functions for mathematical operations, visualization, and data processing
-- **`coin_ssp_netcdf.py`**: NetCDF I/O operations for gridded data loading and saving
-- **`main.py`**: Workflow orchestration and grid cell processing
+- **`coin_ssp_utils.py`**: Consolidated utility functions for mathematical operations, visualization, time series processing, and NetCDF data processing
+- **`calculate_target_gdp_reductions.py`**: Standalone tool for spatially-explicit target GDP reduction calculations
+- **`main.py`**: Country-level workflow orchestration
 
-Keep helper functions organized in utils to maintain clean separation of concerns.
+Keep helper functions organized in utils to maintain clean separation of concerns. The utilities module now consolidates both mathematical/visualization functions and NetCDF data processing functions to reduce code duplication.
 
 ### Time Series Processing
 - **LOESS Filtering**: Use locally weighted scatterplot smoothing (LOESS) for separating climate trends from weather variability
@@ -83,6 +83,8 @@ Keep helper functions organized in utils to maintain clean separation of concern
 - **Metadata Preservation**: Maintain proper coordinate systems, units, and attributes in output files
 - **Unit Conversion**: Convert temperature from Kelvin to Celsius using physical constant 273.15
 - **Area Weighting**: Use cosine of latitude for proper global mean calculations
+- **Consolidated Utilities**: Keep all NetCDF processing functions in `coin_ssp_utils.py` to avoid duplication
+- **Repository Storage**: Small NetCDF files can be stored in git with appropriate .gitignore patterns
 
 ## Lessons Learned: Constraint System Design
 
@@ -107,4 +109,15 @@ The implementation of spatially-explicit target reduction functions revealed imp
 - **Spatial Considerations**: Account for how GDP distribution across temperature gradients affects global constraints
 - **Alternative Approaches**: Consider reformulating constraints to use cold-temperature reference points with zero damage
 
-These lessons emphasize the importance of validating not just mathematical correctness but also physical realism in climate-economic modeling algorithms.
+#### Economic Realism vs Mathematical Precision
+- **Issue**: Mathematically precise constraint satisfaction can produce economically meaningless results
+- **Example**: Quadratic damage function yielding >100% GDP losses (>252% in polar regions)
+- **Insight**: Economic bounds are as important as mathematical constraints in climate damage modeling
+- **Solution**: Implement realistic bounds (e.g., maximum 80% GDP loss) alongside mathematical precision
+
+#### Function Form Selection
+- **Unconstrained quadratics**: Can produce extreme values in temperature ranges outside calibration data
+- **Bounded alternatives**: Consider sigmoid functions, piecewise linear, or constrained optimization with bounds
+- **Trade-offs**: Balance mathematical tractability with economic plausibility across full spatial temperature range
+
+These lessons emphasize the importance of validating not just mathematical correctness but also physical realism and economic plausibility in climate-economic modeling algorithms.

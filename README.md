@@ -84,33 +84,40 @@ save_gridded_results(results, output_path, grid_metadata)
 - **Economic Model Core**: Functional implementation of baseline economic calculations
 
 #### Gridded Data Infrastructure
-- **NetCDF Data Loaders** (`coin_ssp_netcdf.py`): Reads gridded climate and economic data from `./data/input/`
+- **NetCDF Data Loaders** (`coin_ssp_utils.py`): Consolidated utilities for gridded climate and economic data from `./data/input/`
+  - Functions: `load_gridded_data()`, `calculate_area_weights()`, `calculate_time_means()`, `calculate_global_mean()`
   - Handles 4 NetCDF files: temperature, precipitation, GDP, population
-  - Automatic Kelvin to Celsius conversion using physical constant
+  - Automatic Kelvin to Celsius conversion using physical constant 273.15
   - Area-weighted global means using cosine of latitude
   - Temporal averaging over user-specified year ranges
+  - NetCDF files now stored in repository (small file sizes, updated .gitignore)
 
 #### Target GDP Reduction System
 - **Target Calculation Utility** (`calculate_target_gdp_reductions.py`): Standalone tool for creating spatially-explicit economic impact targets
   - JSON configuration system (`target_gdp_config_example.json`)
   - Three reduction types: constant, linear (temperature-dependent), quadratic (temperature-dependent)
-  - GDP-weighted global constraint satisfaction 
+  - GDP-weighted global constraint satisfaction using weighted least squares (OLS)
   - NetCDF output (3×lat×lon array) saved to `./data/output/`
-  - Global map visualization with red-white-blue colormap
+  - Multi-page PDF visualization: global maps + temperature-damage function plots
+  - Global map headers show GDP-weighted global means (not area-weighted)
   - Fixed color scale (-1 to +1) with actual range annotations
+  - Comprehensive constraint verification with 10+ decimal precision
 
 ### ⚠️ Known Issues
 
 #### Target GDP Reduction Algorithm
-- **Temperature dependency issue**: Linear function currently shows backwards relationship (more damage at colder temperatures)
-- **Root cause**: Constraint system mathematically correct but produces physically unrealistic temperature dependence  
-- **Status**: Requires reformulation of constraint system to ensure damage increases with temperature
-- **Mathematical details**: Extensively documented in code comments showing constraint equations and solution methods
+- **Quadratic function unrealistic values**: Quadratic reduction shows extreme negative values (>100% GDP loss) in polar regions
+- **Root cause**: Unconstrained quadratic function can produce economically meaningless results (GDP reductions >100%)
+- **Linear function issue**: Mathematical solution can show counterintuitive temperature-damage relationships in some regions
+- **Mathematical accuracy**: Constraint satisfaction is precise (10+ decimals) but economic realism needs bounds
+- **Status**: Requires reformulation with realistic bounds or alternative functional forms
+- **Documentation**: Extensively documented constraint equations and verification methods in code
 
 ### 🚧 Future Development
 
 #### Next Priority Items
-- **Fix temperature dependency**: Redesign linear/quadratic constraint systems for realistic climate damage patterns
+- **Bounded damage functions**: Implement realistic bounds for quadratic reduction (e.g., max -80% GDP loss)
+- **Alternative constraint formulations**: Explore cold-region reference points or piecewise functions
 - **Grid Cell Economic Model**: Extend TFP calculation to vectorized grid processing
 - **Climate-Integrated Forward Model**: Apply damage functions spatially across grid cells
 - **Full Pipeline Integration**: Connect target reduction tools with main economic modeling workflow
@@ -329,20 +336,27 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 ## File Structure
 ```
 coin_ssp/
-├── coin_ssp_core.py          # Main economic model functions
-├── coin_ssp_utils.py         # LOESS time series filtering utilities  
-├── main.py                   # Complete processing pipeline
+├── coin_ssp_core.py                    # Main economic model functions
+├── coin_ssp_utils.py                   # Consolidated utilities (LOESS filtering + NetCDF processing)
+├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations  
+├── test_target_gdp.py                  # Test script for target GDP reductions
+├── main.py                             # Country-level processing pipeline
+├── target_gdp_config_example.json      # Configuration for target GDP reduction calculations
 ├── data/
-│   ├── input/                # Processed country-level datasets
+│   ├── input/                          # NetCDF gridded climate/economic data + country datasets
+│   │   ├── gridRaw_tas_CanESM5_ssp585.nc      # Gridded temperature data
+│   │   ├── gridRaw_pr_CanESM5_ssp585.nc       # Gridded precipitation data
+│   │   ├── gridded_gdp_regrid_CanESM5.nc      # Gridded GDP projections
+│   │   ├── gridded_pop_regrid_CanESM5.nc      # Gridded population projections
 │   │   ├── Historical_SSP1_annual.csv
 │   │   ├── Historical_SSP2_annual.csv
 │   │   └── ...
-│   └── output/               # Timestamped model run results
-│       ├── run_20250903_143052/
+│   └── output/                         # Timestamped model run results
+│       ├── run_20250903_143052/        # Country-level results
 │       │   ├── [country]_results_20250903_143052.csv
 │       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
-│       └── run_20250903_151234/
-│           └── ...
+│       ├── target_gdp_reductions.nc    # Gridded target reduction results
+│       └── target_gdp_reductions_maps.pdf  # Global maps + function plots
 ```
 
 ## Contributing
