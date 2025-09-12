@@ -67,7 +67,11 @@ def calculate_target_reductions(config_file):
     global_temp_ref = calculate_global_mean(temp_ref, data['lat'])
     global_gdp_target = calculate_global_mean(gdp_target, data['lat'])
     
-    print(f"Global mean reference temperature: {global_temp_ref:.2f}")
+    # Calculate GDP-weighted global mean temperature for reference period
+    gdp_weighted_temp_ref = calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target
+    
+    print(f"Global mean reference temperature: {global_temp_ref:.2f}°C")
+    print(f"GDP-weighted global mean reference temperature: {gdp_weighted_temp_ref:.2f}°C")
     print(f"Global mean target GDP: {global_gdp_target:.2e}")
     
     # Calculate target reductions
@@ -332,7 +336,7 @@ def save_results_netcdf(results, output_filename):
     print(f"Results saved to {output_path}")
     return output_path
 
-def create_global_maps(results, pdf_filename):
+def create_global_maps(results, config, pdf_filename):
     """
     Create global maps of target GDP reductions with red-white-blue colormap.
     
@@ -340,6 +344,8 @@ def create_global_maps(results, pdf_filename):
     ----------
     results : dict
         Results from calculate_target_reductions()
+    config : dict
+        Configuration dictionary with target values
     pdf_filename : str
         Output PDF filename (without path)
     """
@@ -457,10 +463,19 @@ def create_global_maps(results, pdf_filename):
         ax.axvline(x=30, color='gray', linestyle='--', alpha=0.5, label='30°C reference')
         ax.axvline(x=13.5, color='orange', linestyle='--', alpha=0.5, label='13.5°C zero point')
         
-        # Mark key points
-        ax.plot(30, -0.25, 'ro', markersize=8, label='Linear: 30°C = -0.25')
-        ax.plot(30, -0.75, 'bo', markersize=8, label='Quadratic: 30°C = -0.75')
-        ax.plot(13.5, 0, 'bs', markersize=8, label='Quadratic: 13.5°C = 0')
+        # Mark key points from config
+        linear_ref_temp = config['linear_target']['reference_temperature']
+        linear_ref_value = config['linear_target']['reduction_at_reference_temp']
+        quad_ref_temp = config['quadratic_target']['reference_temperature']
+        quad_ref_value = config['quadratic_target']['reduction_at_reference_temp']
+        quad_zero_temp = config['quadratic_target']['zero_reduction_temperature']
+        
+        ax.plot(linear_ref_temp, linear_ref_value, 'ro', markersize=8, 
+                label=f'Linear: {linear_ref_temp}°C = {linear_ref_value}')
+        ax.plot(quad_ref_temp, quad_ref_value, 'bo', markersize=8, 
+                label=f'Quadratic: {quad_ref_temp}°C = {quad_ref_value}')
+        ax.plot(quad_zero_temp, 0, 'bs', markersize=8, 
+                label=f'Quadratic: {quad_zero_temp}°C = 0')
         
         # Format plot
         ax.set_xlabel('Temperature (°C)', fontsize=14)
@@ -492,7 +507,8 @@ if __name__ == "__main__":
         
     config_file = sys.argv[1]
     
-    # Calculate target reductions
+    # Load config and calculate target reductions
+    config = load_config(config_file)
     results = calculate_target_reductions(config_file)
     
     # Save results to NetCDF
@@ -501,7 +517,7 @@ if __name__ == "__main__":
     
     # Create global maps and save to PDF
     pdf_filename = "target_gdp_reductions_maps.pdf"
-    create_global_maps(results, pdf_filename)
+    create_global_maps(results, config, pdf_filename)
     
     # Print summary statistics
     print("\nSummary Statistics:")

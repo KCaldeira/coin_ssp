@@ -13,12 +13,12 @@
   "linear_target": {
     "global_mean_reduction": -0.10,
     "reference_temperature": 30.0,
-    "reduction_at_reference_temp": -0.25
+    "reduction_at_reference_temp": -0.15
   },
   "quadratic_target": {
     "global_mean_reduction": -0.10,
-    "reference_temperature": 30.0,
-    "reduction_at_reference_temp": -0.75,
+    "reference_temperature": 30.00,
+    "reduction_at_reference_temp": -0.15,
     "zero_reduction_temperature": 13.5
   }
 }
