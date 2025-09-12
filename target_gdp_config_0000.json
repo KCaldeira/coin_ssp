@@ -1,0 +1,24 @@
+{
+  "reference_period": {
+    "start_year": 2015,
+    "end_year": 2025
+  },
+  "target_period": {
+    "start_year": 2080, 
+    "end_year": 2100
+  },
+  "constant_target": {
+    "gdp_reduction": -0.10
+  },
+  "linear_target": {
+    "global_mean_reduction": -0.10,
+    "reference_temperature": 30.0,
+    "reduction_at_reference_temp": -0.15
+  },
+  "quadratic_target": {
+    "global_mean_reduction": -0.10,
+    "reference_temperature": 23.00,
+    "reduction_at_reference_temp": -0.10,
+    "zero_reduction_temperature": 13.5
+  }
+}

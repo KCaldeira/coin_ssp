@@ -448,8 +448,11 @@ def create_global_maps(results, config, pdf_filename):
         a0, a1 = global_stats['linear_coeffs']['a0'], global_stats['linear_coeffs']['a1']
         a_quad, b_quad, c_quad = global_stats['quadratic_coeffs']['a'], global_stats['quadratic_coeffs']['b'], global_stats['quadratic_coeffs']['c']
         
+        # Get constant value from config
+        constant_value = config['constant_target']['gdp_reduction']
+        
         # Calculate function values
-        constant_values = np.full_like(temp_range, -0.1)  # Constant reduction
+        constant_values = np.full_like(temp_range, constant_value)
         linear_values = a0 + a1 * temp_range
         quadratic_values = a_quad + b_quad * temp_range + c_quad * temp_range**2
         
@@ -484,11 +487,25 @@ def create_global_maps(results, config, pdf_filename):
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=12)
         
+        # Set axis limits
+        ax.set_xlim(-10, 35)
+        
         # Set y-axis limits to show the range nicely
         all_values = np.concatenate([constant_values, linear_values, quadratic_values])
         y_min, y_max = all_values.min(), all_values.max()
         y_range = y_max - y_min
         ax.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+        
+        # Add equations as text annotations
+        equation_text = (
+            f"Constant: reduction = {constant_value:.3f}\n"
+            f"Linear: reduction = {a0:.6f} + {a1:.6f} × T\n"
+            f"Quadratic: reduction = {a_quad:.6f} + {b_quad:.6f} × T + {c_quad:.9f} × T²"
+        )
+        
+        # Position the text box in the upper left corner
+        ax.text(0.02, 0.98, equation_text, transform=ax.transAxes, fontsize=11,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches='tight')
@@ -507,16 +524,24 @@ if __name__ == "__main__":
         
     config_file = sys.argv[1]
     
+    # Extract wildcard from config filename
+    import os
+    config_basename = os.path.basename(config_file)  # Remove path
+    if config_basename.startswith('target_gdp_config_') and config_basename.endswith('.json'):
+        wildcard = config_basename[18:-5]  # Remove 'target_gdp_config_' and '.json'
+    else:
+        wildcard = "default"
+    
     # Load config and calculate target reductions
     config = load_config(config_file)
     results = calculate_target_reductions(config_file)
     
-    # Save results to NetCDF
-    netcdf_filename = "target_gdp_reductions.nc"
+    # Save results to NetCDF with wildcard in filename
+    netcdf_filename = f"target_gdp_reductions_{wildcard}.nc"
     save_results_netcdf(results, netcdf_filename)
     
-    # Create global maps and save to PDF
-    pdf_filename = "target_gdp_reductions_maps.pdf"
+    # Create global maps and save to PDF with wildcard in filename
+    pdf_filename = f"target_gdp_reductions_maps_{wildcard}.pdf"
     create_global_maps(results, config, pdf_filename)
     
     # Print summary statistics
