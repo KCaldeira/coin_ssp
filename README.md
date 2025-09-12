@@ -56,19 +56,36 @@ All damage functions support both temperature and precipitation sensitivities.
 - **Quality Assurance**: Validates grid cell completeness and data continuity
 
 ### 3. Grid Cell Processing
-**Step 1: Grid Cell TFP Calculation**
+
+The following pipeline will be done for each climate model under consideration
+
+**Step 1: Develop target gdp changes using the SSP245 scenario**
+```python
+# Vectorized across all grid cells
+calculate_target_reductions(config_file)
+```
+
+**Step 2: Grid Cell TFP Calculation for each of the SSP scenarios, without consideration of climate change**
 ```python
 # Applied to each grid cell independently
 tfp_baseline, k_baseline = calculate_tfp_coin_ssp(population_grid, gdp_grid, params)
 ```
 
-**Step 2: Climate-Integrated Forward Model**  
+**Step 3: Calculate the scaling factors for each grid cell for each damage function case for SSP245**
+```python
+# Applied to each grid cell independently
+optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(country_data, params, scaling_params)
+```
+
+**Step 4: Climate-Integrated Forward Model**  
+
+Run forward case for all available SSPs for this model using the scaling results from the previous step
 ```python
 # Vectorized across all grid cells
 results = calculate_coin_ssp_forward_model(tfp_baseline, population_grid, gdp_grid, temperature_grid, params)
 ```
 
-**Step 3: NetCDF Output Generation**
+**Step 5: NetCDF Output Generation**
 ```python
 # Save gridded results to NetCDF with proper metadata
 save_gridded_results(results, output_path, grid_metadata)
