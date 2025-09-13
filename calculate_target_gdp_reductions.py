@@ -6,7 +6,10 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import os
-from coin_ssp_utils import load_gridded_data, calculate_time_means, calculate_global_mean
+from coin_ssp_utils import (
+    load_gridded_data, calculate_time_means, calculate_global_mean,
+    calculate_all_target_reductions
+)
 
 def load_config(config_file):
     """Load configuration from JSON file."""
@@ -76,185 +79,81 @@ def calculate_target_reductions(config_file):
     print(f"GDP-weighted global mean reference temperature: {gdp_weighted_temp_ref:.2f}°C")
     print(f"Global mean target GDP: {global_gdp_target:.2e}")
     
-    # Calculate target reductions
+    # Calculate target reductions using extracted functions
     print("Calculating target GDP reductions...")
     
-    # 1. Constant target
-    constant_reduction = np.full_like(temp_ref, config['constant_target']['gdp_reduction'])
+    # Prepare gridded data for the calculation functions
+    gridded_data = {
+        'temp_ref': temp_ref,
+        'gdp_target': gdp_target,
+        'lat': data['lat']
+    }
     
-    # 2. Linear target: reduction = a0 + a1 * T_ref
-    # 
-    # MATHEMATICAL BASIS:
-    # We want: reduction(T) = a0 + a1 * T  where T is in Celsius
-    # 
-    # Two constraints to solve for a0, a1:
-    # CONSTRAINT 1: Point constraint at reference temperature
-    #   reduction(T_ref_linear) = value_at_ref_linear
-    #   a0 + a1 * T_ref_linear = value_at_ref_linear
-    #
-    # CONSTRAINT 2: GDP-weighted global mean constraint
-    #   The global mean GDP after applying reductions should equal target:
-    #   ∑[w_i * gdp_i * (1 + reduction(T_i))] / ∑[w_i * gdp_i] = global_mean_linear
-    #   where w_i are area weights, gdp_i and T_i are GDP and temperature at grid cell i
-    #   
-    #   Expanding: ∑[w_i * gdp_i] + ∑[w_i * gdp_i * (a0 + a1 * T_i)] / ∑[w_i * gdp_i] = global_mean_linear
-    #   Simplifying: 1 + (a0 * ∑[w_i * gdp_i] + a1 * ∑[w_i * gdp_i * T_i]) / ∑[w_i * gdp_i] = global_mean_linear
-    #   Therefore: a0 + a1 * (∑[w_i * gdp_i * T_i] / ∑[w_i * gdp_i]) = global_mean_linear - 1
-
-    #
-    # This gives us two equations in two unknowns:
-    # Eq1: a0 + a1 * T_ref_linear = value_at_ref_linear  
-    # Eq2: a0 + a1 * gdp_weighted_temp_mean = global_mean_linear - 1
-    #
-    # Solution:
-    # a1 = (value_at_ref_linear - (global_mean_linear - 1)) / (T_ref_linear - gdp_weighted_temp_mean)
-    # a0 = value_at_ref_linear - a1 * T_ref_linear
+    # Convert old-style config to new-style target configurations
+    target_configs = [
+        {
+            'target_name': 'constant',
+            'target_type': 'constant',
+            'gdp_reduction': config['constant_target']['gdp_reduction']
+        },
+        {
+            'target_name': 'linear', 
+            'target_type': 'linear',
+            'global_mean_reduction': config['linear_target']['global_mean_reduction'],
+            'reference_temperature': config['linear_target']['reference_temperature'],
+            'reduction_at_reference_temp': config['linear_target']['reduction_at_reference_temp']
+        },
+        {
+            'target_name': 'quadratic',
+            'target_type': 'quadratic', 
+            'global_mean_reduction': config['quadratic_target']['global_mean_reduction'],
+            'reference_temperature': config['quadratic_target']['reference_temperature'],
+            'reduction_at_reference_temp': config['quadratic_target']['reduction_at_reference_temp'],
+            'zero_reduction_temperature': config['quadratic_target']['zero_reduction_temperature']
+        }
+    ]
     
-    linear_config = config['linear_target']
-    global_mean_linear = linear_config['global_mean_reduction']
-    T_ref_linear = linear_config['reference_temperature']
-    value_at_ref_linear = linear_config['reduction_at_reference_temp']
+    # Calculate all target reductions using extracted functions
+    calculation_results = calculate_all_target_reductions(target_configs, gridded_data)
     
-    # Calculate GDP-weighted global mean temperature with higher precision
-    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target)
+    # Extract arrays and print verification information (maintaining existing output format)
+    constant_reduction = calculation_results['constant']['reduction_array']
+    
+    linear_result = calculation_results['linear']
+    linear_reduction = linear_result['reduction_array']
+    linear_coeffs = linear_result['coefficients']
+    linear_verification = linear_result['constraint_verification']
     
     print(f"Linear algorithm check:")
-    print(f"  T_ref_linear: {T_ref_linear}°C")
-    print(f"  GDP-weighted temp mean: {gdp_weighted_temp_mean:.6f}°C")
-    print(f"  value_at_ref_linear: {value_at_ref_linear}")
-    print(f"  global_mean_linear: {global_mean_linear}")
-    
-    # Set up as weighted least squares regression problem
-    # We have two constraints to fit exactly:
-    # 1. Point constraint: reduction(T_ref) = value_at_ref_linear  
-    # 2. GDP-weighted constraint: weighted_mean(reduction(T)) = global_mean_linear - 1
-    
-    # Create design matrix and target values
-    # Row 1: Point constraint (give it high weight to ensure exact fit)
-    # Row 2: GDP-weighted constraint (weight by total GDP)
-    
-    T_ref_linear = np.float64(T_ref_linear)
-    value_at_ref_linear = np.float64(value_at_ref_linear)
-    global_mean_linear = np.float64(global_mean_linear)
-    
-    # Design matrix X: [1, T] for each constraint
-    X = np.array([
-        [1.0, T_ref_linear],                    # Point constraint
-        [1.0, gdp_weighted_temp_mean]           # GDP-weighted constraint
-    ], dtype=np.float64)
-    
-    # Target values y
-    y = np.array([
-        value_at_ref_linear,                    # -0.25 at 30°C
-        global_mean_linear                      # -0.10 for GDP-weighted mean
-    ], dtype=np.float64)
-    
-    # Weights w (could be equal, or emphasize point constraint)
-    w = np.array([1.0, 1.0], dtype=np.float64)
-    
-    # Solve weighted least squares: (X^T W X)^(-1) X^T W y
-    W = np.diag(w)
-    XtWX = X.T @ W @ X
-    XtWy = X.T @ W @ y
-    
-    coeffs = np.linalg.solve(XtWX, XtWy)
-    a0_linear, a1_linear = coeffs
-    
-    # Verification: Check that constraints are satisfied
-    constraint1_check = a0_linear + a1_linear * T_ref_linear
-    constraint2_check = a0_linear + a1_linear * gdp_weighted_temp_mean
+    print(f"  T_ref_linear: {target_configs[1]['reference_temperature']}°C")
+    print(f"  GDP-weighted temp mean: {linear_result['gdp_weighted_temp_mean']:.6f}°C")
+    print(f"  value_at_ref_linear: {target_configs[1]['reduction_at_reference_temp']}")
+    print(f"  global_mean_linear: {target_configs[1]['global_mean_reduction']}")
     print(f"  OLS solution verification:")
-    print(f"    At T_ref: {constraint1_check:.10f} (target: {value_at_ref_linear})")
-    print(f"    Global mean: {constraint2_check:.10f} (target: {global_mean_linear:.10f})")
-    print(f"  Linear coefficients: a0={a0_linear:.10f}, a1={a1_linear:.10f}")
+    print(f"    At T_ref: {linear_verification['point_constraint']['achieved']:.10f} (target: {linear_verification['point_constraint']['target']})")
+    print(f"    Global mean: {linear_verification['global_mean_constraint']['achieved']:.10f} (target: {linear_verification['global_mean_constraint']['target']:.10f})")
+    print(f"  Linear coefficients: a0={linear_coeffs['a0']:.10f}, a1={linear_coeffs['a1']:.10f}")
     
-    linear_reduction = a0_linear + a1_linear * temp_ref
-    
-    # 3. Quadratic target: reduction = a + b * T_ref + c * T_ref^2  
-    #
-    # MATHEMATICAL BASIS:
-    # We want: reduction(T) = a + b * T + c * T²  where T is in Celsius
-    #
-    # Three constraints to solve for a, b, c:
-    # CONSTRAINT 1: Zero point constraint
-    #   reduction(T0) = 0  where T0 = zero_reduction_temperature
-    #   a + b * T0 + c * T0² = 0
-    #
-    # CONSTRAINT 2: Point constraint at reference temperature  
-    #   reduction(T_ref_quad) = value_at_ref_quad
-    #   a + b * T_ref_quad + c * T_ref_quad² = value_at_ref_quad
-    #
-    # CONSTRAINT 3: GDP-weighted global mean constraint
-    #   The global mean GDP after applying reductions should equal target:
-    #   ∑[w_i * gdp_i * (1 + reduction(T_i))] / ∑[w_i * gdp_i] = global_mean_quad
-    #   
-    #   Following similar algebra as linear case:
-    #   1 + (a * ∑[w_i * gdp_i] + b * ∑[w_i * gdp_i * T_i] + c * ∑[w_i * gdp_i * T_i²]) / ∑[w_i * gdp_i] = global_mean_quad
-    #   Therefore: a + b * gdp_weighted_temp_mean + c * gdp_weighted_temp2_mean = global_mean_quad - 1
-    #   where gdp_weighted_temp_mean = ∑[w_i * gdp_i * T_i] / ∑[w_i * gdp_i]
-    #   and gdp_weighted_temp2_mean = ∑[w_i * gdp_i * T_i²] / ∑[w_i * gdp_i]
-    #
-    # This gives us three equations in three unknowns:
-    # Eq1: a + b * T0 + c * T0² = 0
-    # Eq2: a + b * T_ref_quad + c * T_ref_quad² = value_at_ref_quad  
-    # Eq3: a + b * gdp_weighted_temp_mean + c * gdp_weighted_temp2_mean = global_mean_quad - 1
-    #
-    # From Eq1: a = -b * T0 - c * T0²
-    # Substituting into Eq2 and Eq3:
-    # Eq2': b * (T_ref_quad - T0) + c * (T_ref_quad² - T0²) = value_at_ref_quad
-    # Eq3': b * (gdp_weighted_temp_mean - T0) + c * (gdp_weighted_temp2_mean - T0²) = global_mean_quad - 1
-    
-    quad_config = config['quadratic_target'] 
-    global_mean_quad = quad_config['global_mean_reduction']
-    T_ref_quad = quad_config['reference_temperature']
-    value_at_ref_quad = quad_config['reduction_at_reference_temp']
-    T0 = quad_config['zero_reduction_temperature']
-    
-    # Calculate GDP-weighted global mean temperature and temperature squared with higher precision
-    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, data['lat']) / global_gdp_target)
-    gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, data['lat']) / global_gdp_target)
+    quadratic_result = calculation_results['quadratic']
+    quadratic_reduction = quadratic_result['reduction_array']
+    quadratic_coeffs = quadratic_result['coefficients']
+    quadratic_verification = quadratic_result['constraint_verification']
     
     print(f"Quadratic algorithm check:")
-    print(f"  T0 (zero point): {T0}°C")
-    print(f"  T_ref_quad: {T_ref_quad}°C")
-    print(f"  GDP-weighted temp mean: {gdp_weighted_temp_mean:.6f}°C")
-    print(f"  GDP-weighted temp² mean: {gdp_weighted_temp2_mean:.6f}°C²")
-    print(f"  value_at_ref_quad: {value_at_ref_quad}")
-    print(f"  global_mean_quad: {global_mean_quad}")
-    
-    # Solve 2x2 system for b and c (after eliminating a) with higher precision
-    T0 = np.float64(T0)
-    T_ref_quad = np.float64(T_ref_quad)
-    value_at_ref_quad = np.float64(value_at_ref_quad)
-    global_mean_quad = np.float64(global_mean_quad)
-    
-    M = np.array([
-        [T_ref_quad - T0, T_ref_quad**2 - T0**2],
-        [gdp_weighted_temp_mean - T0, gdp_weighted_temp2_mean - T0**2]
-    ], dtype=np.float64)
-    rhs = np.array([
-        value_at_ref_quad,
-        global_mean_quad
-    ], dtype=np.float64)
-    
-    # Check condition number for numerical stability
-    cond = np.linalg.cond(M)
-    if cond > 1e12:
-        print(f"  Warning: Quadratic system is ill-conditioned (cond = {cond:.2e})")
-    
-    b_quad, c_quad = np.linalg.solve(M, rhs)
-    a_quad = -b_quad * T0 - c_quad * T0**2
-    
-    # Verification: Check that all three constraints are satisfied
-    constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0
-    constraint2_check = a_quad + b_quad * T_ref_quad + c_quad * T_ref_quad**2  # Should be value_at_ref_quad
-    constraint3_check = a_quad + b_quad * gdp_weighted_temp_mean + c_quad * gdp_weighted_temp2_mean  # Should be global_mean_quad
+    print(f"  T0 (zero point): {target_configs[2]['zero_reduction_temperature']}°C")
+    print(f"  T_ref_quad: {target_configs[2]['reference_temperature']}°C")
+    print(f"  GDP-weighted temp mean: {quadratic_result['gdp_weighted_temp_mean']:.6f}°C")
+    print(f"  GDP-weighted temp² mean: {quadratic_result['gdp_weighted_temp2_mean']:.6f}°C²")
+    print(f"  value_at_ref_quad: {target_configs[2]['reduction_at_reference_temp']}")
+    print(f"  global_mean_quad: {target_configs[2]['global_mean_reduction']}")
     print(f"  Constraint verification:")
-    print(f"    At T0=0: {constraint1_check:.10f} (target: 0.0)")
-    print(f"    At T_ref: {constraint2_check:.10f} (target: {value_at_ref_quad})")
-    print(f"    Global mean: {constraint3_check:.10f} (target: {global_mean_quad:.10f})")
+    print(f"    At T0=0: {quadratic_verification['zero_point_constraint']['achieved']:.10f} (target: {quadratic_verification['zero_point_constraint']['target']})")
+    print(f"    At T_ref: {quadratic_verification['reference_point_constraint']['achieved']:.10f} (target: {quadratic_verification['reference_point_constraint']['target']})")
+    print(f"    Global mean: {quadratic_verification['global_mean_constraint']['achieved']:.10f} (target: {quadratic_verification['global_mean_constraint']['target']:.10f})")
     
-    quadratic_reduction = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
+    # Extract coefficients for backward compatibility
+    a0_linear, a1_linear = linear_coeffs['a0'], linear_coeffs['a1']
+    a_quad, b_quad, c_quad = quadratic_coeffs['a'], quadratic_coeffs['b'], quadratic_coeffs['c']
     
     # Package results
     results = {
