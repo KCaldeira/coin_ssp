@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import statsmodels.api as sm
 import copy
@@ -7,6 +8,7 @@ from pathlib import Path
 import xarray as xr
 from datetime import datetime
 from typing import Dict, Any
+from coin_ssp_core import ScalingParams
 
 def apply_time_series_filter(time_series, filter_width, start_year):
     """
@@ -49,26 +51,6 @@ def apply_time_series_filter(time_series, filter_width, start_year):
             result[ti] = ts[ti] - filtered_series[ti] + filtered_at_start
 
     return result
-
-def create_scaled_params(params, scaling, scale_factor):
-    """
-    Create scaled parameters from base parameters, scaling template, and scale factor.
-    Computed once, used many times.
-    """
-    params_scaled = copy.copy(params)
-    params_scaled.k_tas1   = scale_factor * scaling.k_tas1
-    params_scaled.k_tas2   = scale_factor * scaling.k_tas2
-    params_scaled.tfp_tas1 = scale_factor * scaling.tfp_tas1
-    params_scaled.tfp_tas2 = scale_factor * scaling.tfp_tas2
-    params_scaled.y_tas1   = scale_factor * scaling.y_tas1
-    params_scaled.y_tas2   = scale_factor * scaling.y_tas2
-    params_scaled.k_pr1    = scale_factor * scaling.k_pr1
-    params_scaled.k_pr2    = scale_factor * scaling.k_pr2
-    params_scaled.tfp_pr1  = scale_factor * scaling.tfp_pr1
-    params_scaled.tfp_pr2  = scale_factor * scaling.tfp_pr2
-    params_scaled.y_pr1    = scale_factor * scaling.y_pr1
-    params_scaled.y_pr2    = scale_factor * scaling.y_pr2
-    return params_scaled
 
 def create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig):
     """Create a single page with three panels for one country and scaling set."""
@@ -123,6 +105,10 @@ def create_country_scaling_page(country, scaling_name, results, scaling_result, 
     plt.tight_layout()
     return fig
 
+def filter_scaling_params(scaling_config):
+    allowed_keys = set(ScalingParams.__dataclass_fields__.keys())
+    return {k: v for k, v in scaling_config.items() if k in allowed_keys}
+
 def create_country_pdf_books(all_results, params, output_dir, run_name, timestamp):
     """Create PDF books with one book per country, one page per scaling set."""
     output_dir = Path(output_dir)
@@ -157,16 +143,14 @@ def create_country_pdf_books(all_results, params, output_dir, run_name, timestam
 # Target GDP Utilities (moved from coin_ssp_target_gdp.py)
 # =============================================================================
 
-def load_gridded_data(model_name="CanESM5", case_name="ssp585"):
+def load_gridded_data(model_name, case_name):
     """
     Load all four NetCDF files and return as a unified dataset.
     
     Parameters
     ----------
-    model_name : str, optional
-        Climate model name (default: "CanESM5")
-    case_name : str, optional
-        Scenario case name (default: "ssp585")
+    model_name : str
+    case_name : str
     
     Returns
     -------
@@ -193,11 +177,11 @@ def load_gridded_data(model_name="CanESM5", case_name="ssp585"):
     pr = pr_ds.pr.values  # (86, 64, 128)
     
     # Load GDP data
-    gdp_ds = xr.open_dataset(f'data/input/gridded_gdp_regrid_{model_name}.nc', decode_times=False)
+    gdp_ds = xr.open_dataset(f'data/input/gridded_gdp_regrid_{model_name}_{case_name}.nc', decode_times=False)
     gdp = gdp_ds.gdp_20202100ssp5.values  # (18, 64, 128)
     
     # Load population data
-    pop_ds = xr.open_dataset(f'data/input/gridded_pop_regrid_{model_name}.nc', decode_times=False)
+    pop_ds = xr.open_dataset(f'data/input/gridded_pop_regrid_{model_name}_{case_name}.nc', decode_times=False)
     pop = pop_ds.pop_20062100ssp5.values  # (95, 64, 128)
     
     # Get coordinate arrays
@@ -673,13 +657,7 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
             print(f"  Population: {os.path.basename(pop_file)}")
             
             # Load gridded data for this SSP using existing function
-            ssp_data = load_gridded_data(
-                temp_file, precip_file, gdp_file, pop_file,
-                time_periods['reference_period']['start_year'],
-                time_periods['reference_period']['end_year'],
-                time_periods['target_period']['start_year'],
-                time_periods['target_period']['end_year']
-            )
+            ssp_data = load_gridded_data(model_name, ssp_name)
             
             # Store in organized structure
             all_data[ssp_name] = {
@@ -986,13 +964,9 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     first_ssp = tfp_results[ssp_names[0]]
     nlat, nlon, ntime = first_ssp['tfp_baseline'].shape
     
-    # Extract coordinate information if available
-    if '_coordinates' in tfp_results:
-        lat_coords = tfp_results['_coordinates']['lat']
-        lon_coords = tfp_results['_coordinates']['lon']
-    else:
-        lat_coords = np.arange(nlat)  # Fallback
-        lon_coords = np.arange(nlon)  # Fallback
+    # Create coordinate arrays that match the actual data dimensions
+    lat_coords = np.arange(nlat)  # Use actual latitude dimension
+    lon_coords = np.arange(nlon)  # Use actual longitude dimension
     
     # Create arrays for all SSPs
     tfp_all_ssps = np.full((len(ssp_names), nlat, nlon, ntime), np.nan)
@@ -1041,8 +1015,9 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
         'description': 'True for grid cells with economic activity (GDP > 0 and population > 0)'
     }
     
-    # Add global attributes
-    total_processed = sum(result['grid_cells_processed'] for result in tfp_results.values())
+    # Add global attributes  
+    total_processed = sum(result['grid_cells_processed'] for ssp_name, result in tfp_results.items() 
+                         if ssp_name != '_coordinates')
     ds.attrs = {
         'title': 'COIN-SSP Baseline TFP - Step 2 Results',
         'model_name': model_name,

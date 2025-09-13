@@ -38,7 +38,6 @@ import numpy as np
 from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
-from coin_ssp_utils import create_scaled_params
 
 @dataclass
 # parametes for the COIN-SSP model
@@ -81,6 +80,26 @@ class ScalingParams:
     y_tas2: float = 0  # quadratic temperature sensitivity for output loss
     y_pr1: float = 0  # linear precipitation sensitivity for output loss
     y_pr2: float = 0  # quadratic precipitation sensitivity for output loss
+
+def create_scaled_params(params, scaling, scale_factor):
+    """
+    Create scaled parameters from base parameters, scaling template, and scale factor.
+    Computed once, used many times.
+    """
+    params_scaled = copy.copy(params)
+    params_scaled.k_tas1   = scale_factor * scaling.k_tas1
+    params_scaled.k_tas2   = scale_factor * scaling.k_tas2
+    params_scaled.tfp_tas1 = scale_factor * scaling.tfp_tas1
+    params_scaled.tfp_tas2 = scale_factor * scaling.tfp_tas2
+    params_scaled.y_tas1   = scale_factor * scaling.y_tas1
+    params_scaled.y_tas2   = scale_factor * scaling.y_tas2
+    params_scaled.k_pr1    = scale_factor * scaling.k_pr1
+    params_scaled.k_pr2    = scale_factor * scaling.k_pr2
+    params_scaled.tfp_pr1  = scale_factor * scaling.tfp_pr1
+    params_scaled.tfp_pr2  = scale_factor * scaling.tfp_pr2
+    params_scaled.y_pr1    = scale_factor * scaling.y_pr1
+    params_scaled.y_pr2    = scale_factor * scaling.y_pr2
+    return params_scaled
 
 def calculate_tfp_coin_ssp(pop, gdp, params):
     """
@@ -259,6 +278,16 @@ def optimize_climate_response_scaling(
         )
 
         ratio = y_climate[idx] / y_weather[idx]
+        if np.isnan(ratio) or np.isinf(ratio):
+            print(f"        scale={scale:.6f}, ratio is NaN or Inf, returning large penalty")
+            print(f"        Climate y={y_climate[idx]:.6f}, Weather y={y_weather[idx]:.6f}")
+            print(f"        Climate[t-1] y={y_climate[idx-1]:.6f}, Weather[t-1] y={y_weather[idx-1]:.6f}")
+            print(f"        Climate params: k_tas1={pc.k_tas1}, k_tas2={pc.k_tas2}, tfp_tas1={pc.tfp_tas1}, tfp_tas2={pc.tfp_tas2}, y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
+            print(f"        Climate params: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
+            print(f"        Weather params: k_tas1={pc.k_tas1}, k_tas2={pc.k_tas2}, tfp_tas1={pc.tfp_tas1}, tfp_tas2={pc.tfp_tas2}, y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
+            print(f"        Weather params: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
+            print(f"        idx={idx}, year={params.year_scale}, target ratio={1.0 + params.amount_scale}")
+            return 1e6  # large penalty for invalid ratio
         target = 1.0 + params.amount_scale
         objective_value = (ratio - target) ** 2
         print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")

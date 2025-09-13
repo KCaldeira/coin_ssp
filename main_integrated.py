@@ -11,7 +11,7 @@ Processing Flow (per README.md Section 3):
 2. Calculate baseline TFP for each SSP scenario (per grid cell, no climate)
 3. Calculate scaling factors for each grid cell (per cell optimization for SSP245)
 4. Run forward model for all SSPs (using per-cell scaling factors)
-5. Generate NetCDF outputs with proper metadata
+5. Generate summary data products (global and regional aggregates)
 """
 
 import json
@@ -20,7 +20,9 @@ import sys
 import copy
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Any, Tuple
+from coin_ssp_utils import filter_scaling_params
 
 from coin_ssp_utils import (
     load_gridded_data, calculate_time_means, calculate_global_mean,
@@ -47,12 +49,13 @@ def setup_output_directory(config: Dict[str, Any]) -> str:
     """
     model_name = config['climate_model']['model_name']
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"output_integrated_{model_name}_{timestamp}"
+    base_output_dir = Path("./data/output")
+    output_dir = base_output_dir / f"output_integrated_{model_name}_{timestamp}"
     
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created output directory: {output_dir}")
     
-    return output_dir
+    return str(output_dir)
 
 
 def get_step_output_path(output_dir: str, step_num: int, model_name: str, ssp_name: str = None, 
@@ -214,13 +217,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str) 
     print(f"  GDP file: {gdp_file}")
     
     # Load the gridded data
-    data = load_gridded_data(
-        temp_file, None, gdp_file, None,  # temp, precip, gdp, pop (only need temp and gdp for Step 1)
-        time_periods['reference_period']['start_year'],
-        time_periods['reference_period']['end_year'],
-        time_periods['target_period']['start_year'],
-        time_periods['target_period']['end_year']
-    )
+    data = load_gridded_data(model_name, reference_ssp)
     
     # Calculate temporal means
     print("Calculating temporal means...")
@@ -346,9 +343,8 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
         
         # Get SSP-specific data using centralized accessor
         print(f"  Extracting gridded GDP and population data for {ssp_name}...")
-        ssp_data = get_ssp_data(all_data, ssp_name)
-        gdp_data = ssp_data['gdp']  # [lat, lon, time]
-        pop_data = ssp_data['population']  # [lat, lon, time] 
+        gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [lat, lon, time]
+        pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [lat, lon, time] 
         
         # Get dimensions
         nlat, nlon, ntime = gdp_data.shape
@@ -457,13 +453,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     # Load all climate data for reference SSP
     print(f"Loading climate data for {reference_ssp}...")
     all_data = load_all_netcdf_data(config)
-    reference_ssp_data = get_ssp_data(all_data, reference_ssp)
     
     # Extract climate and population data
-    temp_data = reference_ssp_data['temperature']  # [lat, lon, time]
-    precip_data = reference_ssp_data['precipitation']  # [lat, lon, time] 
-    pop_data = reference_ssp_data['population']  # [lat, lon, time]
-    gdp_data = reference_ssp_data['gdp']  # [lat, lon, time]
+    temp_data = get_ssp_data(all_data, reference_ssp, 'temperature')  # [lat, lon, time]
+    precip_data = get_ssp_data(all_data, reference_ssp, 'precipitation')  # [lat, lon, time] 
+    pop_data = get_ssp_data(all_data, reference_ssp, 'population')  # [lat, lon, time]
+    gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')  # [lat, lon, time]
     
     # Get baseline TFP for reference SSP
     reference_tfp = tfp_results[reference_ssp]
@@ -522,7 +517,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
             print(f"  Damage function: {scaling_name} ({damage_idx+1}/{n_damage_functions})")
             
             # Create ScalingParams for this damage function
-            scaling_params = ScalingParams(**damage_scaling)
+            scaling_config = filter_scaling_params(damage_scaling)
+            scaling_params = ScalingParams(**scaling_config)
             
             for lat_idx in range(nlat):
                 for lon_idx in range(nlon):
@@ -693,11 +689,10 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         print(f"\nProcessing SSP scenario: {ssp_name} ({i+1}/{len(forward_ssps)})")
         
         # Get SSP-specific data
-        ssp_data = get_ssp_data(all_data, ssp_name)
-        temp_data = ssp_data['temperature']  # [lat, lon, time]
-        precip_data = ssp_data['precipitation'] # [lat, lon, time]
-        pop_data = ssp_data['population']  # [lat, lon, time]
-        gdp_data = ssp_data['gdp']  # [lat, lon, time]
+        temp_data = get_ssp_data(all_data, ssp_name, 'temperature')  # [lat, lon, time]
+        precip_data = get_ssp_data(all_data, ssp_name, 'precipitation') # [lat, lon, time]
+        pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [lat, lon, time]
+        gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [lat, lon, time]
         
         # Get baseline TFP for this SSP from Step 2
         tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [lat, lon, time]
