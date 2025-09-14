@@ -365,7 +365,10 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
         for lat_idx in range(nlat):
             for lon_idx in range(nlon):
                 if valid_mask[lat_idx, lon_idx]:
-                    
+                    # Extract time series for this valid grid cell
+                    pop_timeseries = pop_data[lat_idx, lon_idx, :]
+                    gdp_timeseries = gdp_data[lat_idx, lon_idx, :]
+
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
                     
@@ -375,7 +378,10 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
                     
                     grid_cells_processed += 1
         
+        # grid_cells_processed should equal the pre-computed valid count
+        valid_count = all_data['_metadata']['valid_count']
         print(f"  Processed {grid_cells_processed} valid grid cells out of {nlat * nlon} total")
+        assert grid_cells_processed == valid_count, f"Processed {grid_cells_processed} != valid count {valid_count}"
         
         tfp_results[ssp_name] = {
             'tfp_baseline': tfp_baseline,
