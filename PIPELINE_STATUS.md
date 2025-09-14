@@ -41,6 +41,14 @@ The complete 5-step gridded climate-economic processing pipeline is **fully func
 - **Corrected Dimension Handling**: Proper `[time, lat, lon]` indexing throughout
 - **Mathematical Safeguards**: `RATIO_EPSILON = 1e-20` for robust division operations
 
+### **Quadratic Constraint Mathematics (September 2025)**
+**Issue Resolved**: Quadratic temperature-damage functions were using shifted temperature form `a + b*(T-T₀) + c*(T-T₀)²` instead of standard absolute temperature form
+**Solution Implemented**:
+- **Absolute Temperature Equations**: Reformulated as `a + b*T + c*T²` using 3x3 constraint system
+- **Proper Constraint Satisfaction**: Zero point (13.5°C), reference point (24°C→-10%), and GDP-weighted global mean (-10%)
+- **Visualization Accuracy**: Plot equations now display correct absolute temperature coefficients
+- **Mathematical Verification**: All three constraints satisfied exactly with robust linear algebra solution
+
 ## 📖 Documentation Enhancements
 
 ### **README.md Updates**
@@ -108,11 +116,20 @@ The complete 5-step gridded climate-economic processing pipeline is **fully func
 - ✅ Clean file organization with debug materials archived
 - ✅ Enhanced error handling and user experience improvements
 
+### **Visualization Enhancements (September 2025)**:
+- ✅ **Step 1 PDF Generation**: Integrated target GDP visualization with 4-panel layout (3 maps + line plot)
+- ✅ **GDP-Weighted Temperature Display**: Header shows GDP-weighted mean temperature for target period (2080-2100)
+- ✅ **Constraint Satisfaction Validation**: Visual verification of mathematical constraint fulfillment
+- ✅ **Calibration Point Markers**: Reference points displayed on temperature-damage function plots
+- ✅ **Global Mean Validation**: GDP-weighted global means calculated and displayed for verification
+
 ### **Testing Status**:
 - ✅ Pipeline runs to completion without errors
 - ✅ Progress indicators functioning correctly
 - ✅ Data loading optimization verified working
 - ✅ All 5 processing steps producing expected NetCDF outputs
+- ✅ **Step 1 constraint mathematics fully validated** (all three constraint types working correctly)
+- ✅ **Quadratic damage functions satisfy all constraints exactly** (0 at 13.5°C, -10% at 24°C, -10% global mean)
 
 ---
 

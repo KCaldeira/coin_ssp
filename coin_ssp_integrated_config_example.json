@@ -95,7 +95,7 @@
       "target_type": "linear",
       "global_mean_reduction": -0.10,
       "reference_temperature": 30.0,
-      "reduction_at_reference_temp": -0.25,
+      "reduction_at_reference_temp": -0.12,
       "description": "Linear temperature-dependent reduction, -25% at 30°C, -10% GDP-weighted global mean"
     },
     {
@@ -103,7 +103,7 @@
       "target_type": "quadratic", 
       "global_mean_reduction": -0.10,
       "reference_temperature": 30.0,
-      "reduction_at_reference_temp": -0.75,
+      "reduction_at_reference_temp": -0.15,
       "zero_reduction_temperature": 13.5,
       "max_reduction": -0.80,
       "description": "Quadratic temperature-dependent reduction with 80% maximum loss bound"

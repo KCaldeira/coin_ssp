@@ -28,7 +28,8 @@ from coin_ssp_utils import (
     load_gridded_data, calculate_time_means, calculate_global_mean,
     calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
-    apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf
+    apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
+    create_target_gdp_visualization
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
 
@@ -305,7 +306,13 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     output_path = get_step_output_path(output_dir, 1, model_name, reference_ssp, "nc")
     save_step1_results_netcdf(target_results, output_path)
-    
+
+    # Create visualization
+    print("Generating target GDP visualization...")
+    visualization_path = create_target_gdp_visualization(target_results, config, output_dir,
+                                                        model_name, reference_ssp)
+    print(f"✅ Visualization saved: {visualization_path}")
+
     print(f"\nStep 1 completed: {len(gdp_targets)} target GDP change patterns calculated")
     print("Target reductions ready for per-grid-cell scaling factor optimization")
     return target_results

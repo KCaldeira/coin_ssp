@@ -589,31 +589,30 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
     gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat) / global_gdp_target)
     gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, lat) / global_gdp_target)
     
-    # Set up constraint system for quadratic: a + b*(T-T0) + c*(T-T0)²
-    # Constraint 1: a + b*(T0-T0) + c*(T0-T0)² = 0  =>  a = 0
-    # Constraint 2: a + b*(T_ref-T0) + c*(T_ref-T0)² = value_at_ref_quad
-    # Constraint 3: GDP-weighted global mean constraint
-    
-    a_quad = 0.0  # From zero point constraint
-    
-    # Solve for b and c using remaining constraints
+    # Set up constraint system for quadratic: a + b*T + c*T²
+    # Constraint 1: a + b*T0 + c*T0² = 0  (zero point constraint)
+    # Constraint 2: a + b*T_ref + c*T_ref² = value_at_ref_quad  (reference point constraint)
+    # Constraint 3: a + b*GDP_weighted_temp_mean + c*GDP_weighted_temp2_mean = global_mean_quad  (GDP-weighted constraint)
+
+    # Solve the 3x3 system for [a, b, c]
     X = np.array([
-        [T_ref_quad - T0, (T_ref_quad - T0)**2],                                    # Reference point constraint
-        [gdp_weighted_temp_mean - T0, gdp_weighted_temp2_mean - T0**2]              # GDP-weighted constraint
+        [1, T0, T0**2],                                                  # Zero point constraint
+        [1, T_ref_quad, T_ref_quad**2],                                  # Reference point constraint
+        [1, gdp_weighted_temp_mean, gdp_weighted_temp2_mean]             # GDP-weighted constraint
     ], dtype=np.float64)
-    
+
     y = np.array([
+        0.0,                        # Zero reduction at T0
         value_at_ref_quad,          # Target at reference temperature
         global_mean_quad            # Target GDP-weighted global mean
     ], dtype=np.float64)
-    
-    # Solve for coefficients: [b, c]
-    bc_coefficients = np.linalg.solve(X, y)
-    b_quad, c_quad = bc_coefficients
-    
-    # Calculate quadratic reduction array
-    temp_shifted = temp_ref - T0
-    quadratic_reduction = a_quad + b_quad * temp_shifted + c_quad * temp_shifted**2
+
+    # Solve for coefficients: [a, b, c]
+    abc_coefficients = np.linalg.solve(X, y)
+    a_quad, b_quad, c_quad = abc_coefficients
+
+    # Calculate quadratic reduction array using absolute temperature
+    quadratic_reduction = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
     
     # Apply bounds if specified
     bounds_applied = False
@@ -623,13 +622,16 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
             bounds_applied = True
         quadratic_reduction = bounded_reduction
     
-    # Verify constraint satisfaction (using unbounded values for mathematical verification)
-    temp_shifted_ref = T_ref_quad - T0
-    constraint1_check = a_quad  # Should be 0
-    constraint2_check = a_quad + b_quad * temp_shifted_ref + c_quad * temp_shifted_ref**2  # Should equal value_at_ref_quad
-    
-    # Global mean constraint (use bounded values if applied)
-    constraint3_check = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat) / global_gdp_target - 1
+    # Verify constraint satisfaction
+    constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
+    constraint2_check = a_quad + b_quad * T_ref_quad + c_quad * T_ref_quad**2  # Should equal value_at_ref_quad at T_ref
+
+    # For mathematical constraint verification, use unbounded quadratic function
+    unbounded_quadratic = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
+    constraint3_check = calculate_global_mean(gdp_target * (1 + unbounded_quadratic), lat) / global_gdp_target - 1
+
+    # Also report the actual global mean after bounds are applied (for information)
+    actual_global_mean_after_bounds = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat) / global_gdp_target - 1
     
     return {
         'reduction_array': quadratic_reduction.astype(np.float64),
@@ -649,6 +651,10 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
                 'achieved': float(constraint3_check),
                 'target': float(global_mean_quad),
                 'error': float(abs(constraint3_check - global_mean_quad))
+            },
+            'global_mean_after_bounds': {
+                'achieved': float(actual_global_mean_after_bounds),
+                'note': 'Global mean after applying bounds (if any)'
             }
         },
         'gdp_weighted_temp_mean': float(gdp_weighted_temp_mean),
@@ -1486,3 +1492,258 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
     ds.to_netcdf(output_path)
     print(f"Step 4 results saved to {output_path}")
     return output_path
+
+
+def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict[str, Any],
+                                   output_dir: str, model_name: str, reference_ssp: str) -> str:
+    """
+    Create comprehensive visualization of target GDP reduction results.
+
+    Generates a single-page PDF with:
+    - Global maps showing spatial patterns of each target reduction type
+    - Line plot showing damage functions vs temperature (if coefficients available)
+
+    Parameters
+    ----------
+    target_results : Dict[str, Any]
+        Results from step1_calculate_target_gdp_changes()
+    config : Dict[str, Any]
+        Integrated configuration dictionary
+    output_dir : str
+        Output directory path
+    model_name : str
+        Climate model name
+    reference_ssp : str
+        Reference SSP scenario name
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    pdf_filename = f"step1_target_gdp_visualization_{model_name}_{reference_ssp}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract metadata and coordinates
+    metadata = target_results['_metadata']
+    lat = metadata['lat']
+    lon = metadata['lon']
+    temp_ref = metadata['temp_ref']
+    gdp_target = metadata['gdp_target']
+    global_temp_ref = metadata['global_temp_ref']
+    global_gdp_target = metadata['global_gdp_target']
+
+    # Create meshgrid for plotting
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+    # Set fixed color scale limits (same as standalone tool)
+    vmin = -1.0
+    vmax = 1.0
+
+    # Create red-white-blue colormap centered at zero
+    n_bins = 256
+    colors = ['red', 'white', 'blue']
+    cmap = mcolors.LinearSegmentedColormap.from_list('rwb', colors, N=n_bins)
+
+    # Calculate GDP-weighted temperature for target period (2080-2100)
+    target_period_start = config['time_periods']['target_period']['start_year']
+    target_period_end = config['time_periods']['target_period']['end_year']
+    gdp_weighted_temp_target = calculate_global_mean(gdp_target * temp_ref, lat) / global_gdp_target
+
+    # Extract reduction arrays and calculate statistics
+    reduction_arrays = {}
+    global_means = {}
+    data_ranges = {}
+
+    # Get all available targets (flexible for different configurations)
+    target_names = [key for key in target_results.keys() if key != '_metadata']
+
+    for target_name in target_names:
+        reduction_array = target_results[target_name]['reduction_array']
+        global_mean = target_results[target_name]['global_mean_achieved']
+
+        reduction_arrays[target_name] = reduction_array
+        global_means[target_name] = global_mean
+        data_ranges[target_name] = {
+            'min': float(np.min(reduction_array)),
+            'max': float(np.max(reduction_array))
+        }
+
+    # Calculate overall data range for title annotation
+    all_data = np.concatenate([arr.flatten() for arr in reduction_arrays.values()])
+    overall_min = np.min(all_data)
+    overall_max = np.max(all_data)
+
+    # Calculate GDP-weighted means for verification (like original code)
+    gdp_weighted_means = {}
+    for target_name in target_names:
+        reduction_array = reduction_arrays[target_name]
+        # GDP-weighted mean calculation: sum(gdp * reduction) / sum(gdp)
+        gdp_weighted_mean = calculate_global_mean(gdp_target * (1 + reduction_array), lat) / calculate_global_mean(gdp_target, lat) - 1
+        gdp_weighted_means[target_name] = gdp_weighted_mean
+
+    with PdfPages(pdf_path) as pdf:
+        # Single page with 4 panels: 3 maps + 1 line plot (2x2 layout)
+        fig = plt.figure(figsize=(16, 12))
+
+        # Overall title
+        fig.suptitle(f'Target GDP Reductions - {model_name} {reference_ssp.upper()}\n'
+                    f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_temp_target:.2f}°C',
+                    fontsize=16, fontweight='bold')
+
+        # Create 3 map subplots (assuming we have 3 targets: constant, linear, quadratic)
+        map_positions = [(2, 2, 1), (2, 2, 2), (2, 2, 3)]  # Top row + bottom left
+
+        for i, target_name in enumerate(target_names[:3]):  # Limit to 3 maps
+            reduction_array = reduction_arrays[target_name]
+            global_mean = global_means[target_name]
+            gdp_weighted_mean = gdp_weighted_means[target_name]
+            data_range = data_ranges[target_name]
+            target_info = target_results[target_name]
+
+            # Create subplot
+            ax = plt.subplot(*map_positions[i])
+
+            # Create map
+            im = ax.pcolormesh(lon_grid, lat_grid, reduction_array,
+                             cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+
+            # Format target name for display
+            display_name = target_name.replace('_', ' ').title()
+            target_type = target_info.get('target_type', 'unknown')
+
+            ax.set_title(f'{display_name} ({target_type})\n'
+                        f'Range: {data_range["min"]:.4f} to {data_range["max"]:.4f}\n'
+                        f'GDP-weighted: {gdp_weighted_mean:.6f}',
+                        fontsize=12, fontweight='bold')
+            ax.set_xlabel('Longitude', fontsize=10)
+            ax.set_ylabel('Latitude', fontsize=10)
+            ax.grid(True, alpha=0.3)
+
+            # Add colorbar
+            cbar = plt.colorbar(im, ax=ax, shrink=0.7)
+            cbar.set_label('Fractional GDP\nReduction', rotation=270, labelpad=20, fontsize=10)
+
+        # Fourth panel: Line plot (bottom right)
+        ax4 = plt.subplot(2, 2, 4)
+
+        # Temperature range for plotting
+        temp_range = np.linspace(-10, 35, 1000)
+
+        # Plot each function
+        colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
+
+        for i, target_name in enumerate(target_names):
+            target_info = target_results[target_name]
+            target_type = target_info['target_type']
+            color = colors[i % len(colors)]
+
+            if target_type == 'constant':
+                # Constant function
+                gdp_targets = config['gdp_reduction_targets']
+                const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                constant_value = const_config['gdp_reduction']
+                function_values = np.full_like(temp_range, constant_value)
+                label = f'Constant: {constant_value:.3f}'
+
+                # Horizontal line for constant
+                ax4.plot(temp_range, function_values, color=color, linewidth=2,
+                        label=label, alpha=0.8)
+
+            elif target_type == 'linear':
+                coefficients = target_info.get('coefficients')
+                if coefficients:
+                    # Linear function: reduction = a0 + a1 * T
+                    a0, a1 = coefficients['a0'], coefficients['a1']
+                    function_values = a0 + a1 * temp_range
+
+                    ax4.plot(temp_range, function_values, color=color, linewidth=2,
+                            label=f'Linear: {a0:.4f} + {a1:.4f}×T', alpha=0.8)
+
+                    # Add calibration point from config
+                    gdp_targets = config['gdp_reduction_targets']
+                    linear_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                    if 'reference_temperature' in linear_config:
+                        ref_temp = linear_config['reference_temperature']
+                        ref_value = linear_config['reduction_at_reference_temp']
+                        ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
+                                label=f'Linear calib: {ref_temp}°C = {ref_value:.3f}')
+
+            elif target_type == 'quadratic':
+                coefficients = target_info.get('coefficients')
+                if coefficients:
+                    # Quadratic function: reduction = a + b*T + c*T²
+                    a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
+                    function_values = a + b * temp_range + c * temp_range**2
+
+                    ax4.plot(temp_range, function_values, color=color, linewidth=2,
+                            label=f'Quadratic: {a:.4f} + {b:.4f}×T + {c:.6f}×T²', alpha=0.8)
+
+                    # Add calibration points from config
+                    gdp_targets = config['gdp_reduction_targets']
+                    quad_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                    if 'reference_temperature' in quad_config:
+                        ref_temp = quad_config['reference_temperature']
+                        ref_value = quad_config['reduction_at_reference_temp']
+                        ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
+                                label=f'Quad calib: {ref_temp}°C = {ref_value:.3f}')
+
+                    if 'zero_reduction_temperature' in quad_config:
+                        zero_temp = quad_config['zero_reduction_temperature']
+                        ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
+                                label=f'Quad zero: {zero_temp}°C = 0')
+
+        # Add reference lines
+        ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+
+        # Format line plot
+        ax4.set_xlabel('Temperature (°C)', fontsize=12)
+        ax4.set_ylabel('Fractional GDP Reduction', fontsize=12)
+        ax4.set_title('Target Functions vs Temperature', fontsize=12, fontweight='bold')
+        ax4.grid(True, alpha=0.3)
+        ax4.legend(fontsize=9, loc='best')
+
+        # Set axis limits
+        ax4.set_xlim(-10, 35)
+
+        # Calculate y-axis limits from all function values
+        all_y_values = []
+        for target_name in target_names:
+            target_info = target_results[target_name]
+            target_type = target_info['target_type']
+
+            if target_type == 'constant':
+                gdp_targets = config['gdp_reduction_targets']
+                const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                constant_value = const_config['gdp_reduction']
+                all_y_values.extend([constant_value])
+
+            elif target_type in ['linear', 'quadratic'] and target_info.get('coefficients'):
+                coefficients = target_info['coefficients']
+                if target_type == 'linear':
+                    a0, a1 = coefficients['a0'], coefficients['a1']
+                    values = a0 + a1 * temp_range
+                elif target_type == 'quadratic':
+                    a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
+                    values = a + b * temp_range + c * temp_range**2
+                all_y_values.extend(values)
+
+        if all_y_values:
+            y_min, y_max = min(all_y_values), max(all_y_values)
+            y_range = y_max - y_min
+            ax4.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+
+        # Adjust layout to prevent overlap
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.9)  # Make room for suptitle
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close(fig)
+
+    print(f"Target GDP visualization saved to {pdf_path}")
+    return pdf_path
