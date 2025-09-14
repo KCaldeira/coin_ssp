@@ -29,7 +29,7 @@ from coin_ssp_utils import (
     calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
-    create_target_gdp_visualization
+    create_target_gdp_visualization, create_baseline_tfp_visualization
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
 
@@ -378,9 +378,9 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
         print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Calculating baseline TFP for each grid cell...")
 
-        # Initialize output arrays [lat, lon, time] for results storage
-        tfp_baseline = np.full((nlat, nlon, ntime), np.nan)
-        k_baseline = np.full((nlat, nlon, ntime), np.nan)
+        # Initialize output arrays [time, lat, lon] for results storage
+        tfp_baseline = np.full((ntime, nlat, nlon), np.nan)
+        k_baseline = np.full((ntime, nlat, nlon), np.nan)
 
         # Use the global valid mask computed during data loading
         valid_mask = all_data['_metadata']['valid_mask']
@@ -398,9 +398,9 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
                     
-                    # Store results (output arrays are [lat, lon, time])
-                    tfp_baseline[lat_idx, lon_idx, :] = tfp_cell
-                    k_baseline[lat_idx, lon_idx, :] = k_cell
+                    # Store results (output arrays are [time, lat, lon])
+                    tfp_baseline[:, lat_idx, lon_idx] = tfp_cell
+                    k_baseline[:, lat_idx, lon_idx] = k_cell
                     
                     grid_cells_processed += 1
         
@@ -421,15 +421,34 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
     model_name = config['climate_model']['model_name']
     output_path = get_step_output_path(output_dir, 2, model_name, file_type="nc")
     
-    # Add coordinate information from the loaded data
+    # Add metadata for visualization (coordinates, years, and reference data for valid cell identification)
     metadata = all_data['_metadata']
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    # Use years from the reference SSP data (they should all have the same years after alignment)
+    years = all_data[reference_ssp]['gdp_years']
+
+    tfp_results['_metadata'] = {
+        'lat': metadata['lat'],
+        'lon': metadata['lon'],
+        'years': years,
+        'gdp_data': all_data[reference_ssp]['gdp'][0],  # Reference period GDP for valid cell mask
+        'pop_data': all_data[reference_ssp]['population'][0]  # Reference period population
+    }
+
+    # Keep the coordinates for NetCDF compatibility
     tfp_results['_coordinates'] = {
         'lat': metadata['lat'],
         'lon': metadata['lon']
     }
     
     save_step2_results_netcdf(tfp_results, output_path, model_name)
-    
+
+    # Generate TFP visualization
+    print("Generating baseline TFP visualization...")
+    visualization_path = create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name)
+    print(f"✅ Visualization saved: {visualization_path}")
+
     print(f"\nStep 2 completed: Baseline TFP calculated for {len(tfp_results)} SSP scenarios")
     return tfp_results
 
@@ -497,7 +516,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     # Get baseline TFP for reference SSP
     reference_tfp = tfp_results[reference_ssp]
     valid_mask = reference_tfp['valid_mask']
-    tfp_baseline = reference_tfp['tfp_baseline']  # [lat, lon, time]
+    tfp_baseline = reference_tfp['tfp_baseline']  # [time, lat, lon]
     
     # Get dimensions (temp_data is [time, lat, lon])
     ntime, nlat, nlon = temp_data.shape
@@ -571,7 +590,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
                     cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
                     cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
-                    cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx, :]  # [time] (output array is [lat, lon, time])
+                    cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
                     
                     # Get target reduction for this grid cell  
                     target_reduction = target_reduction_array[lat_idx, lon_idx]
@@ -735,7 +754,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [time, lat, lon]
 
         # Get baseline TFP for this SSP from Step 2
-        tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [lat, lon, time]
+        tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
 
         ntime = temp_data.shape[0]  # Time is first dimension
         years = np.arange(base_year, base_year + ntime)
@@ -787,7 +806,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
                         cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
                         cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
-                        cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx, :]  # [time] (output array is [lat, lon, time])
+                        cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
                         
                         # Create weather (filtered) time series
                         filter_width = 30  # years (same as country-level code)

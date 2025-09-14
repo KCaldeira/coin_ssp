@@ -613,25 +613,11 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
 
     # Calculate quadratic reduction array using absolute temperature
     quadratic_reduction = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
-    
-    # Apply bounds if specified
-    bounds_applied = False
-    if max_reduction is not None:
-        bounded_reduction = np.maximum(quadratic_reduction, max_reduction)
-        if not np.array_equal(bounded_reduction, quadratic_reduction):
-            bounds_applied = True
-        quadratic_reduction = bounded_reduction
-    
+
     # Verify constraint satisfaction
     constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
     constraint2_check = a_quad + b_quad * T_ref_quad + c_quad * T_ref_quad**2  # Should equal value_at_ref_quad at T_ref
-
-    # For mathematical constraint verification, use unbounded quadratic function
-    unbounded_quadratic = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
-    constraint3_check = calculate_global_mean(gdp_target * (1 + unbounded_quadratic), lat) / global_gdp_target - 1
-
-    # Also report the actual global mean after bounds are applied (for information)
-    actual_global_mean_after_bounds = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat) / global_gdp_target - 1
+    constraint3_check = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat) / global_gdp_target - 1
     
     return {
         'reduction_array': quadratic_reduction.astype(np.float64),
@@ -651,16 +637,10 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
                 'achieved': float(constraint3_check),
                 'target': float(global_mean_quad),
                 'error': float(abs(constraint3_check - global_mean_quad))
-            },
-            'global_mean_after_bounds': {
-                'achieved': float(actual_global_mean_after_bounds),
-                'note': 'Global mean after applying bounds (if any)'
             }
         },
         'gdp_weighted_temp_mean': float(gdp_weighted_temp_mean),
-        'gdp_weighted_temp2_mean': float(gdp_weighted_temp2_mean),
-        'bounds_applied': bounds_applied,
-        'max_reduction_bound': max_reduction
+        'gdp_weighted_temp2_mean': float(gdp_weighted_temp2_mean)
     }
 
 
@@ -1164,39 +1144,39 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # Get SSP names and dimensions from first result
-    ssp_names = [ssp for ssp in tfp_results.keys() if ssp != '_coordinates']
+    ssp_names = [ssp for ssp in tfp_results.keys() if ssp not in ['_coordinates', '_metadata']]
     first_ssp = tfp_results[ssp_names[0]]
-    nlat, nlon, ntime = first_ssp['tfp_baseline'].shape
+    ntime, nlat, nlon = first_ssp['tfp_baseline'].shape  # [time, lat, lon] convention
     
     # Create coordinate arrays that match the actual data dimensions
     lat_coords = np.arange(nlat)  # Use actual latitude dimension
     lon_coords = np.arange(nlon)  # Use actual longitude dimension
     
-    # Create arrays for all SSPs
-    tfp_all_ssps = np.full((len(ssp_names), nlat, nlon, ntime), np.nan)
-    k_all_ssps = np.full((len(ssp_names), nlat, nlon, ntime), np.nan)
+    # Create arrays for all SSPs [ssp, time, lat, lon]
+    tfp_all_ssps = np.full((len(ssp_names), ntime, nlat, nlon), np.nan)
+    k_all_ssps = np.full((len(ssp_names), ntime, nlat, nlon), np.nan)
     valid_masks = np.full((len(ssp_names), nlat, nlon), False)
-    
+
     for i, ssp_name in enumerate(ssp_names):
-        tfp_all_ssps[i] = tfp_results[ssp_name]['tfp_baseline']
-        k_all_ssps[i] = tfp_results[ssp_name]['k_baseline']
+        tfp_all_ssps[i] = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
+        k_all_ssps[i] = tfp_results[ssp_name]['k_baseline']      # [time, lat, lon]
         valid_masks[i] = tfp_results[ssp_name]['valid_mask']
     
     # Create coordinate arrays (assuming annual time steps starting from year 0)
     time_coords = np.arange(ntime)
     
-    # Create xarray dataset
+    # Create xarray dataset with [time, lat, lon] convention
     ds = xr.Dataset(
         {
-            'tfp_baseline': (['ssp', 'lat', 'lon', 'time'], tfp_all_ssps),
-            'k_baseline': (['ssp', 'lat', 'lon', 'time'], k_all_ssps),
+            'tfp_baseline': (['ssp', 'time', 'lat', 'lon'], tfp_all_ssps),
+            'k_baseline': (['ssp', 'time', 'lat', 'lon'], k_all_ssps),
             'valid_mask': (['ssp', 'lat', 'lon'], valid_masks)
         },
         coords={
             'ssp': ssp_names,
+            'time': time_coords,
             'lat': lat_coords,
-            'lon': lon_coords,
-            'time': time_coords
+            'lon': lon_coords
         }
     )
     
@@ -1219,9 +1199,9 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
         'description': 'True for grid cells with economic activity (GDP > 0 and population > 0)'
     }
     
-    # Add global attributes  
-    total_processed = sum(result['grid_cells_processed'] for ssp_name, result in tfp_results.items() 
-                         if ssp_name != '_coordinates')
+    # Add global attributes
+    total_processed = sum(result['grid_cells_processed'] for ssp_name, result in tfp_results.items()
+                         if ssp_name not in ['_coordinates', '_metadata'])
     ds.attrs = {
         'title': 'COIN-SSP Baseline TFP - Step 2 Results',
         'model_name': model_name,
@@ -1746,4 +1726,208 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         plt.close(fig)
 
     print(f"Target GDP visualization saved to {pdf_path}")
+    return pdf_path
+
+
+def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name):
+    """
+    Create comprehensive PDF visualization for Step 2 baseline TFP results.
+
+    Generates a 3-panel visualization:
+    1. Map of mean TFP for reference period (2015-2025)
+    2. Map of mean TFP for target period (2080-2100)
+    3. Time series percentile plot (min, 10%, 25%, 50%, 75%, 90%, max)
+
+    Parameters
+    ----------
+    tfp_results : dict
+        Results from Step 2 baseline TFP calculation containing:
+        - '_metadata': Coordinate and data information
+        - SSP scenarios with TFP time series data
+    config : dict
+        Configuration dictionary with time periods and SSP information
+    output_dir : str
+        Directory for output files
+    model_name : str
+        Climate model name for labeling
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    pdf_filename = f"step2_baseline_tfp_visualization_{model_name}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract metadata and coordinates
+    metadata = tfp_results['_metadata']
+    lat = metadata['lat']
+    lon = metadata['lon']
+    years = metadata['years']
+
+    # Get time period information
+    ref_start = config['time_periods']['reference_period']['start_year']
+    ref_end = config['time_periods']['reference_period']['end_year']
+    target_start = config['time_periods']['target_period']['start_year']
+    target_end = config['time_periods']['target_period']['end_year']
+
+    # Create meshgrid for plotting
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+    # Get forward simulation SSPs and use first one for visualization
+    forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
+    viz_ssp = forward_ssps[0]  # Use first SSP for maps
+
+    # Extract TFP data for visualization SSP
+    tfp_timeseries = tfp_results[viz_ssp]['tfp_baseline']  # Shape: [time, lat, lon]
+
+    # Find time indices for reference and target periods
+    ref_mask = (years >= ref_start) & (years <= ref_end)
+    target_mask = (years >= target_start) & (years <= target_end)
+
+    # Calculate period means (axis=0 for time dimension in [time, lat, lon])
+    tfp_ref_mean = np.mean(tfp_timeseries[ref_mask], axis=0)  # [lat, lon]
+    tfp_target_mean = np.mean(tfp_timeseries[target_mask], axis=0)  # [lat, lon]
+
+    # Get valid grid cell mask (same logic as target GDP - nonzero GDP and population)
+    # We'll need GDP data to determine valid cells
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    if 'gdp_data' in metadata and 'pop_data' in metadata:
+        gdp_ref = metadata['gdp_data']
+        pop_ref = metadata['pop_data']
+        valid_mask = (gdp_ref > 0) & (pop_ref > 0)
+        print(f"Using GDP/population data for valid mask: {np.sum(valid_mask)} valid cells")
+    else:
+        # Fallback: use TFP values themselves to identify valid cells
+        valid_mask = (tfp_ref_mean > 0) & np.isfinite(tfp_ref_mean)
+        print(f"Using TFP data for valid mask: {np.sum(valid_mask)} valid cells")
+
+        # If no valid cells found with TFP, try using any finite TFP values
+        if np.sum(valid_mask) == 0:
+            valid_mask = np.isfinite(tfp_ref_mean)
+            print(f"Extended to finite TFP values: {np.sum(valid_mask)} valid cells")
+
+            # Last resort: use a few sample cells for visualization
+            if np.sum(valid_mask) == 0:
+                print("WARNING: No valid cells found - using sample cells for visualization")
+                valid_mask = np.zeros_like(tfp_ref_mean, dtype=bool)
+                # Set a few cells as valid for basic visualization
+                valid_mask[32, 64] = True  # Single test cell
+                valid_mask[16, 32] = True  # Another test cell
+
+    # Calculate percentiles across valid grid cells for time series
+    percentiles = [0, 10, 25, 50, 75, 90, 100]  # min, 10%, 25%, 50%, 75%, 90%, max
+    percentile_labels = ['Min', '10%', '25%', 'Median', '75%', '90%', 'Max']
+    percentile_colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple']
+
+    # Extract time series for valid cells only
+    tfp_percentiles = np.zeros((len(percentiles), len(years)))
+
+    for t_idx, year in enumerate(years):
+        tfp_slice = tfp_timeseries[t_idx]  # [lat, lon]
+        valid_values = tfp_slice[valid_mask]
+
+        if len(valid_values) > 0:
+            tfp_percentiles[:, t_idx] = np.percentile(valid_values, percentiles)
+        else:
+            tfp_percentiles[:, t_idx] = np.nan
+
+    # Determine color scale for maps
+    all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
+    vmin = np.percentile(all_tfp_values, 5)
+    vmax = np.percentile(all_tfp_values, 95)
+
+    # Create colormap for TFP (use viridis - good for scientific data)
+    cmap = plt.cm.viridis
+
+    # Create PDF with 3-panel layout
+    with PdfPages(pdf_path) as pdf:
+        fig = plt.figure(figsize=(18, 10))
+
+        # Overall title
+        fig.suptitle(f'Baseline Total Factor Productivity - {model_name} {viz_ssp.upper()}\n'
+                    f'Reference Period: {ref_start}-{ref_end} | Target Period: {target_start}-{target_end}',
+                    fontsize=16, fontweight='bold')
+
+        # Panel 1: Reference period mean TFP map
+        ax1 = plt.subplot(2, 3, (1, 2))  # Top left, spans 2 columns
+        im1 = ax1.pcolormesh(lon_grid, lat_grid, tfp_ref_mean,
+                            cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+        ax1.set_title(f'Mean TFP: Reference Period ({ref_start}-{ref_end})',
+                     fontsize=14, fontweight='bold')
+        ax1.set_xlabel('Longitude')
+        ax1.set_ylabel('Latitude')
+
+        # Add coastlines if available
+        ax1.set_xlim(lon.min(), lon.max())
+        ax1.set_ylim(lat.min(), lat.max())
+
+        # Colorbar for reference map
+        cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8, aspect=20)
+        cbar1.set_label('TFP', rotation=270, labelpad=15)
+
+        # Panel 2: Target period mean TFP map
+        ax2 = plt.subplot(2, 3, (4, 5))  # Bottom left, spans 2 columns
+        im2 = ax2.pcolormesh(lon_grid, lat_grid, tfp_target_mean,
+                            cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+        ax2.set_title(f'Mean TFP: Target Period ({target_start}-{target_end})',
+                     fontsize=14, fontweight='bold')
+        ax2.set_xlabel('Longitude')
+        ax2.set_ylabel('Latitude')
+
+        ax2.set_xlim(lon.min(), lon.max())
+        ax2.set_ylim(lat.min(), lat.max())
+
+        # Colorbar for target map
+        cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8, aspect=20)
+        cbar2.set_label('TFP', rotation=270, labelpad=15)
+
+        # Panel 3: Time series percentiles
+        ax3 = plt.subplot(1, 3, 3)  # Right side, full height
+
+        for i, (percentile, label, color) in enumerate(zip(percentiles, percentile_labels, percentile_colors)):
+            ax3.plot(years, tfp_percentiles[i], color=color, linewidth=2,
+                    label=label, alpha=0.8)
+
+        ax3.set_xlabel('Year', fontsize=12)
+        ax3.set_ylabel('Total Factor Productivity', fontsize=12)
+        ax3.set_title('TFP Percentiles Across Valid Grid Cells', fontsize=14, fontweight='bold')
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(fontsize=10, loc='best')
+
+        # Add reference lines for time periods
+        ax3.axvspan(ref_start, ref_end, alpha=0.2, color='blue', label='Reference Period')
+        ax3.axvspan(target_start, target_end, alpha=0.2, color='red', label='Target Period')
+
+        # Set reasonable axis limits
+        ax3.set_xlim(years.min(), years.max())
+
+        # Handle case where all percentiles are NaN
+        if np.all(np.isnan(tfp_percentiles)):
+            print("WARNING: All TFP percentile values are NaN - using default y-axis limits")
+            ax3.set_ylim(0, 1)
+        else:
+            tfp_min = np.nanmin(tfp_percentiles)
+            tfp_max = np.nanmax(tfp_percentiles)
+            if np.isfinite(tfp_min) and np.isfinite(tfp_max) and tfp_min != tfp_max:
+                tfp_range = tfp_max - tfp_min
+                ax3.set_ylim(tfp_min - 0.05*tfp_range, tfp_max + 0.05*tfp_range)
+            else:
+                print("WARNING: Invalid TFP range - using default y-axis limits")
+                ax3.set_ylim(0, 1)
+
+        # Adjust layout
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.9)  # Make room for suptitle
+
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close(fig)
+
+    print(f"Baseline TFP visualization saved to {pdf_path}")
     return pdf_path
