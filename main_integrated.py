@@ -173,7 +173,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     return filepath
 
 
-def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
+def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Step 1: Develop target GDP changes using reference SSP scenario (global calculation).
     
@@ -207,17 +207,30 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str) 
     print(f"Climate model: {model_name}")
     print(f"Processing {len(gdp_targets)} GDP reduction targets")
     
-    # Load gridded data for reference SSP
-    print(f"Loading gridded data for {reference_ssp}...")
-    
-    temp_file = resolve_netcdf_filepath(config, 'temperature', reference_ssp)
-    gdp_file = resolve_netcdf_filepath(config, 'gdp', reference_ssp)
-    
-    print(f"  Temperature file: {temp_file}")
-    print(f"  GDP file: {gdp_file}")
-    
-    # Load the gridded data
-    data = load_gridded_data(model_name, reference_ssp)
+    # Use pre-loaded data if provided, otherwise load fresh
+    if all_netcdf_data is not None:
+        print(f"Using pre-loaded NetCDF data for {reference_ssp}...")
+        # Convert from all_netcdf_data format to Step 1's expected format
+        data = {
+            'tas': all_netcdf_data[reference_ssp]['temperature'],
+            'gdp': all_netcdf_data[reference_ssp]['gdp'],
+            'lat': all_netcdf_data['_metadata']['lat'],
+            'lon': all_netcdf_data['_metadata']['lon'],
+            'tas_years': all_netcdf_data[reference_ssp]['temperature_years'],
+            'gdp_years': all_netcdf_data[reference_ssp]['gdp_years']
+        }
+    else:
+        # Fallback to individual loading (backward compatibility)
+        print(f"Loading gridded data for {reference_ssp}...")
+
+        temp_file = resolve_netcdf_filepath(config, 'temperature', reference_ssp)
+        gdp_file = resolve_netcdf_filepath(config, 'gdp', reference_ssp)
+
+        print(f"  Temperature file: {temp_file}")
+        print(f"  GDP file: {gdp_file}")
+
+        # Load the gridded data
+        data = load_gridded_data(model_name, reference_ssp)
     
     # Calculate temporal means
     print("Calculating temporal means...")
@@ -298,7 +311,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str) 
     return target_results
 
 
-def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
+def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Step 2: Calculate baseline TFP for each SSP scenario (per grid cell, no climate effects).
     
@@ -329,9 +342,14 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
     print(f"Climate model: {model_name}")
     print(f"Processing {len(forward_ssps)} SSP scenarios: {forward_ssps}")
     
-    # Load all NetCDF data upfront for efficiency
-    print("Loading all NetCDF data...")
-    all_data = load_all_netcdf_data(config)
+    # Use pre-loaded data if provided, otherwise load fresh
+    if all_netcdf_data is not None:
+        print("Using pre-loaded NetCDF data...")
+        all_data = all_netcdf_data
+    else:
+        # Fallback to loading fresh (backward compatibility)
+        print("Loading all NetCDF data...")
+        all_data = load_all_netcdf_data(config)
     
     # Create ModelParams object from configuration
     params = ModelParams(**model_params)
@@ -343,16 +361,17 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
         
         # Get SSP-specific data using centralized accessor
         print(f"  Extracting gridded GDP and population data for {ssp_name}...")
-        gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [lat, lon, time]
-        pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [lat, lon, time] 
+        gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [time, lat, lon]
+        pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [time, lat, lon] 
         
         # Get dimensions
-        nlat, nlon, ntime = gdp_data.shape
-        
-        print(f"  Grid dimensions: {nlat} lat x {nlon} lon x {ntime} time")
+        # GDP data is [time, lat, lon] = (137, 64, 128)
+        ntime, nlat, nlon = gdp_data.shape
+
+        print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Calculating baseline TFP for each grid cell...")
-        
-        # Initialize output arrays
+
+        # Initialize output arrays [lat, lon, time] for results storage
         tfp_baseline = np.full((nlat, nlon, ntime), np.nan)
         k_baseline = np.full((nlat, nlon, ntime), np.nan)
 
@@ -365,14 +384,14 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
         for lat_idx in range(nlat):
             for lon_idx in range(nlon):
                 if valid_mask[lat_idx, lon_idx]:
-                    # Extract time series for this valid grid cell
-                    pop_timeseries = pop_data[lat_idx, lon_idx, :]
-                    gdp_timeseries = gdp_data[lat_idx, lon_idx, :]
+                    # Extract time series for this valid grid cell (data is [time, lat, lon])
+                    pop_timeseries = pop_data[:, lat_idx, lon_idx]
+                    gdp_timeseries = gdp_data[:, lat_idx, lon_idx]
 
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
                     
-                    # Store results
+                    # Store results (output arrays are [lat, lon, time])
                     tfp_baseline[lat_idx, lon_idx, :] = tfp_cell
                     k_baseline[lat_idx, lon_idx, :] = k_cell
                     
@@ -408,8 +427,9 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
     return tfp_results
 
 
-def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_results: Dict[str, Any], 
-                                           tfp_results: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
+def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_results: Dict[str, Any],
+                                           tfp_results: Dict[str, Any], output_dir: str,
+                                           all_netcdf_data: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Step 3: Calculate scaling factors for each grid cell (per-cell optimization for SSP245).
     
@@ -452,9 +472,14 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print(f"GDP reduction targets: {n_gdp_targets}")
     print(f"Total combinations per grid cell: {total_combinations}")
     
-    # Load all climate data for reference SSP
-    print(f"Loading climate data for {reference_ssp}...")
-    all_data = load_all_netcdf_data(config)
+    # Use pre-loaded data if provided, otherwise load fresh
+    if all_netcdf_data is not None:
+        print(f"Using pre-loaded NetCDF data for {reference_ssp}...")
+        all_data = all_netcdf_data
+    else:
+        # Fallback to loading fresh (backward compatibility)
+        print(f"Loading climate data for {reference_ssp}...")
+        all_data = load_all_netcdf_data(config)
     
     # Extract climate and population data
     temp_data = get_ssp_data(all_data, reference_ssp, 'temperature')  # [lat, lon, time]
@@ -467,8 +492,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     valid_mask = reference_tfp['valid_mask']
     tfp_baseline = reference_tfp['tfp_baseline']  # [lat, lon, time]
     
-    # Get dimensions
-    nlat, nlon, ntime = temp_data.shape
+    # Get dimensions (temp_data is [time, lat, lon])
+    ntime, nlat, nlon = temp_data.shape
     
     # Initialize scaling factor arrays 
     scaling_factors = np.full((nlat, nlon, n_damage_functions, n_gdp_targets), np.nan)
@@ -523,6 +548,9 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
             scaling_params = ScalingParams(**scaling_config)
             
             for lat_idx in range(nlat):
+                # Progress indicator: print dot for each latitude band
+                print(".", end="", flush=True)
+
                 for lon_idx in range(nlon):
                     
                     # Check if grid cell is valid (has economic activity)
@@ -531,12 +559,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                         
                     total_grid_cells += 1
                     
-                    # Extract time series for this grid cell
-                    cell_temp = temp_data[lat_idx, lon_idx, :]  # [time]
-                    cell_precip = precip_data[lat_idx, lon_idx, :]  # [time]
-                    cell_pop = pop_data[lat_idx, lon_idx, :]  # [time]
-                    cell_gdp = gdp_data[lat_idx, lon_idx, :]  # [time]
-                    cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx, :]  # [time]
+                    # Extract time series for this grid cell (climate data is [time, lat, lon])
+                    cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
+                    cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+                    cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
+                    cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
+                    cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx, :]  # [time] (output array is [lat, lon, time])
                     
                     # Get target reduction for this grid cell  
                     target_reduction = target_reduction_array[lat_idx, lon_idx]
@@ -552,7 +580,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     params_cell.pr0 = np.mean(cell_precip[:year_diverge_loc+1])
                     params_cell.amount_scale = target_reduction
                     
-                    # Create cell data dictionary matching country_data structure
+                    # Create cell data dictionary matching gridcell_data structure
                     cell_data = {
                         'years': years,
                         'population': cell_pop,
@@ -594,7 +622,10 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     except Exception as e:
                         print(f"    Optimization failed for cell ({lat_idx}, {lon_idx}): {e}")
                         # Arrays already initialized with NaN and False, so no need to set
-    
+
+            # Newline after each damage function completes its latitude bands
+            print()
+
     print(f"\nOptimization completed:")
     print(f"  Total valid grid cells processed: {total_grid_cells}")  
     print(f"  Successful optimizations: {successful_optimizations}")
@@ -691,15 +722,15 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         print(f"\nProcessing SSP scenario: {ssp_name} ({i+1}/{len(forward_ssps)})")
         
         # Get SSP-specific data
-        temp_data = get_ssp_data(all_data, ssp_name, 'temperature')  # [lat, lon, time]
-        precip_data = get_ssp_data(all_data, ssp_name, 'precipitation') # [lat, lon, time]
-        pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [lat, lon, time]
-        gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [lat, lon, time]
-        
+        temp_data = get_ssp_data(all_data, ssp_name, 'temperature')  # [time, lat, lon]
+        precip_data = get_ssp_data(all_data, ssp_name, 'precipitation') # [time, lat, lon]
+        pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [time, lat, lon]
+        gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [time, lat, lon]
+
         # Get baseline TFP for this SSP from Step 2
         tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [lat, lon, time]
-        
-        ntime = temp_data.shape[2]
+
+        ntime = temp_data.shape[0]  # Time is first dimension
         years = np.arange(base_year, base_year + ntime)
         
         # Calculate year diverge location for weather filtering
@@ -708,7 +739,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         else:
             year_diverge_loc = np.where(years == base_params.year_diverge)[0][0]
         
-        print(f"  Grid dimensions: {nlat} lat x {nlon} lon x {ntime} time")
+        print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")
         
         # Initialize result arrays for this SSP
@@ -744,12 +775,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                             
                         total_forward_runs += 1
                         
-                        # Extract time series for this grid cell
-                        cell_temp = temp_data[lat_idx, lon_idx, :]  # [time]
-                        cell_precip = precip_data[lat_idx, lon_idx, :]  # [time]
-                        cell_pop = pop_data[lat_idx, lon_idx, :]  # [time]
-                        cell_gdp = gdp_data[lat_idx, lon_idx, :]  # [time]
-                        cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx, :]  # [time]
+                        # Extract time series for this grid cell (climate data is [time, lat, lon])
+                        cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
+                        cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+                        cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
+                        cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
+                        cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx, :]  # [time] (output array is [lat, lon, time])
                         
                         # Create weather (filtered) time series
                         filter_width = 30  # years (same as country-level code)
@@ -957,11 +988,16 @@ def run_integrated_pipeline(config_path: str) -> None:
         
         # Setup output directory
         output_dir = setup_output_directory(config)
-        
+
+        # Load all NetCDF data once for efficiency (major optimization)
+        print("Loading all NetCDF data for entire pipeline...")
+        all_netcdf_data = load_all_netcdf_data(config)
+        print("✅ All NetCDF data loaded - will be reused across all processing steps")
+
         # Execute 5-step processing flow
-        target_results = step1_calculate_target_gdp_changes(config, output_dir)
-        tfp_results = step2_calculate_baseline_tfp(config, output_dir)
-        scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir)
+        target_results = step1_calculate_target_gdp_changes(config, output_dir, all_netcdf_data)
+        tfp_results = step2_calculate_baseline_tfp(config, output_dir, all_netcdf_data)
+        scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir, all_netcdf_data)
         forward_results = step4_forward_integration_all_ssps(config, scaling_results, tfp_results, output_dir)
         step5_processing_summary(config, target_results, tfp_results, scaling_results, forward_results)
         

@@ -79,6 +79,11 @@ Keep helper functions organized in utils to maintain clean separation of concern
 
 ### NetCDF Data Handling
 - **xarray Integration**: Use xarray for elegant NetCDF operations and coordinate handling
+- **Climate Model Data Convention**: NetCDF arrays follow standard climate model dimension order `[time, lat, lon]`
+  - Time dimension first (e.g., 137 annual time steps)
+  - Latitude dimension second (e.g., 64 latitude points)
+  - Longitude dimension third (e.g., 128 longitude points)
+  - **CRITICAL**: Always use `data[time_idx, lat_idx, lon_idx]` indexing order
 - **Vectorized Operations**: Apply economic calculations across entire spatial grids simultaneously
 - **Memory Efficiency**: Process large gridded datasets using chunking and lazy evaluation where appropriate
 - **Metadata Preservation**: Maintain proper coordinate systems, units, and attributes in output files
@@ -157,6 +162,61 @@ The implementation of spatially-explicit target reduction functions revealed imp
 - **Trade-offs**: Balance mathematical tractability with economic plausibility across full spatial temperature range
 
 These lessons emphasize the importance of validating not just mathematical correctness but also physical realism and economic plausibility in climate-economic modeling algorithms.
+
+## Lessons Learned: NetCDF Data Processing and NaN Debugging
+
+### Critical Pipeline Debugging Experience (December 2024)
+The transition from CSV country-level data to NetCDF gridded data revealed important lessons about robust data processing and systematic debugging in climate-economic modeling:
+
+#### NetCDF Data Alignment Challenges
+- **Issue**: Different NetCDF files had mismatched temporal dimensions despite representing the same time periods
+- **Root Cause**: Economic data (GDP: 18 time points) vs. climate data (Temperature: 86 points) used different temporal sampling strategies
+- **Solution**: Implement centralized temporal alignment utilities rather than assuming data consistency
+- **Key Learning**: Never assume temporal consistency across NetCDF files - always validate and harmonize programmatically
+
+#### Grid Cell Validation Evolution
+- **Original Approach**: Check only first time point for valid economic data (GDP > 0, population > 0)
+- **Problem Discovered**: Cells passing initial screening had zeros embedded in middle of time series due to interpolation artifacts
+- **Enhanced Approach**: Validate all time points simultaneously with centralized `valid_mask` computation
+- **Key Learning**: Economic grid cell validation must consider complete temporal behavior, not just initial conditions
+
+#### NetCDF Dimension Convention Confusion
+- **Issue**: Code incorrectly assumed climate model data used `[lat, lon, time]` dimension ordering
+- **Reality**: Climate model convention is `[time, lat, lon]` leading to systematic indexing errors
+- **Impact**: Caused out-of-bounds errors and incorrect data extraction throughout pipeline
+- **Solution**: Standardize on climate model convention and document explicitly in codebase
+- **Key Learning**: NetCDF dimension conventions must be verified empirically, not assumed from metadata
+
+#### Division by Zero in Economic Calculations
+- **Root Cause**: Negative GDP values from climate damage get constrained to zero via `np.maximum(0, value)` operations
+- **Manifestation**: Weather scenario GDP becomes zero, causing `NaN = GDP_climate / 0` in optimization objective
+- **Mathematical Solution**: Add small epsilon (`1e-20`) to denominator: `ratio = y_climate / (y_weather + EPSILON)`
+- **Design Decision**: Module-level constant for maintainability rather than hard-coded values
+- **Key Learning**: Economic constraints can create division-by-zero scenarios that require mathematical safeguards
+
+#### Systematic Debugging Methodology
+- **Comprehensive Diagnostic Output**: When NaN detected, print complete data context including:
+  - Full gridcell data arrays with statistics (range, zeros, target year values)
+  - All model parameters and scaled climate parameters
+  - Time series context around problematic calculations
+- **Fail-Fast Philosophy**: Terminate execution immediately with RuntimeError rather than continuing with corrupted results
+- **Progressive Debugging**: Create targeted debug scripts for specific issues (`debug_netcdf_time.py`, `debug_gdp_interpolation.py`)
+- **Key Learning**: Invest in comprehensive debugging infrastructure - the time saved during iterative debugging pays for initial setup cost
+
+#### Code Quality and User Experience
+- **Variable Naming**: Rename `country_data` → `gridcell_data` for consistency with spatial processing context
+- **Progress Indicators**: Add visual feedback (dots per latitude band) during long-running optimization steps
+- **Output Management**: Balance diagnostic detail with console noise - comment out routine optimization output but preserve error diagnostics
+- **Key Learning**: Code clarity and user feedback become critical as processing scales to larger spatial grids
+
+#### NetCDF Processing Best Practices Established
+- **Temporal Alignment**: Always use `extract_year_coordinate()` and `interpolate_to_annual_grid()` utilities for consistency
+- **Dimension Handling**: Explicitly validate shape assumptions with `ntime, nlat, nlon = data.shape`
+- **Array Indexing**: Use climate model convention: `data[:, lat_idx, lon_idx]` for time series extraction
+- **Grid Cell Validation**: Apply centralized `valid_mask` computed once and reused across all processing steps
+- **Error Prevention**: Use `RATIO_EPSILON` constant for robust division operations in economic calculations
+
+These lessons demonstrate that transitioning from well-behaved CSV data to complex multi-dimensional NetCDF data requires systematic validation, robust error handling, and comprehensive debugging infrastructure. The investment in proper data processing utilities pays dividends in pipeline reliability and maintainability.
 
 ## Current Implementation Status: Integrated Processing Pipeline
 

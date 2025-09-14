@@ -39,6 +39,9 @@ from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
 
+# Small epsilon to prevent division by zero in ratio calculations
+RATIO_EPSILON = 1e-20
+
 @dataclass
 # parametes for the COIN-SSP model
 class ModelParams:
@@ -239,7 +242,7 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
 
 def optimize_climate_response_scaling(
-        country_data, params: ModelParams, scaling: ScalingParams,
+        gridcell_data, params: ModelParams, scaling: ScalingParams,
         x0: float = -0.001,  # starting guess for the scale
         bounds: tuple = (-0.1, 0.1),  # keeping current bounds as default
         maxiter: int = 200,
@@ -253,7 +256,7 @@ def optimize_climate_response_scaling(
     x0 = float(np.clip(x0, lo, hi))
 
     # Precompute target year index once
-    idx = np.where(country_data['years'] == params.year_scale)[0]
+    idx = np.where(gridcell_data['years'] == params.year_scale)[0]
     if idx.size == 0:
         raise ValueError(f"Year {params.year_scale} not found in years array")
     idx = int(idx[0])
@@ -267,30 +270,60 @@ def optimize_climate_response_scaling(
 
         # Climate run
         y_climate, *_ = calculate_coin_ssp_forward_model(
-            country_data['tfp_baseline'], country_data['population'], 
-            country_data['tas'], country_data['pr'], pc
+            gridcell_data['tfp_baseline'], gridcell_data['population'],
+            gridcell_data['tas'], gridcell_data['pr'], pc
         )
 
         # Weather (baseline) run
         y_weather, *_ = calculate_coin_ssp_forward_model(
-            country_data['tfp_baseline'], country_data['population'], 
-            country_data['tas_weather'], country_data['pr_weather'], pc
+            gridcell_data['tfp_baseline'], gridcell_data['population'],
+            gridcell_data['tas_weather'], gridcell_data['pr_weather'], pc
         )
 
-        ratio = y_climate[idx] / y_weather[idx]
+        ratio = y_climate[idx] / (y_weather[idx] + RATIO_EPSILON)
         if np.isnan(ratio) or np.isinf(ratio):
-            print(f"        scale={scale:.6f}, ratio is NaN or Inf, returning large penalty")
-            print(f"        Climate y={y_climate[idx]:.6f}, Weather y={y_weather[idx]:.6f}")
-            print(f"        Climate[t-1] y={y_climate[idx-1]:.6f}, Weather[t-1] y={y_weather[idx-1]:.6f}")
-            print(f"        Climate params: k_tas1={pc.k_tas1}, k_tas2={pc.k_tas2}, tfp_tas1={pc.tfp_tas1}, tfp_tas2={pc.tfp_tas2}, y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
-            print(f"        Climate params: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
-            print(f"        Weather params: k_tas1={pc.k_tas1}, k_tas2={pc.k_tas2}, tfp_tas1={pc.tfp_tas1}, tfp_tas2={pc.tfp_tas2}, y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
-            print(f"        Weather params: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
-            print(f"        idx={idx}, year={params.year_scale}, target ratio={1.0 + params.amount_scale}")
-            return 1e6  # large penalty for invalid ratio
+            print(f"\n{'='*80}")
+            print(f"NaN/Inf RATIO DETECTED - STOPPING FOR DIAGNOSIS")
+            print(f"{'='*80}")
+            print(f"Problem: scale={scale:.6f}, ratio is {ratio} (NaN or Inf)")
+            print(f"Climate y={y_climate[idx]:.6f}, Weather y={y_weather[idx]:.6f}")
+            print(f"Climate[t-1] y={y_climate[idx-1]:.6f}, Weather[t-1] y={y_weather[idx-1]:.6f}")
+            print(f"Target year index: {idx}, year={params.year_scale}, target ratio={1.0 + params.amount_scale}")
+
+            print(f"\nComplete gridcell_data contents:")
+            for key, value in gridcell_data.items():
+                if isinstance(value, np.ndarray):
+                    print(f"  {key}: shape={value.shape}, dtype={value.dtype}")
+                    print(f"    range: {np.min(value):.6e} to {np.max(value):.6e}")
+                    print(f"    zeros: {np.sum(value == 0)} / {len(value)} ({100*np.sum(value == 0)/len(value):.1f}%)")
+                    if key in ['tfp_baseline', 'population', 'gdp']:
+                        print(f"    values at target year ({params.year_scale}): {value[idx]:.6e}")
+                else:
+                    print(f"  {key}: {value}")
+
+            print(f"\nModel Parameters:")
+            print(f"  ModelParams: s={params.s}, alpha={params.alpha}, delta={params.delta}")
+            print(f"  ScalingParams: amount_scale={params.amount_scale}, year_scale={params.year_scale}")
+            print(f"  Climate baseline: tas0={params.tas0:.2f}, pr0={params.pr0:.2f}")
+
+            print(f"\nScaled Climate Parameters:")
+            print(f"  Capital damage: k_tas1={pc.k_tas1}, k_tas2={pc.k_tas2}")
+            print(f"  TFP damage: tfp_tas1={pc.tfp_tas1}, tfp_tas2={pc.tfp_tas2}")
+            print(f"  GDP damage: y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
+            print(f"  Precip damage: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
+
+            print(f"\nFull time series near target year:")
+            start_idx = max(0, idx-3)
+            end_idx = min(len(y_climate), idx+4)
+            print(f"  Years {params.year_scale-3} to {params.year_scale+3}:")
+            print(f"  Climate GDP: {y_climate[start_idx:end_idx]}")
+            print(f"  Weather GDP: {y_weather[start_idx:end_idx]}")
+
+            print(f"{'='*80}")
+            raise RuntimeError(f"NaN/Inf ratio detected at scale={scale:.6f}. See debug output above for full diagnosis.")
         target = 1.0 + params.amount_scale
         objective_value = (ratio - target) ** 2
-        print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")
+        # print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")  # Commented out to reduce verbose output
         return objective_value
 
     res = minimize(

@@ -193,7 +193,7 @@ def extract_year_coordinate(dataset, coord_names=None):
 
         valid_years = time_values[valid_mask].astype(int)
         if np.sum(valid_mask) != len(time_values):
-            print(f"    Warning: Filtered out {len(time_values) - np.sum(valid_mask)} invalid time values")
+            print(f"    Warning: Filtered out {len(time_values) - np.sum(valid_mask)} time values with incomplete data")
 
         return valid_years, valid_mask
 
@@ -875,23 +875,32 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
     print("Computing global valid grid cell mask...")
 
     # Use reference SSP for validity checking
-    ref_gdp = all_data[reference_ssp]['gdp']  # [lat, lon, time]
-    ref_pop = all_data[reference_ssp]['population']  # [lat, lon, time]
+    ref_gdp = all_data[reference_ssp]['gdp']  # [time, lat, lon] (not [lat, lon, time])
+    ref_pop = all_data[reference_ssp]['population']  # [time, lat, lon]
 
-    valid_mask = np.zeros((nlat, nlon), dtype=bool)
+    # Climate model data convention: [time, lat, lon]
+    ntime_actual, nlat_actual, nlon_actual = ref_gdp.shape
+    print(f"  Actual data dimensions: {ntime_actual} time × {nlat_actual} lat × {nlon_actual} lon")
+
+    valid_mask = np.zeros((nlat_actual, nlon_actual), dtype=bool)
     valid_count = 0
 
-    for lat_idx in range(nlat):
-        for lon_idx in range(nlon):
-            gdp_timeseries = ref_gdp[lat_idx, lon_idx, :]
-            pop_timeseries = ref_pop[lat_idx, lon_idx, :]
+    for lat_idx in range(nlat_actual):
+        for lon_idx in range(nlon_actual):
+            gdp_timeseries = ref_gdp[:, lat_idx, lon_idx]  # [time] - extract all time points for this location
+            pop_timeseries = ref_pop[:, lat_idx, lon_idx]  # [time]
 
             # Grid cell is valid if GDP and population are positive at ALL time points
             if np.all(gdp_timeseries > 0) and np.all(pop_timeseries > 0):
                 valid_mask[lat_idx, lon_idx] = True
                 valid_count += 1
 
-    print(f"  Valid economic grid cells: {valid_count} / {total_grid_cells} ({100*valid_count/total_grid_cells:.1f}%)")
+    actual_total_cells = nlat_actual * nlon_actual
+    print(f"  Valid economic grid cells: {valid_count} / {actual_total_cells} ({100*valid_count/actual_total_cells:.1f}%)")
+
+    # Update metadata with correct dimensions
+    all_data['_metadata']['grid_shape'] = (nlat_actual, nlon_actual)
+    all_data['_metadata']['time_shape'] = ntime_actual
 
     # Add valid mask to metadata
     all_data['_metadata']['valid_mask'] = valid_mask
