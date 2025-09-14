@@ -140,71 +140,235 @@ def create_country_pdf_books(all_results, params, output_dir, run_name, timestam
     return pdf_files
 
 # =============================================================================
+# Temporal Alignment Utilities
+# =============================================================================
+
+def extract_year_coordinate(dataset, coord_names=None):
+    """
+    Extract actual year values from NetCDF time coordinate.
+
+    Parameters
+    ----------
+    dataset : xarray.Dataset
+        NetCDF dataset with time coordinate
+    coord_names : list, optional
+        Coordinate names to try, by default ['year', 'time', 'axis_0']
+
+    Returns
+    -------
+    tuple
+        (years, valid_mask) where years are the extracted year values
+        and valid_mask indicates which time indices are valid
+    """
+    if coord_names is None:
+        coord_names = ['year', 'time', 'axis_0']
+
+    time_coord = None
+    for coord_name in coord_names:
+        if coord_name in dataset.coords:
+            time_coord = dataset.coords[coord_name]
+            break
+
+    if time_coord is None:
+        raise ValueError(f"No time coordinate found. Tried: {coord_names}")
+
+    # Handle different time coordinate types
+    time_values = time_coord.values
+
+    # If already integers (years), return as-is
+    if np.issubdtype(time_values.dtype, np.integer):
+        return time_values.astype(int), np.ones(len(time_values), dtype=bool)
+
+    # If datetime-like objects, extract year
+    if hasattr(time_values[0], 'year'):
+        years = np.array([t.year for t in time_values])
+        return years, np.ones(len(years), dtype=bool)
+
+    # If floating point values, treat as raw years (ignore "years since" units)
+    if np.issubdtype(time_values.dtype, np.floating):
+        # Filter for reasonable year values and ignore units encoding
+        valid_mask = np.isfinite(time_values) & (time_values > 1800) & (time_values < 2200)
+        if not np.any(valid_mask):
+            raise ValueError("No valid years found in time coordinate")
+
+        valid_years = time_values[valid_mask].astype(int)
+        if np.sum(valid_mask) != len(time_values):
+            print(f"    Warning: Filtered out {len(time_values) - np.sum(valid_mask)} invalid time values")
+
+        return valid_years, valid_mask
+
+    raise ValueError(f"Cannot extract years from time coordinate with dtype {time_values.dtype}")
+
+def interpolate_to_annual_grid(original_years, data_array, target_years):
+    """
+    Linearly interpolate data to annual time grid.
+
+    Parameters
+    ----------
+    original_years : numpy.ndarray
+        Original year values (1D array)
+    data_array : numpy.ndarray
+        Data array with time as first dimension: (time, ...)
+    target_years : numpy.ndarray
+        Target annual year values (1D array)
+
+    Returns
+    -------
+    numpy.ndarray
+        Interpolated data array with shape (len(target_years), ...)
+    """
+    # If already on target grid, return as-is
+    if len(original_years) == len(target_years) and np.allclose(original_years, target_years):
+        return data_array
+
+    # Get spatial dimensions
+    spatial_shape = data_array.shape[1:]
+
+    # Flatten spatial dimensions for vectorized interpolation
+    data_flat = data_array.reshape(len(original_years), -1)
+
+    # Interpolate each spatial point
+    interpolated_flat = np.zeros((len(target_years), data_flat.shape[1]))
+
+    for i in range(data_flat.shape[1]):
+        interpolated_flat[:, i] = np.interp(target_years, original_years, data_flat[:, i])
+
+    # Reshape back to original spatial dimensions
+    return interpolated_flat.reshape((len(target_years),) + spatial_shape)
+
+# =============================================================================
 # Target GDP Utilities (moved from coin_ssp_target_gdp.py)
 # =============================================================================
 
 def load_gridded_data(model_name, case_name):
     """
-    Load all four NetCDF files and return as a unified dataset.
-    
+    Load all four NetCDF files and return as a temporally-aligned dataset.
+
+    All variables are interpolated to annual resolution and aligned to the
+    same common year range that all variables share after interpolation.
+
     Parameters
     ----------
     model_name : str
+        Climate model name
     case_name : str
-    
+        SSP scenario name
+
     Returns
     -------
     dict
-        Dictionary containing:
-        - 'tas': temperature data (axis_0, lat, lon) 
-        - 'pr': precipitation data (axis_0, lat, lon)
-        - 'gdp': GDP data (axis_0, lat, lon) 
-        - 'pop': population data (time, lat, lon)
+        Dictionary containing temporally-aligned data:
+        - 'tas': temperature data (time, lat, lon) - annual, common years
+        - 'pr': precipitation data (time, lat, lon) - annual, common years
+        - 'gdp': GDP data (time, lat, lon) - annual, common years (interpolated)
+        - 'pop': population data (time, lat, lon) - annual, common years
         - 'lat': latitude coordinates
         - 'lon': longitude coordinates
-        - 'tas_years': temperature time axis (0-85, assuming 2015-2100)
-        - 'pr_years': precipitation time axis (0-85, assuming 2015-2100) 
-        - 'gdp_years': GDP time axis (0-17, assuming 5-year intervals)
-        - 'pop_years': population time axis (years since reference)
+        - 'tas_years': temperature time axis (annual years)
+        - 'pr_years': precipitation time axis (annual years)
+        - 'gdp_years': GDP time axis (annual years, interpolated)
+        - 'pop_years': population time axis (annual years)
+        - 'common_years': final common year range for all variables
     """
-    
+    print(f"Loading and aligning NetCDF data for {model_name} {case_name}...")
+
     # Load temperature data
+    print("  Loading temperature data...")
     tas_ds = xr.open_dataset(f'data/input/gridRaw_tas_{model_name}_{case_name}.nc', decode_times=False)
-    tas = tas_ds.tas.values - 273.15  # Convert from Kelvin to Celsius
-    
-    # Load precipitation data  
+    tas_raw_all = tas_ds.tas.values - 273.15  # Convert from Kelvin to Celsius
+    tas_years_raw, tas_valid_mask = extract_year_coordinate(tas_ds)
+    tas_raw = tas_raw_all[tas_valid_mask]
+
+    # Load precipitation data
+    print("  Loading precipitation data...")
     pr_ds = xr.open_dataset(f'data/input/gridRaw_pr_{model_name}_{case_name}.nc', decode_times=False)
-    pr = pr_ds.pr.values  # (86, 64, 128)
-    
+    pr_raw_all = pr_ds.pr.values
+    pr_years_raw, pr_valid_mask = extract_year_coordinate(pr_ds)
+    pr_raw = pr_raw_all[pr_valid_mask]
+
     # Load GDP data
+    print("  Loading GDP data...")
     gdp_ds = xr.open_dataset(f'data/input/gridded_gdp_regrid_{model_name}_{case_name}.nc', decode_times=False)
-    gdp = gdp_ds.gdp_20202100ssp5.values  # (18, 64, 128)
-    
+    gdp_raw_all = gdp_ds.gdp_20202100ssp5.values
+    gdp_years_raw, gdp_valid_mask = extract_year_coordinate(gdp_ds)
+    gdp_raw = gdp_raw_all[gdp_valid_mask]
+
     # Load population data
+    print("  Loading population data...")
     pop_ds = xr.open_dataset(f'data/input/gridded_pop_regrid_{model_name}_{case_name}.nc', decode_times=False)
-    pop = pop_ds.pop_20062100ssp5.values  # (95, 64, 128)
-    
+    pop_raw_all = pop_ds.pop_20062100ssp5.values
+    pop_years_raw, pop_valid_mask = extract_year_coordinate(pop_ds)
+    pop_raw = pop_raw_all[pop_valid_mask]
+
     # Get coordinate arrays
     lat = tas_ds.lat.values
     lon = tas_ds.lon.values
-    
-    # Create year arrays (assuming standard time conventions)
-    tas_years = np.arange(2015, 2015 + len(tas_ds.axis_0))  # 2015-2100
-    pr_years = np.arange(2015, 2015 + len(pr_ds.axis_0))    # 2015-2100
-    gdp_years = np.arange(2020, 2020 + len(gdp_ds.axis_0) * 5, 5)  # 2020-2100 in 5-year steps
-    pop_years = np.arange(2006, 2006 + len(pop_ds.time))     # 2006-2100
-    
+
+    print(f"  Original time ranges:")
+    print(f"    Temperature: {tas_years_raw.min()}-{tas_years_raw.max()} ({len(tas_years_raw)} points)")
+    print(f"    Precipitation: {pr_years_raw.min()}-{pr_years_raw.max()} ({len(pr_years_raw)} points)")
+    print(f"    GDP: {gdp_years_raw.min()}-{gdp_years_raw.max()} ({len(gdp_years_raw)} points)")
+    print(f"    Population: {pop_years_raw.min()}-{pop_years_raw.max()} ({len(pop_years_raw)} points)")
+
+    # Create annual grids for each variable
+    print("  Interpolating to annual grids...")
+    tas_years_annual = np.arange(tas_years_raw.min(), tas_years_raw.max() + 1)
+    pr_years_annual = np.arange(pr_years_raw.min(), pr_years_raw.max() + 1)
+    gdp_years_annual = np.arange(gdp_years_raw.min(), gdp_years_raw.max() + 1)
+    pop_years_annual = np.arange(pop_years_raw.min(), pop_years_raw.max() + 1)
+
+    # Interpolate each variable to annual grid
+    tas_annual = interpolate_to_annual_grid(tas_years_raw, tas_raw, tas_years_annual)
+    pr_annual = interpolate_to_annual_grid(pr_years_raw, pr_raw, pr_years_annual)
+    gdp_annual = interpolate_to_annual_grid(gdp_years_raw, gdp_raw, gdp_years_annual)
+    pop_annual = interpolate_to_annual_grid(pop_years_raw, pop_raw, pop_years_annual)
+
+    # Find common year range (intersection of all ranges)
+    common_start = max(tas_years_annual.min(), pr_years_annual.min(),
+                      gdp_years_annual.min(), pop_years_annual.min())
+    common_end = min(tas_years_annual.max(), pr_years_annual.max(),
+                    gdp_years_annual.max(), pop_years_annual.max())
+    common_years = np.arange(common_start, common_end + 1)
+
+    print(f"  Common year range: {common_start}-{common_end} ({len(common_years)} years)")
+
+    # Subset all variables to common years
+    def subset_to_common_years(data, years, common_years):
+        start_idx = np.where(years == common_years[0])[0][0]
+        end_idx = np.where(years == common_years[-1])[0][0] + 1
+        return data[start_idx:end_idx], years[start_idx:end_idx]
+
+    tas_aligned, tas_years_aligned = subset_to_common_years(tas_annual, tas_years_annual, common_years)
+    pr_aligned, pr_years_aligned = subset_to_common_years(pr_annual, pr_years_annual, common_years)
+    gdp_aligned, gdp_years_aligned = subset_to_common_years(gdp_annual, gdp_years_annual, common_years)
+    pop_aligned, pop_years_aligned = subset_to_common_years(pop_annual, pop_years_annual, common_years)
+
+    # Verify alignment
+    assert np.array_equal(tas_years_aligned, common_years), "Temperature years not aligned"
+    assert np.array_equal(pr_years_aligned, common_years), "Precipitation years not aligned"
+    assert np.array_equal(gdp_years_aligned, common_years), "GDP years not aligned"
+    assert np.array_equal(pop_years_aligned, common_years), "Population years not aligned"
+
+    print(f"  ✅ All variables aligned to {len(common_years)} common years")
+
+    # Close datasets
+    tas_ds.close()
+    pr_ds.close()
+    gdp_ds.close()
+    pop_ds.close()
+
     return {
-        'tas': tas,
-        'pr': pr, 
-        'gdp': gdp,
-        'pop': pop,
+        'tas': tas_aligned,
+        'pr': pr_aligned,
+        'gdp': gdp_aligned,
+        'pop': pop_aligned,
         'lat': lat,
         'lon': lon,
-        'tas_years': tas_years,
-        'pr_years': pr_years,
-        'gdp_years': gdp_years,
-        'pop_years': pop_years
+        'tas_years': tas_years_aligned,
+        'pr_years': pr_years_aligned,
+        'gdp_years': gdp_years_aligned,
+        'pop_years': pop_years_aligned,
+        'common_years': common_years
     }
 
 def calculate_area_weights(lat):
@@ -706,7 +870,33 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
     
     print(f"  Estimated memory usage: {total_mb:.1f} MB")
     print("  ✅ All NetCDF data loaded successfully")
-    
+
+    # Create global valid mask (check all time points for economic activity)
+    print("Computing global valid grid cell mask...")
+
+    # Use reference SSP for validity checking
+    ref_gdp = all_data[reference_ssp]['gdp']  # [lat, lon, time]
+    ref_pop = all_data[reference_ssp]['population']  # [lat, lon, time]
+
+    valid_mask = np.zeros((nlat, nlon), dtype=bool)
+    valid_count = 0
+
+    for lat_idx in range(nlat):
+        for lon_idx in range(nlon):
+            gdp_timeseries = ref_gdp[lat_idx, lon_idx, :]
+            pop_timeseries = ref_pop[lat_idx, lon_idx, :]
+
+            # Grid cell is valid if GDP and population are positive at ALL time points
+            if np.all(gdp_timeseries > 0) and np.all(pop_timeseries > 0):
+                valid_mask[lat_idx, lon_idx] = True
+                valid_count += 1
+
+    print(f"  Valid economic grid cells: {valid_count} / {total_grid_cells} ({100*valid_count/total_grid_cells:.1f}%)")
+
+    # Add valid mask to metadata
+    all_data['_metadata']['valid_mask'] = valid_mask
+    all_data['_metadata']['valid_count'] = valid_count
+
     return all_data
 
 
@@ -790,10 +980,10 @@ def get_grid_metadata(all_data: Dict[str, Any]) -> Dict[str, Any]:
 def calculate_tfp_coin_ssp(pop, gdp, params):
     """
     Calculate total factor productivity time series using the Solow-Swan growth model.
-    
+
     Parameters
     ----------
-    pop : array-like  
+    pop : array-like
         Time series of population (L) in people
     gdp : array-like
         Time series of gross domestic product (Y) in $/yr
@@ -815,7 +1005,6 @@ def calculate_tfp_coin_ssp(pop, gdp, params):
     Assumes system is in steady-state at year 0 with normalized values of 1.
     Uses discrete time integration with 1-year time steps.
     """
-
     y = gdp/gdp[0] # output normalized to year 0
     l = pop/pop[0] # population normalized to year 0
     k = np.copy(y) # capital stock normalized to year 0

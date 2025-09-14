@@ -354,21 +354,17 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str) -> Dic
         
         # Initialize output arrays
         tfp_baseline = np.full((nlat, nlon, ntime), np.nan)
-        k_baseline = np.full((nlat, nlon, ntime), np.nan) 
-        valid_mask = np.zeros((nlat, nlon), dtype=bool)
+        k_baseline = np.full((nlat, nlon, ntime), np.nan)
+
+        # Use the global valid mask computed during data loading
+        valid_mask = all_data['_metadata']['valid_mask']
         
         grid_cells_processed = 0
         
-        # Process each grid cell
+        # Process each grid cell using the pre-computed valid mask
         for lat_idx in range(nlat):
             for lon_idx in range(nlon):
-                # Check if grid cell has economic activity (non-zero GDP and population in year 0)
-                if gdp_data[lat_idx, lon_idx, 0] > 0 and pop_data[lat_idx, lon_idx, 0] > 0:
-                    valid_mask[lat_idx, lon_idx] = True
-                    
-                    # Extract time series for this grid cell
-                    pop_timeseries = pop_data[lat_idx, lon_idx, :]
-                    gdp_timeseries = gdp_data[lat_idx, lon_idx, :]
+                if valid_mask[lat_idx, lon_idx]:
                     
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
