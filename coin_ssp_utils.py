@@ -1522,9 +1522,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     # Create meshgrid for plotting
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
-    # Set fixed color scale limits (same as standalone tool)
-    vmin = -1.0
-    vmax = 1.0
+    # Set fixed color scale limits
+    vmin = -0.25
+    vmax = 0.25
 
     # Create red-white-blue colormap centered at zero
     n_bins = 256
@@ -1726,6 +1726,154 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         plt.close(fig)
 
     print(f"Target GDP visualization saved to {pdf_path}")
+    return pdf_path
+
+
+def create_scaling_factors_visualization(scaling_results, config, output_dir, model_name):
+    """
+    Create comprehensive PDF visualization for Step 3 scaling factor results.
+
+    Generates a multi-panel visualization with one map per damage function × target combination.
+    For typical case: 3 damage functions × 2 targets = 6 small maps on one page.
+
+    Parameters
+    ----------
+    scaling_results : dict
+        Results from Step 3 scaling factor calculation
+    config : dict
+        Configuration dictionary
+    output_dir : str
+        Directory for output files
+    model_name : str
+        Climate model name for labeling
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    pdf_filename = f"step3_scaling_factors_visualization_{model_name}_{reference_ssp}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract data arrays and metadata
+    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, damage_func, target]
+    valid_mask = scaling_results['valid_mask']  # [lat, lon]
+    damage_function_names = scaling_results['damage_function_names']
+    target_names = scaling_results['target_names']
+
+    # Get coordinate information
+    coordinates = scaling_results['_coordinates']
+    lat = coordinates['lat']
+    lon = coordinates['lon']
+
+    # Create meshgrid for plotting
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+    # Get dimensions
+    nlat, nlon, n_damage, n_targets = scaling_factors.shape
+    total_maps = n_damage * n_targets
+
+    # Calculate subplot layout (prefer rectangular layout)
+    if total_maps <= 6:
+        ncols = 3 if total_maps > 3 else total_maps
+        nrows = (total_maps + ncols - 1) // ncols  # Ceiling division
+    else:
+        ncols = 4
+        nrows = (total_maps + ncols - 1) // ncols
+
+    # Determine color scale across all scaling factors for valid cells
+    valid_scaling_factors = []
+    for damage_idx in range(n_damage):
+        for target_idx in range(n_targets):
+            sf_map = scaling_factors[:, :, damage_idx, target_idx]
+            valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
+            if len(valid_values) > 0:
+                valid_scaling_factors.extend(valid_values)
+
+    if len(valid_scaling_factors) > 0:
+        vmin = np.percentile(valid_scaling_factors, 5)
+        vmax = np.percentile(valid_scaling_factors, 95)
+        # Ensure symmetric around zero if range includes both positive and negative
+        if vmin < 0 and vmax > 0:
+            vabs_max = max(abs(vmin), abs(vmax))
+            vmin = -vabs_max
+            vmax = vabs_max
+    else:
+        vmin, vmax = -0.01, 0.01  # Default range
+
+    # Create PDF with multi-panel layout
+    with PdfPages(pdf_path) as pdf:
+        fig = plt.figure(figsize=(15, 4 * nrows))
+
+        # Main title
+        fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp})',
+                    fontsize=16, fontweight='bold', y=0.98)
+
+        map_idx = 0
+        for damage_idx, damage_name in enumerate(damage_function_names):
+            for target_idx, target_name in enumerate(target_names):
+                map_idx += 1
+                ax = plt.subplot(nrows, ncols, map_idx)
+
+                # Extract scaling factor map for this combination
+                sf_map = scaling_factors[:, :, damage_idx, target_idx]
+
+                # Mask invalid cells and ocean
+                sf_map_masked = np.copy(sf_map)
+                sf_map_masked[~valid_mask] = np.nan
+
+                # Create map
+                im = ax.contourf(lon_grid, lat_grid, sf_map_masked,
+                               levels=20, cmap='RdBu_r', vmin=vmin, vmax=vmax, extend='both')
+
+                # Add coastlines (basic grid)
+                ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
+                          levels=[0.5], colors='black', linewidths=0.5, alpha=0.3)
+
+                # Labels and formatting
+                ax.set_title(f'{damage_name}\n{target_name}', fontsize=10, fontweight='bold')
+                ax.set_xlabel('Longitude', fontsize=9)
+                ax.set_ylabel('Latitude', fontsize=9)
+                ax.tick_params(labelsize=8)
+
+                # Set aspect ratio and limits
+                ax.set_xlim(lon.min(), lon.max())
+                ax.set_ylim(lat.min(), lat.max())
+                ax.set_aspect('equal')
+
+                # Add colorbar for each subplot
+                cbar = plt.colorbar(im, ax=ax, shrink=0.8, aspect=15)
+                cbar.set_label('Scaling Factor', rotation=270, labelpad=12, fontsize=8)
+                cbar.ax.tick_params(labelsize=7)
+
+        # Add summary statistics text box
+        if len(valid_scaling_factors) > 0:
+            stats_text = (f'Global Statistics (Valid Cells):\n'
+                         f'Range: {np.min(valid_scaling_factors):.4f} to {np.max(valid_scaling_factors):.4f}\n'
+                         f'Mean: {np.mean(valid_scaling_factors):.4f}\n'
+                         f'Std: {np.std(valid_scaling_factors):.4f}\n'
+                         f'Valid cells: {np.sum(valid_mask):,}')
+
+            fig.text(0.02, 0.02, stats_text, fontsize=9,
+                    bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8),
+                    verticalalignment='bottom')
+
+        # Adjust layout
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.92, bottom=0.15)  # Make room for title and stats
+
+        # Save page
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close()
+
+    print(f"Scaling factors visualization saved to {pdf_path}")
     return pdf_path
 
 
@@ -1967,29 +2115,25 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
                 max_tfp_series = tfp_timeseries[:, max_lat, max_lon]
 
                 # Get GDP and population data for these cells
-                # Try multiple sources for the time series data
+                # Access data directly from the current function call via load_gridded_data
                 min_pop_series = np.full(len(years), np.nan)
                 min_gdp_series = np.full(len(years), np.nan)
                 max_pop_series = np.full(len(years), np.nan)
                 max_gdp_series = np.full(len(years), np.nan)
 
-                # First try: get from original SSP data via re-loading (most reliable)
+                # Load the data directly using the same approach as the main pipeline
+                model_name = config['climate_model']['model_name']
                 try:
-                    from coin_ssp_utils import get_ssp_data
-                    ssp_data = get_ssp_data(config, reference_ssp)
-                    if 'population' in ssp_data and 'gdp' in ssp_data:
-                        min_pop_series = ssp_data['population'][:, min_lat, min_lon]
-                        max_pop_series = ssp_data['population'][:, max_lat, max_lon]
+                    # Use load_gridded_data to get the full time series data
+                    ssp_data = load_gridded_data(model_name, reference_ssp)
+                    if 'pop' in ssp_data and 'gdp' in ssp_data:
+                        min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
+                        max_pop_series = ssp_data['pop'][:, max_lat, max_lon]
                         min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
                         max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
-                except:
-                    # Second try: get from metadata if available
-                    if 'pop_timeseries' in metadata:
-                        min_pop_series = metadata['pop_timeseries'][:, min_lat, min_lon]
-                        max_pop_series = metadata['pop_timeseries'][:, max_lat, max_lon]
-                    if 'gdp_timeseries' in metadata:
-                        min_gdp_series = metadata['gdp_timeseries'][:, min_lat, min_lon]
-                        max_gdp_series = metadata['gdp_timeseries'][:, max_lat, max_lon]
+                except Exception as e:
+                    print(f"Warning: Could not load GDP/population data for CSV: {e}")
+                    # Leave as NaN arrays if loading fails
 
                 # Create DataFrame and save to CSV
                 import pandas as pd

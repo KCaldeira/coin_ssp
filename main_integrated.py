@@ -29,7 +29,7 @@ from coin_ssp_utils import (
     calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
-    create_target_gdp_visualization, create_baseline_tfp_visualization
+    create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
 
@@ -700,7 +700,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     model_name = config['climate_model']['model_name']
     output_path = get_step_output_path(output_dir, 3, model_name, reference_ssp, "nc")
     save_step3_results_netcdf(scaling_results, output_path, model_name)
-    
+
+    # Generate scaling factors visualization
+    print("Generating scaling factors visualization...")
+    visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
+    print(f"✅ Visualization saved: {visualization_path}")
+
     print(f"\nStep 3 completed: Scaling factors calculated for each grid cell")
     print(f"Total combinations processed: {total_combinations} per valid grid cell")
     return scaling_results
@@ -973,7 +978,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"\nStep 2 - Baseline TFP Calculation:")
     print(f"  ✅ Processed {len(forward_ssps)} SSP scenarios")
     for ssp_name, ssp_data in tfp_results.items():
-        if ssp_name != '_coordinates':
+        if ssp_name not in ['_coordinates', '_metadata']:
             print(f"     • {ssp_name}: {ssp_data['grid_cells_processed']} valid grid cells")
     
     # Step 3 Summary

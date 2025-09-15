@@ -55,20 +55,22 @@
 
   "damage_function_scalings": [
     {
-      "scaling_name": "capital_quadratic_optimized",
+      "scaling_name": "capital_quadratic",
       "description": "Quadratic temperature sensitivity for capital stock with optimization",
       "k_tas2": 1.0,
       "optimization_target": {
         "year": 2100,
-        "amount": -0.05
+        "amount": -0.10
       }
     },
     {
-      "scaling_name": "tfp_linear_direct", 
+      "scaling_name": "tfp_linear", 
       "description": "Linear temperature sensitivity for TFP with direct scaling",
       "tfp_tas1": 1.0,
-      "scale_factor": -0.003,
-      "optimization_target": null
+      "optimization_target": {
+	"year":2100,
+      	"amount":-0.10
+      }
     },
     {
       "scaling_name": "output_combined_optimized",
