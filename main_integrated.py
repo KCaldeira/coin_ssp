@@ -397,7 +397,34 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
 
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
-                    
+
+                    # Additional NaN check immediately after TFP calculation
+                    if np.any(np.isnan(tfp_cell)) or np.any(np.isnan(k_cell)):
+                        print(f"\n{'='*80}")
+                        print(f"NaN DETECTED AFTER TFP CALCULATION - GRID CELL DIAGNOSIS")
+                        print(f"{'='*80}")
+                        print(f"Grid cell location: lat_idx={lat_idx}, lon_idx={lon_idx}")
+                        print(f"SSP scenario: {ssp_name}")
+                        print(f"Grid cells processed so far: {grid_cells_processed}")
+
+                        print(f"INPUT TIME SERIES FOR THIS GRID CELL:")
+                        print(f"  Population: {pop_timeseries}")
+                        print(f"  GDP: {gdp_timeseries}")
+
+                        print(f"TFP CALCULATION RESULTS:")
+                        print(f"  TFP: {tfp_cell}")
+                        print(f"  Capital: {k_cell}")
+                        print(f"  TFP contains NaN: {np.any(np.isnan(tfp_cell))}")
+                        print(f"  Capital contains NaN: {np.any(np.isnan(k_cell))}")
+
+                        if np.any(np.isnan(tfp_cell)):
+                            print(f"  TFP NaN indices: {np.where(np.isnan(tfp_cell))[0].tolist()}")
+                        if np.any(np.isnan(k_cell)):
+                            print(f"  Capital NaN indices: {np.where(np.isnan(k_cell))[0].tolist()}")
+
+                        print(f"{'='*80}")
+                        raise RuntimeError(f"NaN detected in TFP results at grid cell ({lat_idx}, {lon_idx})")
+
                     # Store results (output arrays are [time, lat, lon])
                     tfp_baseline[:, lat_idx, lon_idx] = tfp_cell
                     k_baseline[:, lat_idx, lon_idx] = k_cell
@@ -419,7 +446,8 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
         
     # Write results to NetCDF file with coordinate information
     model_name = config['climate_model']['model_name']
-    output_path = get_step_output_path(output_dir, 2, model_name, file_type="nc")
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    output_path = get_step_output_path(output_dir, 2, model_name, reference_ssp, "nc")
     
     # Add metadata for visualization (coordinates, years, and reference data for valid cell identification)
     metadata = all_data['_metadata']
@@ -618,36 +646,31 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                         'tfp_baseline': cell_tfp_baseline
                     }
                     
-                    try:
-                        # Run per-grid-cell optimization
-                        optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
-                            cell_data, params_cell, scaling_params
-                        )
-                        
-                        # Store results
-                        scaling_factors[lat_idx, lon_idx, damage_idx, target_idx] = optimal_scale
-                        optimization_errors[lat_idx, lon_idx, damage_idx, target_idx] = final_error
-                        convergence_flags[lat_idx, lon_idx, damage_idx, target_idx] = True
-                        
-                        # Store scaled damage function parameters
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0] = params_scaled.k_tas1
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 1] = params_scaled.k_tas2  
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 2] = params_scaled.k_pr1
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 3] = params_scaled.k_pr2
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 4] = params_scaled.tfp_tas1
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 5] = params_scaled.tfp_tas2
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 6] = params_scaled.tfp_pr1
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 7] = params_scaled.tfp_pr2
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 8] = params_scaled.y_tas1
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 9] = params_scaled.y_tas2
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10] = params_scaled.y_pr1
-                        scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11] = params_scaled.y_pr2
-                        
-                        successful_optimizations += 1
-                        
-                    except Exception as e:
-                        print(f"    Optimization failed for cell ({lat_idx}, {lon_idx}): {e}")
-                        # Arrays already initialized with NaN and False, so no need to set
+                    # Run per-grid-cell optimization
+                    optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
+                        cell_data, params_cell, scaling_params
+                    )
+
+                    # Store results
+                    scaling_factors[lat_idx, lon_idx, damage_idx, target_idx] = optimal_scale
+                    optimization_errors[lat_idx, lon_idx, damage_idx, target_idx] = final_error
+                    convergence_flags[lat_idx, lon_idx, damage_idx, target_idx] = True
+
+                    # Store scaled damage function parameters
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0] = params_scaled.k_tas1
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 1] = params_scaled.k_tas2
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 2] = params_scaled.k_pr1
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 3] = params_scaled.k_pr2
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 4] = params_scaled.tfp_tas1
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 5] = params_scaled.tfp_tas2
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 6] = params_scaled.tfp_pr1
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 7] = params_scaled.tfp_pr2
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 8] = params_scaled.y_tas1
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 9] = params_scaled.y_tas2
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10] = params_scaled.y_pr1
+                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11] = params_scaled.y_pr2
+
+                    successful_optimizations += 1
 
             # Newline after each damage function completes its latitude bands
             print()
@@ -832,31 +855,25 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         params_scaled.y_pr1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10]
                         params_scaled.y_pr2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11]
                         
-                        try:
-                            # Run forward model with climate data
-                            y_climate, a_climate, k_climate_values, _, _, _ = calculate_coin_ssp_forward_model(
-                                cell_tfp_baseline, cell_pop, cell_temp, cell_precip, params_scaled
-                            )
-                            
-                            # Run forward model with weather data (no climate trends)
-                            y_weather, a_weather, k_weather_values, _, _, _ = calculate_coin_ssp_forward_model(
-                                cell_tfp_baseline, cell_pop, cell_temp_weather, cell_precip_weather, params_scaled
-                            )
-                            
-                            # Store results (convert normalized values back to actual units)
-                            gdp_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = y_climate * cell_gdp[0]
-                            gdp_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = y_weather * cell_gdp[0] 
-                            tfp_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = a_climate
-                            tfp_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = a_weather
-                            k_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = k_climate_values
-                            k_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = k_weather_values
-                            
-                            successful_forward_runs += 1
-                            
-                        except Exception as e:
-                            print(f"      Forward model failed for cell ({lat_idx}, {lon_idx}), "
-                                  f"damage {damage_name}, target {target_name}: {e}")
-                            # Arrays already initialized with NaN, so no need to set
+                        # Run forward model with climate data
+                        y_climate, a_climate, k_climate_values, _, _, _ = calculate_coin_ssp_forward_model(
+                            cell_tfp_baseline, cell_pop, cell_temp, cell_precip, params_scaled
+                        )
+
+                        # Run forward model with weather data (no climate trends)
+                        y_weather, a_weather, k_weather_values, _, _, _ = calculate_coin_ssp_forward_model(
+                            cell_tfp_baseline, cell_pop, cell_temp_weather, cell_precip_weather, params_scaled
+                        )
+
+                        # Store results (convert normalized values back to actual units)
+                        gdp_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = y_climate * cell_gdp[0]
+                        gdp_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = y_weather * cell_gdp[0]
+                        tfp_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = a_climate
+                        tfp_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = a_weather
+                        k_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = k_climate_values
+                        k_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = k_weather_values
+
+                        successful_forward_runs += 1
         
         print(f"  Forward model completed:")
         print(f"    Total forward runs: {total_forward_runs}")

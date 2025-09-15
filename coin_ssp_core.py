@@ -107,10 +107,10 @@ def create_scaled_params(params, scaling, scale_factor):
 def calculate_tfp_coin_ssp(pop, gdp, params):
     """
     Calculate total factor productivity time series using the Solow-Swan growth model.
-    
+
     Parameters
     ----------
-    pop : array-like  
+    pop : array-like
         Time series of population (L) in people
     gdp : array-like
         Time series of gross domestic product (Y) in $/yr
@@ -119,19 +119,23 @@ def calculate_tfp_coin_ssp(pop, gdp, params):
         - 's': savings rate (dimensionless)
         - 'alpha': elasticity of output with respect to capital (dimensionless)
         - 'delta': depreciation rate in 1/yr
-        
+
     Returns
     -------
     a : numpy.ndarray
         Total factor productivity time series, normalized to year 0 (A(t)/A(0))
     k : numpy.ndarray
         Capital stock time series, normalized to year 0 (K(t)/K(0))
-        
+
     Notes
     -----
     Assumes system is in steady-state at year 0 with normalized values of 1.
     Uses discrete time integration with 1-year time steps.
     """
+
+    # Convert to numpy arrays for consistent handling
+    pop = np.array(pop)
+    gdp = np.array(gdp)
 
     y = gdp/gdp[0] # output normalized to year 0
     l = pop/pop[0] # population normalized to year 0
@@ -160,6 +164,49 @@ def calculate_tfp_coin_ssp(pop, gdp, params):
         k[t+1] = k[t] + dkdt  # assumed time step is one year
 
         a[t+1] = y[t+1] / (k[t+1]**alpha * l[t+1]**(1-alpha))
+
+    # Check for NaN values in TFP result and terminate with diagnostic output
+    if np.any(np.isnan(a)) or np.any(np.isnan(k)):
+        print(f"\n{'='*80}")
+        print(f"NaN DETECTED IN TFP CALCULATION - STOPPING FOR DIAGNOSIS")
+        print(f"{'='*80}")
+
+        print(f"INPUT DATA:")
+        print(f"  Population (pop): shape={pop.shape}, dtype={pop.dtype}")
+        print(f"    range: {np.min(pop):.6e} to {np.max(pop):.6e}")
+        print(f"    zeros: {np.sum(pop == 0)} / {len(pop)} ({100*np.sum(pop == 0)/len(pop):.1f}%)")
+        print(f"    first/last values: {pop[0]:.6e}, {pop[-1]:.6e}")
+        print(f"    full values: {pop}")
+
+        print(f"  GDP: shape={gdp.shape}, dtype={gdp.dtype}")
+        print(f"    range: {np.min(gdp):.6e} to {np.max(gdp):.6e}")
+        print(f"    zeros: {np.sum(gdp == 0)} / {len(gdp)} ({100*np.sum(gdp == 0)/len(gdp):.1f}%)")
+        print(f"    first/last values: {gdp[0]:.6e}, {gdp[-1]:.6e}")
+        print(f"    full values: {gdp}")
+
+        print(f"MODEL PARAMETERS:")
+        print(f"  s (savings rate): {s}")
+        print(f"  alpha (capital elasticity): {alpha}")
+        print(f"  delta (depreciation rate): {delta}")
+
+        print(f"INTERMEDIATE CALCULATIONS:")
+        print(f"  y (normalized GDP): {y}")
+        print(f"    contains NaN: {np.any(np.isnan(y))}")
+        print(f"  l (normalized pop): {l}")
+        print(f"    contains NaN: {np.any(np.isnan(l))}")
+        print(f"  k[0] = s/delta = {s}/{delta} = {k[0]}")
+        print(f"  a[0] = k[0]**(-alpha) = {k[0]}**(-{alpha}) = {a[0]}")
+
+        print(f"OUTPUT RESULTS:")
+        print(f"  TFP (a): {a}")
+        print(f"    contains NaN: {np.any(np.isnan(a))}")
+        print(f"    NaN indices: {np.where(np.isnan(a))[0].tolist()}")
+        print(f"  Capital (k): {k}")
+        print(f"    contains NaN: {np.any(np.isnan(k))}")
+        print(f"    NaN indices: {np.where(np.isnan(k))[0].tolist()}")
+
+        print(f"{'='*80}")
+        raise RuntimeError("NaN detected in TFP calculation. See diagnostic output above.")
 
     return a, k
 

@@ -1762,7 +1762,8 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     import os
 
     # Generate output filename
-    pdf_filename = f"step2_baseline_tfp_visualization_{model_name}.pdf"
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    pdf_filename = f"step2_baseline_tfp_visualization_{model_name}_{reference_ssp}.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata and coordinates
@@ -1795,31 +1796,17 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     tfp_ref_mean = np.mean(tfp_timeseries[ref_mask], axis=0)  # [lat, lon]
     tfp_target_mean = np.mean(tfp_timeseries[target_mask], axis=0)  # [lat, lon]
 
-    # Get valid grid cell mask (same logic as target GDP - nonzero GDP and population)
-    # We'll need GDP data to determine valid cells
-    reference_ssp = config['ssp_scenarios']['reference_ssp']
-    if 'gdp_data' in metadata and 'pop_data' in metadata:
-        gdp_ref = metadata['gdp_data']
-        pop_ref = metadata['pop_data']
-        valid_mask = (gdp_ref > 0) & (pop_ref > 0)
-        print(f"Using GDP/population data for valid mask: {np.sum(valid_mask)} valid cells")
-    else:
-        # Fallback: use TFP values themselves to identify valid cells
-        valid_mask = (tfp_ref_mean > 0) & np.isfinite(tfp_ref_mean)
-        print(f"Using TFP data for valid mask: {np.sum(valid_mask)} valid cells")
+    # Use pre-computed valid mask from TFP results (computed once during data loading)
+    valid_mask = tfp_results[viz_ssp]['valid_mask']
+    print(f"Using pre-computed valid mask: {np.sum(valid_mask)} valid cells")
 
-        # If no valid cells found with TFP, try using any finite TFP values
-        if np.sum(valid_mask) == 0:
-            valid_mask = np.isfinite(tfp_ref_mean)
-            print(f"Extended to finite TFP values: {np.sum(valid_mask)} valid cells")
-
-            # Last resort: use a few sample cells for visualization
-            if np.sum(valid_mask) == 0:
-                print("WARNING: No valid cells found - using sample cells for visualization")
-                valid_mask = np.zeros_like(tfp_ref_mean, dtype=bool)
-                # Set a few cells as valid for basic visualization
-                valid_mask[32, 64] = True  # Single test cell
-                valid_mask[16, 32] = True  # Another test cell
+    # If no valid cells found, use fallback
+    if np.sum(valid_mask) == 0:
+        print("WARNING: No valid cells found - using sample cells for visualization")
+        valid_mask = np.zeros_like(tfp_ref_mean, dtype=bool)
+        # Set a few cells as valid for basic visualization
+        valid_mask[32, 64] = True  # Single test cell
+        valid_mask[16, 32] = True  # Another test cell
 
     # Calculate percentiles across valid grid cells for time series
     percentiles = [0, 10, 25, 50, 75, 90, 100]  # min, 10%, 25%, 50%, 75%, 90%, max
@@ -1833,10 +1820,35 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
         tfp_slice = tfp_timeseries[t_idx]  # [lat, lon]
         valid_values = tfp_slice[valid_mask]
 
+        # Diagnostic output for first few time steps
+        if t_idx < 3:
+            print(f"DEBUG: t_idx={t_idx}, year={year}")
+            print(f"  tfp_slice shape: {tfp_slice.shape}, range: {np.nanmin(tfp_slice):.6e} to {np.nanmax(tfp_slice):.6e}")
+            print(f"  valid_mask sum: {np.sum(valid_mask)}")
+            print(f"  valid_values shape: {valid_values.shape}, range: {np.nanmin(valid_values):.6e} to {np.nanmax(valid_values):.6e}")
+            if len(valid_values) > 0:
+                calculated_percentiles = np.percentile(valid_values, percentiles)
+                print(f"  calculated percentiles: {calculated_percentiles}")
+                print(f"  percentile spread: {calculated_percentiles[-1] - calculated_percentiles[0]:.6e}")
+
         if len(valid_values) > 0:
             tfp_percentiles[:, t_idx] = np.percentile(valid_values, percentiles)
         else:
             tfp_percentiles[:, t_idx] = np.nan
+
+    # Diagnostic output for percentile results
+    print(f"DEBUG: PERCENTILE CALCULATION COMPLETE")
+    print(f"  tfp_percentiles shape: {tfp_percentiles.shape}")
+    print(f"  tfp_percentiles range: {np.nanmin(tfp_percentiles):.6e} to {np.nanmax(tfp_percentiles):.6e}")
+    print(f"  tfp_percentiles NaN count: {np.sum(np.isnan(tfp_percentiles))}")
+    print(f"  Sample percentiles for year 0 (1964): {tfp_percentiles[:, 0]}")
+    print(f"  Sample percentiles for year 50: {tfp_percentiles[:, 50] if tfp_percentiles.shape[1] > 50 else 'N/A'}")
+
+    # Check if all percentiles are identical (explaining overlapping lines)
+    for p_idx, percentile_name in enumerate(percentile_labels):
+        percentile_timeseries = tfp_percentiles[p_idx, :]
+        percentile_range = np.nanmax(percentile_timeseries) - np.nanmin(percentile_timeseries)
+        print(f"  {percentile_name} percentile range over time: {percentile_range:.6e}")
 
     # Determine color scale for maps
     all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
@@ -1908,18 +1920,93 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
         # Set reasonable axis limits
         ax3.set_xlim(years.min(), years.max())
 
-        # Handle case where all percentiles are NaN
+        # Set y-axis limits using 90th percentile to avoid outlier distortion
         if np.all(np.isnan(tfp_percentiles)):
             print("WARNING: All TFP percentile values are NaN - using default y-axis limits")
             ax3.set_ylim(0, 1)
         else:
-            tfp_min = np.nanmin(tfp_percentiles)
-            tfp_max = np.nanmax(tfp_percentiles)
-            if np.isfinite(tfp_min) and np.isfinite(tfp_max) and tfp_min != tfp_max:
-                tfp_range = tfp_max - tfp_min
-                ax3.set_ylim(tfp_min - 0.05*tfp_range, tfp_max + 0.05*tfp_range)
+            # Use 90th percentile (index 5) for max, 0 for min to avoid outlier distortion
+            percentile_90_max = np.nanmax(tfp_percentiles[5, :])  # 90th percentile line maximum
+            global_min = np.nanmin(tfp_percentiles)
+            global_max = np.nanmax(tfp_percentiles)
+
+            # Find coordinates of global min and max values in the full timeseries data
+            global_min_full = np.nanmin(tfp_timeseries)
+            global_max_full = np.nanmax(tfp_timeseries)
+
+            # Find indices of min and max values (first occurrence if multiple)
+            min_indices = np.unravel_index(np.nanargmin(tfp_timeseries), tfp_timeseries.shape)
+            max_indices = np.unravel_index(np.nanargmax(tfp_timeseries), tfp_timeseries.shape)
+            min_t, min_lat, min_lon = min_indices
+            max_t, max_lat, max_lon = max_indices
+
+            # Convert time index to year
+            min_year = years[min_t]
+            max_year = years[max_t]
+
+            if np.isfinite(percentile_90_max) and percentile_90_max > 0:
+                # Set y-axis from 0 to 90th percentile max with small buffer
+                y_max = percentile_90_max * 1.1
+                ax3.set_ylim(0, y_max)
+
+                # Add text annotation showing global min/max ranges with coordinates
+                annotation_text = (f'Global range: {global_min_full:.3f} to {global_max_full:.1f}\n'
+                                 f'Min: year {min_year}, lat[{min_lat}], lon[{min_lon}]\n'
+                                 f'Max: year {max_year}, lat[{max_lat}], lon[{max_lon}]')
+                ax3.text(0.02, 0.98, annotation_text,
+                        transform=ax3.transAxes, verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                        fontsize=9)
+
+                # Create CSV file with time series for min and max grid points
+                csv_filename = f"step2_baseline_tfp_extremes_{model_name}_{reference_ssp}.csv"
+                csv_path = os.path.join(output_dir, csv_filename)
+
+                # Extract time series for min and max grid cells
+                min_tfp_series = tfp_timeseries[:, min_lat, min_lon]
+                max_tfp_series = tfp_timeseries[:, max_lat, max_lon]
+
+                # Get GDP and population data for these cells
+                # Try multiple sources for the time series data
+                min_pop_series = np.full(len(years), np.nan)
+                min_gdp_series = np.full(len(years), np.nan)
+                max_pop_series = np.full(len(years), np.nan)
+                max_gdp_series = np.full(len(years), np.nan)
+
+                # First try: get from original SSP data via re-loading (most reliable)
+                try:
+                    from coin_ssp_utils import get_ssp_data
+                    ssp_data = get_ssp_data(config, reference_ssp)
+                    if 'population' in ssp_data and 'gdp' in ssp_data:
+                        min_pop_series = ssp_data['population'][:, min_lat, min_lon]
+                        max_pop_series = ssp_data['population'][:, max_lat, max_lon]
+                        min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
+                        max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
+                except:
+                    # Second try: get from metadata if available
+                    if 'pop_timeseries' in metadata:
+                        min_pop_series = metadata['pop_timeseries'][:, min_lat, min_lon]
+                        max_pop_series = metadata['pop_timeseries'][:, max_lat, max_lon]
+                    if 'gdp_timeseries' in metadata:
+                        min_gdp_series = metadata['gdp_timeseries'][:, min_lat, min_lon]
+                        max_gdp_series = metadata['gdp_timeseries'][:, max_lat, max_lon]
+
+                # Create DataFrame and save to CSV
+                import pandas as pd
+                extremes_data = {
+                    'year': years,
+                    'min_pop': min_pop_series,
+                    'min_gdp': min_gdp_series,
+                    'min_tfp': min_tfp_series,
+                    'max_pop': max_pop_series,
+                    'max_gdp': max_gdp_series,
+                    'max_tfp': max_tfp_series
+                }
+                df = pd.DataFrame(extremes_data)
+                df.to_csv(csv_path, index=False)
+                print(f"Extremes CSV saved: {csv_path}")
             else:
-                print("WARNING: Invalid TFP range - using default y-axis limits")
+                print("WARNING: Invalid 90th percentile range - using default y-axis limits")
                 ax3.set_ylim(0, 1)
 
         # Adjust layout
