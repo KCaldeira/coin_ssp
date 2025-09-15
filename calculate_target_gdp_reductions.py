@@ -47,7 +47,20 @@ def calculate_target_reductions(config_file):
     print("Loading gridded data...")
     model_name = config.get('model_name', 'CanESM5')
     case_name = config.get('case_name', 'ssp585')
-    data = load_gridded_data(model_name, case_name)
+    # Create temporary config structure for load_gridded_data
+    temp_config = {
+        'climate_model': {
+            'model_name': model_name,
+            'input_directory': 'data/input',
+            'netcdf_file_patterns': {
+                'temperature': 'gridRawAlt_tas',
+                'precipitation': 'gridRawAlt_pr',
+                'gdp': 'Gridded_GDPdensity',
+                'population': 'Gridded_POPdensity'
+            }
+        }
+    }
+    data = load_gridded_data(temp_config, model_name, case_name)
     
     # Extract configuration parameters
     ref_start = config['reference_period']['start_year']

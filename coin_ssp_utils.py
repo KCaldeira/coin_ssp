@@ -240,7 +240,7 @@ def interpolate_to_annual_grid(original_years, data_array, target_years):
 # Target GDP Utilities (moved from coin_ssp_target_gdp.py)
 # =============================================================================
 
-def load_gridded_data(model_name, case_name):
+def load_gridded_data(config, model_name, case_name):
     """
     Load all four NetCDF files and return as a temporally-aligned dataset.
 
@@ -249,6 +249,8 @@ def load_gridded_data(model_name, case_name):
 
     Parameters
     ----------
+    config : Dict[str, Any]
+        Configuration dictionary containing file patterns
     model_name : str
         Climate model name
     case_name : str
@@ -274,29 +276,37 @@ def load_gridded_data(model_name, case_name):
 
     # Load temperature data
     print("  Loading temperature data...")
-    tas_ds = xr.open_dataset(f'data/input/gridRaw_tas_{model_name}_{case_name}.nc', decode_times=False)
+    temp_file = resolve_netcdf_filepath(config, 'temperature', case_name)
+    tas_ds = xr.open_dataset(temp_file, decode_times=False)
     tas_raw_all = tas_ds.tas.values - 273.15  # Convert from Kelvin to Celsius
     tas_years_raw, tas_valid_mask = extract_year_coordinate(tas_ds)
     tas_raw = tas_raw_all[tas_valid_mask]
 
     # Load precipitation data
     print("  Loading precipitation data...")
-    pr_ds = xr.open_dataset(f'data/input/gridRaw_pr_{model_name}_{case_name}.nc', decode_times=False)
+    precip_file = resolve_netcdf_filepath(config, 'precipitation', case_name)
+    pr_ds = xr.open_dataset(precip_file, decode_times=False)
     pr_raw_all = pr_ds.pr.values
     pr_years_raw, pr_valid_mask = extract_year_coordinate(pr_ds)
     pr_raw = pr_raw_all[pr_valid_mask]
 
     # Load GDP data
     print("  Loading GDP data...")
-    gdp_ds = xr.open_dataset(f'data/input/gridded_gdp_regrid_{model_name}_{case_name}.nc', decode_times=False)
-    gdp_raw_all = gdp_ds.gdp_20202100ssp5.values
+    # Load GDP data
+    print("  Loading GDP data...")
+    gdp_file = resolve_netcdf_filepath(config, 'gdp', case_name)
+    gdp_ds = xr.open_dataset(gdp_file, decode_times=False)
+    gdp_raw_all = gdp_ds.gdp_density.values
     gdp_years_raw, gdp_valid_mask = extract_year_coordinate(gdp_ds)
     gdp_raw = gdp_raw_all[gdp_valid_mask]
 
     # Load population data
     print("  Loading population data...")
-    pop_ds = xr.open_dataset(f'data/input/gridded_pop_regrid_{model_name}_{case_name}.nc', decode_times=False)
-    pop_raw_all = pop_ds.pop_20062100ssp5.values
+    # Load population data
+    print("  Loading population data...")
+    pop_file = resolve_netcdf_filepath(config, 'population', case_name)
+    pop_ds = xr.open_dataset(pop_file, decode_times=False)
+    pop_raw_all = pop_ds.pop_density.values
     pop_years_raw, pop_valid_mask = extract_year_coordinate(pop_ds)
     pop_raw = pop_raw_all[pop_valid_mask]
 
@@ -411,26 +421,34 @@ def calculate_time_means(data, years, start_year, end_year):
     mask = (years >= start_year) & (years <= end_year)
     return data[mask].mean(axis=0)
 
-def calculate_global_mean(data, lat):
+def calculate_global_mean(data, lat, valid_mask):
     """
-    Calculate area-weighted global mean.
-    
+    Calculate area-weighted global mean using only valid grid cells.
+
     Parameters
     ----------
     data : array
-        2D spatial data (lat, lon) 
+        2D spatial data (lat, lon)
     lat : array
         Latitude coordinates
-        
+    valid_mask : array
+        2D boolean mask (lat, lon) indicating valid grid cells
+
     Returns
     -------
     float
-        Area-weighted global mean
+        Area-weighted global mean over valid cells
     """
     weights = calculate_area_weights(lat)
-    # Expand weights to match data shape: (lat,) -> (lat, lon)  
+    # Expand weights to match data shape: (lat,) -> (lat, lon)
     weights_2d = np.broadcast_to(weights[:, np.newaxis], data.shape)
-    return np.average(data, weights=weights_2d)
+
+    # Apply mask to both data and weights
+    masked_data = np.where(valid_mask, data, np.nan)
+    masked_weights = np.where(valid_mask, weights_2d, 0.0)
+
+    # Use np.nansum and np.sum to handle NaN values properly
+    return np.nansum(masked_data * masked_weights) / np.sum(masked_weights)
 
 
 # =============================================================================
@@ -457,7 +475,7 @@ def calculate_constant_target_reduction(gdp_reduction_value, temp_ref_shape):
     return np.full(temp_ref_shape, gdp_reduction_value, dtype=np.float64)
 
 
-def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat):
+def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, valid_mask):
     """
     Calculate linear temperature-dependent GDP reduction using constraint satisfaction.
     
@@ -496,8 +514,8 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat):
     value_at_ref_linear = linear_config['reduction_at_reference_temp']
     
     # Calculate GDP-weighted global means
-    global_gdp_target = calculate_global_mean(gdp_target, lat)
-    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat) / global_gdp_target)
+    global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
+    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target)
     
     # Set up weighted least squares system for exact constraint satisfaction
     X = np.array([
@@ -519,7 +537,7 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat):
     
     # Verify constraint satisfaction
     constraint1_check = a0_linear + a1_linear * T_ref_linear  # Should equal value_at_ref_linear
-    constraint2_check = calculate_global_mean(gdp_target * (1 + linear_reduction), lat) / global_gdp_target - 1  # Should equal global_mean_linear
+    constraint2_check = calculate_global_mean(gdp_target * (1 + linear_reduction), lat, valid_mask) / global_gdp_target - 1  # Should equal global_mean_linear
     
     return {
         'reduction_array': linear_reduction.astype(np.float64),
@@ -540,7 +558,7 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat):
     }
 
 
-def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target, lat):
+def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target, lat, valid_mask):
     """
     Calculate quadratic temperature-dependent GDP reduction using constraint satisfaction.
     
@@ -560,7 +578,6 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
         - 'reference_temperature': Reference temperature point (e.g., 30.0)
         - 'reduction_at_reference_temp': Reduction at reference temperature (e.g., -0.75)
         - 'zero_reduction_temperature': Temperature with zero reduction (e.g., 13.5)
-        - 'max_reduction': Optional maximum reduction bound (e.g., -0.80)
     temp_ref : np.ndarray
         Reference period temperature array [lat, lon]
     gdp_target : np.ndarray
@@ -572,22 +589,20 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
     -------
     dict
         Dictionary containing:
-        - 'reduction_array': Quadratic reduction array [lat, lon], optionally bounded
+        - 'reduction_array': Quadratic reduction array [lat, lon]
         - 'coefficients': {'a': constant, 'b': linear, 'c': quadratic}
         - 'constraint_verification': Verification of constraint satisfaction
-        - 'bounds_applied': Whether maximum reduction bounds were applied
     """
     # Extract configuration parameters
     global_mean_quad = quadratic_config['global_mean_reduction']
     T_ref_quad = quadratic_config['reference_temperature']
     value_at_ref_quad = quadratic_config['reduction_at_reference_temp']
     T0 = quadratic_config['zero_reduction_temperature']
-    max_reduction = quadratic_config.get('max_reduction', None)
     
     # Calculate GDP-weighted global means
-    global_gdp_target = calculate_global_mean(gdp_target, lat)
-    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat) / global_gdp_target)
-    gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, lat) / global_gdp_target)
+    global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
+    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target)
+    gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, lat, valid_mask) / global_gdp_target)
     
     # Set up constraint system for quadratic: a + b*T + c*T²
     # Constraint 1: a + b*T0 + c*T0² = 0  (zero point constraint)
@@ -617,7 +632,7 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
     # Verify constraint satisfaction
     constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
     constraint2_check = a_quad + b_quad * T_ref_quad + c_quad * T_ref_quad**2  # Should equal value_at_ref_quad at T_ref
-    constraint3_check = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat) / global_gdp_target - 1
+    constraint3_check = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat, valid_mask) / global_gdp_target - 1
     
     return {
         'reduction_array': quadratic_reduction.astype(np.float64),
@@ -647,28 +662,29 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
 def calculate_all_target_reductions(target_configs, gridded_data):
     """
     Calculate all configured target GDP reductions using gridded data.
-    
-    This function processes multiple target configurations and returns
-    results for all target types (constant, linear, quadratic).
-    
+
+    This function processes multiple target configurations and automatically
+    determines the reduction type from available parameters.
+
     Parameters
     ----------
     target_configs : list
         List of target configuration dictionaries, each containing:
         - 'target_name': Unique identifier
-        - 'target_type': 'constant', 'linear', or 'quadratic'  
-        - Type-specific parameters
+        - Type-specific parameters (determines calculation method):
+          * Constant: 'gdp_reduction'
+          * Linear: 'global_mean_reduction' (without zero point)
+          * Quadratic: 'zero_reduction_temperature'
     gridded_data : dict
         Dictionary containing gridded data arrays:
         - 'temp_ref': Reference period temperature [lat, lon]
         - 'gdp_target': Target period GDP [lat, lon]
         - 'lat': Latitude coordinates
-        
+
     Returns
     -------
     dict
         Dictionary with target_name keys, each containing:
-        - 'target_type': Type of target function
         - 'reduction_array': Calculated reduction array [lat, lon]
         - 'coefficients': Function coefficients (if applicable)
         - 'constraint_verification': Constraint satisfaction results
@@ -677,14 +693,18 @@ def calculate_all_target_reductions(target_configs, gridded_data):
     results = {}
     
     temp_ref = gridded_data['temp_ref']
-    gdp_target = gridded_data['gdp_target'] 
+    gdp_target = gridded_data['gdp_target']
     lat = gridded_data['lat']
+    valid_mask = gridded_data['valid_mask']
     
     for target_config in target_configs:
         target_name = target_config['target_name']
+
+        # Use explicit target_type from configuration
         target_type = target_config['target_type']
-        
+
         if target_type == 'constant':
+            # Constant reduction
             reduction_array = calculate_constant_target_reduction(
                 target_config['gdp_reduction'], temp_ref.shape
             )
@@ -697,18 +717,21 @@ def calculate_all_target_reductions(target_configs, gridded_data):
                     'gdp_weighted_mean': target_config['gdp_reduction']
                 }
             }
-            
-        elif target_type == 'linear':
-            result = calculate_linear_target_reduction(target_config, temp_ref, gdp_target, lat)
-            result['target_type'] = target_type
-            
+
         elif target_type == 'quadratic':
+            # Quadratic reduction (has zero point)
             result = calculate_quadratic_target_reduction(target_config, temp_ref, gdp_target, lat)
             result['target_type'] = target_type
-            
+
+        elif target_type == 'linear':
+            # Linear reduction (has global mean constraint)
+            result = calculate_linear_target_reduction(target_config, temp_ref, gdp_target, lat)
+            result['target_type'] = target_type
+
         else:
-            raise ValueError(f"Unknown target type: {target_type}")
-            
+            raise ValueError(f"Unknown target_type '{target_type}' for target '{target_name}'. "
+                           f"Must be 'constant', 'linear', or 'quadratic'.")
+
         results[target_name] = result
     
     return results
@@ -807,7 +830,7 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
             print(f"  Population: {os.path.basename(pop_file)}")
             
             # Load gridded data for this SSP using existing function
-            ssp_data = load_gridded_data(model_name, ssp_name)
+            ssp_data = load_gridded_data(config, model_name, ssp_name)
             
             # Store in organized structure
             all_data[ssp_name] = {
@@ -898,7 +921,10 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
 def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: str) -> str:
     """
     Resolve NetCDF file path using naming convention: {prefix}_{model_name}_{ssp_name}.nc
-    
+
+    For GDP and population files, SSP names are truncated from 'sspXXX' to 'sspX' format
+    (e.g., 'ssp245' becomes 'ssp2', 'ssp585' becomes 'ssp5').
+
     Parameters
     ----------
     config : Dict[str, Any]
@@ -907,7 +933,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
         Type of data ('temperature', 'precipitation', 'gdp', 'population', 'target_reductions')
     ssp_name : str
         SSP scenario name (e.g., 'ssp245', 'ssp585')
-        
+
     Returns
     -------
     str
@@ -917,10 +943,17 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     model_name = climate_model['model_name']
     input_dir = climate_model['input_directory']
     prefix = climate_model['netcdf_file_patterns'][data_type]
-    
-    filename = f"{prefix}_{model_name}_{ssp_name}.nc"
+
+    # For GDP and population files, truncate SSP name to first digit only
+    # e.g., 'ssp245' -> 'ssp2', 'ssp585' -> 'ssp5'
+    if data_type in ['gdp', 'population'] and ssp_name.startswith('ssp') and len(ssp_name) >= 4:
+        truncated_ssp = ssp_name[:4]  # Keep 'ssp' + first digit
+        filename = f"{prefix}_{model_name}_{truncated_ssp}.nc"
+    else:
+        filename = f"{prefix}_{model_name}_{ssp_name}.nc"
+
     filepath = os.path.join(input_dir, filename)
-    
+
     return filepath
 
 
@@ -1068,18 +1101,18 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str) 
             target_arrays.append(target_data['reduction_array'])
             target_names.append(target_name)
     
-    # Stack arrays: (target_type, lat, lon)
+    # Stack arrays: (target_name, lat, lon)
     target_reductions = np.stack(target_arrays, axis=0)
-    
+
     # Create xarray dataset
     ds = xr.Dataset(
         {
-            'target_gdp_reductions': (['target_type', 'lat', 'lon'], target_reductions),
+            'target_gdp_reductions': (['target_name', 'lat', 'lon'], target_reductions),
             'temperature_ref': (['lat', 'lon'], metadata['temp_ref']),
             'gdp_target': (['lat', 'lon'], metadata['gdp_target'])
         },
         coords={
-            'target_type': target_names,
+            'target_name': target_names,
             'lat': metadata['lat'],
             'lon': metadata['lon']
         }
@@ -1596,7 +1629,17 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
             # Format target name for display
             display_name = target_name.replace('_', ' ').title()
-            target_type = target_info.get('target_type', 'unknown')
+
+            # Infer target type from configuration
+            target_config = next(t for t in config['gdp_reduction_targets'] if t['target_name'] == target_name)
+            if 'gdp_reduction' in target_config:
+                target_type = 'constant'
+            elif 'zero_reduction_temperature' in target_config:
+                target_type = 'quadratic'
+            elif 'global_mean_reduction' in target_config:
+                target_type = 'linear'
+            else:
+                target_type = 'unknown'
 
             ax.set_title(f'{display_name} ({target_type})\n'
                         f'Range: {data_range["min"]:.4f} to {data_range["max"]:.4f}\n'
@@ -1621,8 +1664,18 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
         for i, target_name in enumerate(target_names):
             target_info = target_results[target_name]
-            target_type = target_info['target_type']
             color = colors[i % len(colors)]
+
+            # Infer target type from configuration
+            target_config = next(t for t in config['gdp_reduction_targets'] if t['target_name'] == target_name)
+            if 'gdp_reduction' in target_config:
+                target_type = 'constant'
+            elif 'zero_reduction_temperature' in target_config:
+                target_type = 'quadratic'
+            elif 'global_mean_reduction' in target_config:
+                target_type = 'linear'
+            else:
+                target_type = 'unknown'
 
             if target_type == 'constant':
                 # Constant function
@@ -1637,7 +1690,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                         label=label, alpha=0.8)
 
             elif target_type == 'linear':
-                coefficients = target_info.get('coefficients')
+                coefficients = target_info['coefficients']
                 if coefficients:
                     # Linear function: reduction = a0 + a1 * T
                     a0, a1 = coefficients['a0'], coefficients['a1']
@@ -1656,7 +1709,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                                 label=f'Linear calib: {ref_temp}°C = {ref_value:.3f}')
 
             elif target_type == 'quadratic':
-                coefficients = target_info.get('coefficients')
+                coefficients = target_info['coefficients']
                 if coefficients:
                     # Quadratic function: reduction = a + b*T + c*T²
                     a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
@@ -1696,7 +1749,17 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         all_y_values = []
         for target_name in target_names:
             target_info = target_results[target_name]
-            target_type = target_info['target_type']
+
+            # Infer target type from configuration
+            target_config = next(t for t in config['gdp_reduction_targets'] if t['target_name'] == target_name)
+            if 'gdp_reduction' in target_config:
+                target_type = 'constant'
+            elif 'zero_reduction_temperature' in target_config:
+                target_type = 'quadratic'
+            elif 'global_mean_reduction' in target_config:
+                target_type = 'linear'
+            else:
+                target_type = 'unknown'
 
             if target_type == 'constant':
                 gdp_targets = config['gdp_reduction_targets']
@@ -1704,7 +1767,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 constant_value = const_config['gdp_reduction']
                 all_y_values.extend([constant_value])
 
-            elif target_type in ['linear', 'quadratic'] and target_info.get('coefficients'):
+            elif target_type in ['linear', 'quadratic'] and target_info['coefficients']:
                 coefficients = target_info['coefficients']
                 if target_type == 'linear':
                     a0, a1 = coefficients['a0'], coefficients['a1']
@@ -2125,7 +2188,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
                 model_name = config['climate_model']['model_name']
                 try:
                     # Use load_gridded_data to get the full time series data
-                    ssp_data = load_gridded_data(model_name, reference_ssp)
+                    ssp_data = load_gridded_data(config, model_name, reference_ssp)
                     if 'pop' in ssp_data and 'gdp' in ssp_data:
                         min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
                         max_pop_series = ssp_data['pop'][:, max_lat, max_lon]

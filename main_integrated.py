@@ -17,7 +17,6 @@ Processing Flow (per README.md Section 3):
 import json
 import os
 import sys
-import copy
 import numpy as np
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +31,7 @@ from coin_ssp_utils import (
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
+from model_params_factory import ModelParamsFactory
 
 
 def setup_output_directory(config: Dict[str, Any]) -> str:
@@ -121,9 +121,12 @@ def load_integrated_config(config_path: str) -> Dict[str, Any]:
     
     with open(config_path, 'r') as f:
         config = json.load(f)
-    
+
+    # Create ModelParams factory for clean parameter management
+    config['model_params_factory'] = ModelParamsFactory(config['model_params'])
+
     # Basic validation
-    required_sections = ['climate_model', 'ssp_scenarios', 'time_periods', 
+    required_sections = ['climate_model', 'ssp_scenarios', 'time_periods',
                         'model_params', 'damage_function_scalings', 'gdp_reduction_targets']
     
     for section in required_sections:
@@ -231,7 +234,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
         print(f"  GDP file: {gdp_file}")
 
         # Load the gridded data
-        data = load_gridded_data(model_name, reference_ssp)
+        data = load_gridded_data(config, model_name, reference_ssp)
     
     # Calculate temporal means
     print("Calculating temporal means...")
@@ -243,16 +246,20 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
                                      time_periods['target_period']['start_year'], 
                                      time_periods['target_period']['end_year'])
     
+    # Get valid mask from metadata
+    valid_mask = all_netcdf_data['_metadata']['valid_mask']
+
     # Prepare gridded data for target calculation functions
     gridded_data = {
         'temp_ref': temp_ref,
         'gdp_target': gdp_target,
-        'lat': data['lat']
+        'lat': data['lat'],
+        'valid_mask': valid_mask
     }
     
-    # Calculate global means for verification
-    global_temp_ref = calculate_global_mean(temp_ref, data['lat'])
-    global_gdp_target = calculate_global_mean(gdp_target, data['lat'])
+    # Calculate global means for verification using valid mask
+    global_temp_ref = calculate_global_mean(temp_ref, data['lat'], valid_mask)
+    global_gdp_target = calculate_global_mean(gdp_target, data['lat'], valid_mask)
     
     print(f"Global mean reference temperature: {global_temp_ref:.2f}°C")
     print(f"Global mean target GDP: {global_gdp_target:.2e}")
@@ -275,7 +282,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
             global_mean_achieved = calc_result['global_statistics']['gdp_weighted_mean']
         else:
             # For constant case, calculate directly
-            global_mean_achieved = calculate_global_mean(gdp_target * (1 + reduction_array), data['lat']) / global_gdp_target - 1
+            global_mean_achieved = calculate_global_mean(gdp_target * (1 + reduction_array), data['lat'], valid_mask) / global_gdp_target - 1
         
         target_results[target_name] = {
             'target_type': target_type,
@@ -283,8 +290,8 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
             'global_mean_achieved': float(global_mean_achieved),
             'constraint_satisfied': True,
             'economic_bounds_valid': True,
-            'coefficients': calc_result.get('coefficients', None),
-            'constraint_verification': calc_result.get('constraint_verification', None)
+            'coefficients': calc_result['coefficients'],
+            'constraint_verification': calc_result['constraint_verification']
         }
         
         print(f"  {target_name} ({target_type}): GDP-weighted mean = {global_mean_achieved:.6f}")
@@ -358,8 +365,8 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
         print("Loading all NetCDF data...")
         all_data = load_all_netcdf_data(config)
     
-    # Create ModelParams object from configuration
-    params = ModelParams(**model_params)
+    # Create ModelParams instance using factory
+    params = config['model_params_factory'].create_base()
     
     tfp_results = {}
     
@@ -564,9 +571,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                          'tfp_tas1', 'tfp_tas2', 'tfp_pr1', 'tfp_pr2',
                          'y_tas1', 'y_tas2', 'y_pr1', 'y_pr2']
     
-    # Extract model and time parameters
-    model_params = config['model_params']
-    params = ModelParams(**model_params)
+    # Create base ModelParams instance using factory
+    params = config['model_params_factory'].create_base()
     
     # Get years array (assume annual time steps starting from year 0)
     base_year = 2015  # TODO: This should come from configuration
@@ -628,11 +634,13 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, year_diverge_loc)
                     cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, year_diverge_loc)
                     
-                    # Set baseline parameters for this grid cell
-                    params_cell = copy.deepcopy(params)
-                    params_cell.tas0 = np.mean(cell_temp[:year_diverge_loc+1])
-                    params_cell.pr0 = np.mean(cell_precip[:year_diverge_loc+1])
-                    params_cell.amount_scale = target_reduction
+                    # Create parameters for this grid cell using factory
+                    params_cell = config['model_params_factory'].create_for_step(
+                        "grid_cell_optimization",
+                        tas0=np.mean(cell_temp[:year_diverge_loc+1]),
+                        pr0=np.mean(cell_precip[:year_diverge_loc+1]),
+                        amount_scale=damage_scaling['target_amount']
+                    )
                     
                     # Create cell data dictionary matching gridcell_data structure
                     cell_data = {
@@ -647,8 +655,9 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     }
                     
                     # Run per-grid-cell optimization
+                    target_period = config['time_periods']['target_period']
                     optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
-                        cell_data, params_cell, scaling_params
+                        cell_data, params_cell, scaling_params, target_period
                     )
 
                     # Store results
@@ -755,9 +764,8 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     print("Loading all NetCDF data for forward modeling...")
     all_data = load_all_netcdf_data(config)
     
-    # Get model parameters and grid dimensions from Step 3
-    model_params = config['model_params']
-    base_params = ModelParams(**model_params)
+    # Create base ModelParams instance using factory
+    base_params = config['model_params_factory'].create_base()
     damage_function_names = scaling_results['damage_function_names']
     target_names = scaling_results['target_names']
     valid_mask = scaling_results['valid_mask']

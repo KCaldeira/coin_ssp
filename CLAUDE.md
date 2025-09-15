@@ -91,6 +91,7 @@ Keep helper functions organized in utils to maintain clean separation of concern
 - **Area Weighting**: Use cosine of latitude for proper global mean calculations
 - **Consolidated Utilities**: Keep all NetCDF processing functions in `coin_ssp_utils.py` to avoid duplication
 - **Repository Storage**: Small NetCDF files can be stored in git with appropriate .gitignore patterns
+- **⚠️ File Path Configuration**: NetCDF file prefixes are defined in JSON configuration under `climate_model.netcdf_file_patterns`. Use `resolve_netcdf_filepath()` function rather than hardcoding prefixes in data loading functions. NEVER hardcode file prefixes like `gridRaw_`, `gridRawAlt_`, or `Gridded_` - always read from configuration.
 
 ## Output and Data Management Philosophy
 
@@ -650,3 +651,4 @@ ratio = climate_mean / (weather_mean + RATIO_EPSILON)
 4. **Algorithm Validation**: Test optimization convergence with period-mean target
 
 **Status**: **ACTIVE DEVELOPMENT - Steps 1-2 Functional, Algorithm Enhancement Needed** - Target period optimization improvement identified as critical next step
+- remember, we are not going to have any optional arguments. If the code needs a valid mask, we need to make sure we pass it a valid mask.

@@ -43,7 +43,7 @@ from scipy.optimize import minimize
 RATIO_EPSILON = 1e-20
 
 @dataclass
-# parametes for the COIN-SSP model
+# parameters for the COIN-SSP model
 class ModelParams:
     year_diverge: int = 2025 # year at which climate starts to affect the economy (e.g., 2025)
     year_scale: int = 2100 # reference year for when to check climate amount (e.g., 2100)
@@ -70,7 +70,6 @@ class ModelParams:
 # parameters for scaling climate impacts for damage optimization runs
 class ScalingParams:
     scaling_name: str = "default"  # name for this scaling parameter set
-    scale_factor: float = None  # if provided, use this instead of optimization
     k_tas1: float = 0 # linear temperature sensitivity for capital loss
     k_tas2: float = 0  # quadratic temperature sensitivity for capital loss
     k_pr1: float = 0  # linear precipitation sensitivity for capital loss
@@ -290,23 +289,49 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
 def optimize_climate_response_scaling(
         gridcell_data, params: ModelParams, scaling: ScalingParams,
-        x0: float = -0.001,  # starting guess for the scale
+        target_period, x0: float = -0.001,  # starting guess for the scale
         bounds: tuple = (-0.1, 0.1),  # keeping current bounds as default
         maxiter: int = 200,
         tol: float = None):
     """
     Optimize the scaling factor with a starting guess and bound constraints.
     Returns (optimal_scale, final_error, scaled_params).
+
+    Parameters
+    ----------
+    gridcell_data : dict
+        Grid cell time series data
+    params : ModelParams
+        Model parameters
+    scaling : ScalingParams
+        Scaling parameters
+    target_period : dict
+        Dictionary with 'start_year' and 'end_year' for target period
+    x0 : float
+        Starting guess for optimization
+    bounds : tuple
+        Bounds for optimization
+    maxiter : int
+        Maximum iterations
+    tol : float
+        Tolerance for optimization
     """
     # Ensure starting guess is inside bounds
     lo, hi = bounds
     x0 = float(np.clip(x0, lo, hi))
 
-    # Precompute target year index once
-    idx = np.where(gridcell_data['years'] == params.year_scale)[0]
-    if idx.size == 0:
-        raise ValueError(f"Year {params.year_scale} not found in years array")
-    idx = int(idx[0])
+    # Precompute target period indices
+    start_year = target_period['start_year']
+    end_year = target_period['end_year']
+    years = gridcell_data['years']
+
+    target_mask = (years >= start_year) & (years <= end_year)
+    target_indices = np.where(target_mask)[0]
+
+    if len(target_indices) == 0:
+        raise ValueError(f"No years found in target period {start_year}-{end_year}")
+
+    print(f"    Target period: {start_year}-{end_year} ({len(target_indices)} years)")
 
     def objective(xarr):
         # xarr is a length-1 array because we're using scipy.optimize.minimize
@@ -327,15 +352,20 @@ def optimize_climate_response_scaling(
             gridcell_data['tas_weather'], gridcell_data['pr_weather'], pc
         )
 
-        ratio = y_climate[idx] / (y_weather[idx] + RATIO_EPSILON)
-        if np.isnan(ratio) or np.isinf(ratio):
+        # Calculate ratios for all years in target period
+        ratios = y_climate[target_indices] / (y_weather[target_indices] + RATIO_EPSILON)
+        mean_ratio = np.mean(ratios)
+
+        if np.isnan(mean_ratio) or np.isinf(mean_ratio):
             print(f"\n{'='*80}")
-            print(f"NaN/Inf RATIO DETECTED - STOPPING FOR DIAGNOSIS")
+            print(f"NaN/Inf MEAN RATIO DETECTED - STOPPING FOR DIAGNOSIS")
             print(f"{'='*80}")
-            print(f"Problem: scale={scale:.6f}, ratio is {ratio} (NaN or Inf)")
-            print(f"Climate y={y_climate[idx]:.6f}, Weather y={y_weather[idx]:.6f}")
-            print(f"Climate[t-1] y={y_climate[idx-1]:.6f}, Weather[t-1] y={y_weather[idx-1]:.6f}")
-            print(f"Target year index: {idx}, year={params.year_scale}, target ratio={1.0 + params.amount_scale}")
+            print(f"Problem: scale={scale:.6f}, mean_ratio is {mean_ratio} (NaN or Inf)")
+            print(f"Target period: {start_year}-{end_year} ({len(target_indices)} years)")
+            print(f"Climate GDP in target period: {y_climate[target_indices]}")
+            print(f"Weather GDP in target period: {y_weather[target_indices]}")
+            print(f"Individual ratios: {ratios}")
+            print(f"Target mean ratio: {1.0 + params.amount_scale}")
 
             print(f"\nComplete gridcell_data contents:")
             for key, value in gridcell_data.items():
@@ -344,13 +374,13 @@ def optimize_climate_response_scaling(
                     print(f"    range: {np.min(value):.6e} to {np.max(value):.6e}")
                     print(f"    zeros: {np.sum(value == 0)} / {len(value)} ({100*np.sum(value == 0)/len(value):.1f}%)")
                     if key in ['tfp_baseline', 'population', 'gdp']:
-                        print(f"    values at target year ({params.year_scale}): {value[idx]:.6e}")
+                        print(f"    values in target period: {value[target_indices]}")
                 else:
                     print(f"  {key}: {value}")
 
             print(f"\nModel Parameters:")
             print(f"  ModelParams: s={params.s}, alpha={params.alpha}, delta={params.delta}")
-            print(f"  ScalingParams: amount_scale={params.amount_scale}, year_scale={params.year_scale}")
+            print(f"  ScalingParams: amount_scale={params.amount_scale}")
             print(f"  Climate baseline: tas0={params.tas0:.2f}, pr0={params.pr0:.2f}")
 
             print(f"\nScaled Climate Parameters:")
@@ -359,17 +389,11 @@ def optimize_climate_response_scaling(
             print(f"  GDP damage: y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
             print(f"  Precip damage: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
 
-            print(f"\nFull time series near target year:")
-            start_idx = max(0, idx-3)
-            end_idx = min(len(y_climate), idx+4)
-            print(f"  Years {params.year_scale-3} to {params.year_scale+3}:")
-            print(f"  Climate GDP: {y_climate[start_idx:end_idx]}")
-            print(f"  Weather GDP: {y_weather[start_idx:end_idx]}")
-
             print(f"{'='*80}")
-            raise RuntimeError(f"NaN/Inf ratio detected at scale={scale:.6f}. See debug output above for full diagnosis.")
+            raise RuntimeError(f"NaN/Inf mean ratio detected at scale={scale:.6f}. See debug output above for full diagnosis.")
+
         target = 1.0 + params.amount_scale
-        objective_value = (ratio - target) ** 2
+        objective_value = (mean_ratio - target) ** 2
         # print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")  # Commented out to reduce verbose output
         return objective_value
 
