@@ -170,6 +170,13 @@ save_gridded_results(results, output_path, grid_metadata)
 
 ### ⚠️ Known Issues
 
+#### Critical Step 3 Optimization Bug
+- **Issue**: Step 3 scaling factor optimization produces identical results across all target patterns (constant, linear, quadratic)
+- **Symptom**: Global mean scaling factors are exactly the same for all three GDP reduction targets
+- **Implication**: Optimization is not properly incorporating target reduction spatial patterns from Step 1
+- **Status**: **CRITICAL BUG** - requires investigation and fix in next development session
+- **Impact**: Current Step 3 results may not reflect intended spatially-varying target constraints
+
 #### Target GDP Reduction Algorithm
 - **Quadratic function unrealistic values**: Quadratic reduction shows extreme negative values (>100% GDP loss) in polar regions
 - **Root cause**: Unconstrained quadratic function can produce economically meaningless results (GDP reductions >100%)
@@ -444,7 +451,24 @@ pip install -r requirements.txt
 ```
 
 ### Running the Model
-The model now uses JSON configuration files for complete workflow definition:
+
+#### Integrated Processing Pipeline (Grid-Cell Level)
+The complete 5-step integrated workflow for gridded climate-economic modeling:
+
+```bash
+# Complete integrated pipeline (Steps 1-5)
+python main_integrated.py coin_ssp_integrated_config_0002.json
+
+# Skip Step 3 optimization by loading previous results
+python main_integrated.py coin_ssp_integrated_config_0002.json --step3-file data/output/run_20240915_140000/step3_scaling_factors_CanESM5_ssp245.nc
+
+# Results saved to: ./data/output/output_integrated_{model}_{timestamp}/
+# Step outputs: step1_target_gdp_*.nc, step2_baseline_tfp_*.nc, etc.
+# PDF visualizations: step1_target_maps_*.pdf, step3_scaling_maps_*.pdf, etc.
+```
+
+#### Country-Level Analysis
+Traditional country-by-country processing using JSON configuration:
 
 ```bash
 # Process all countries using JSON configuration
@@ -574,26 +598,30 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 ## Model Features
 
 ### ✅ Current Capabilities
+- **Complete Integrated Pipeline**: Full 5-step workflow from target GDP patterns through forward economic projections
 - **Country-level Analysis**: 146 countries with complete 1980-2100 time series
-- **Multi-scenario Support**: All 5 SSP economic scenarios
-- **Climate Integration**: Temperature and precipitation damage functions with automatic parameter calibration
+- **Multi-scenario Support**: All 5 SSP economic scenarios with flexible reference/forward scenario selection
+- **Climate Integration**: Temperature and precipitation response functions with automatic parameter calibration
 - **Gridded Data Processing**: NetCDF utilities for spatial climate and economic data with standardized naming conventions
 - **Target GDP Reduction System**: Spatially-explicit constraint satisfaction with GDP-weighted global means
-- **Unified Configuration**: Integrated JSON schema combining climate models, damage functions, targets, and SSP scenarios
-- **Integrated Pipeline Step 1**: Complete target GDP calculation with dynamic file resolution and JSON integration
+- **Unified Configuration**: Integrated JSON schema combining climate models, response functions, targets, and SSP scenarios
+- **Skip-Step Functionality**: Optional `--step3-file` argument to load previous optimization results for faster testing
+- **Enhanced Visualization**: Zero-biased colorbar scaling, spatial ratio maps, and comprehensive PDF reports
 - **Hybrid Code Architecture**: Extracted reusable functions in `coin_ssp_utils.py` with preserved standalone functionality
 - **Flexible Configuration**: Multiple scaling parameter sets with both optimization and direct scaling modes
 - **Robust Economic Modeling**: Negative capital stock protection and fail-fast error handling
-- **Automated Visualization**: Multi-page PDF books with spatial maps and function plots
+- **Advanced Mapping**: Step 4 spatial maps showing climate/weather GDP ratios with blue-red colormaps
 - **Optimization Framework**: L-BFGS-B optimization for achieving target economic impacts
 - **Quality Assurance**: Comprehensive data validation, constraint verification, and economic bounds checking
 
 ### 🔄 Research Applications
-- **Climate Impact Assessment**: Quantify economic losses under different warming scenarios with optimized damage functions
+- **Climate Impact Assessment**: Quantify economic losses under different warming scenarios with optimized response functions
 - **Policy Analysis**: Compare adaptation strategies across SSP pathways and scaling mechanisms
 - **Parameter Sensitivity**: Automated scaling to achieve specific economic impact targets (e.g., 5%, 10%, 20% GDP losses)
 - **Counterfactual Studies**: Climate vs. weather-only vs. baseline economic projections with visual comparison
-- **Damage Function Comparison**: Capital, TFP, and output damage mechanisms with linear and quadratic responses
+- **Response Function Comparison**: Capital, TFP, and output response mechanisms with linear and quadratic responses
+- **Spatial Pattern Analysis**: Visualize climate/weather GDP ratios and response function scaling factors across global grids
+- **Target Period Assessment**: Focus analysis on 2080-2100 target period with mean ratio optimization
 
 ## Data Quality
 
@@ -616,19 +644,22 @@ gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forwar
 ```
 coin_ssp/
 ├── coin_ssp_core.py                    # Main economic model functions
-├── coin_ssp_utils.py                   # Consolidated utilities (LOESS filtering + NetCDF processing)
-├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations  
+├── coin_ssp_utils.py                   # Consolidated utilities (LOESS filtering + NetCDF processing + visualization)
+├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations
 ├── test_target_gdp.py                  # Test script for target GDP reductions
 ├── main.py                             # Country-level processing pipeline
 ├── main_integrated.py                  # Integrated grid-cell processing pipeline (5-step workflow)
-├── coin_ssp_integrated_config_example.json  # Unified configuration for complete processing workflow
+├── coin_ssp_integrated_config_0002.json    # Current unified configuration for complete workflow
 ├── target_gdp_config_0000.json         # Configuration for target GDP reduction calculations
+├── create_ratio_maps.py                # Standalone tool for creating climate/weather GDP ratio maps
+├── test_step4_visualization.py         # Test visualization using Step 4 NetCDF output data
+├── debug_archive/                      # Archived debug scripts and test files
 ├── data/
 │   ├── input/                          # NetCDF gridded climate/economic data + country datasets
-│   │   ├── gridRaw_tas_CanESM5_ssp585.nc      # Gridded temperature data
-│   │   ├── gridRaw_pr_CanESM5_ssp585.nc       # Gridded precipitation data
-│   │   ├── gridded_gdp_regrid_CanESM5.nc      # Gridded GDP projections
-│   │   ├── gridded_pop_regrid_CanESM5.nc      # Gridded population projections
+│   │   ├── gridRawAlt_tas_CanESM5_ssp245.nc    # Gridded temperature data (updated file patterns)
+│   │   ├── gridRawAlt_pr_CanESM5_ssp245.nc     # Gridded precipitation data
+│   │   ├── Gridded_GDPdensity_CanESM5_ssp245.nc # Gridded GDP projections
+│   │   ├── GriddedAlt_POPdensity_CanESM5_ssp245.nc # Gridded population projections (corrected time axis)
 │   │   ├── Historical_SSP1_annual.csv
 │   │   ├── Historical_SSP2_annual.csv
 │   │   └── ...
@@ -636,8 +667,18 @@ coin_ssp/
 │       ├── run_20250903_143052/        # Country-level results
 │       │   ├── [country]_results_20250903_143052.csv
 │       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
-│       ├── target_gdp_reductions.nc    # Gridded target reduction results
-│       └── target_gdp_reductions_maps.pdf  # Global maps + function plots
+│       ├── output_integrated_CanESM5_20250915_140000/  # Integrated pipeline results
+│       │   ├── step1_target_gdp_CanESM5_ssp245.nc      # Target GDP reductions
+│       │   ├── step2_baseline_tfp_CanESM5.nc           # Baseline TFP calculations
+│       │   ├── step3_scaling_factors_CanESM5_ssp245.nc # Response function scaling factors
+│       │   ├── step4_forward_results_CanESM5.nc        # Forward economic projections
+│       │   ├── step1_target_maps_*.pdf                  # Target reduction visualizations
+│       │   ├── step3_scaling_maps_*.pdf                # Scaling factor visualizations
+│       │   ├── step4_forward_plots_*.pdf               # Forward model time series
+│       │   ├── step4_forward_maps_*.pdf                # Spatial ratio maps
+│       │   └── step4_ratio_maps_*.pdf                  # Alternative ratio map visualization
+│       ├── target_gdp_reductions.nc    # Legacy gridded target reduction results
+│       └── target_gdp_reductions_maps.pdf  # Legacy global maps + function plots
 ```
 
 ## Contributing

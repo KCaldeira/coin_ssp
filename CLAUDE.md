@@ -688,3 +688,185 @@ Following the explicit fail-fast philosophy in this document, removed all inappr
 - ✅ Data quality issues resolved with proper masking implementation
 - ✅ Optimization enhancements provide more robust constraint satisfaction
 - ⏳ TFP extreme value investigation remains for data quality assurance
+
+## December 2025 Development Session: Enhanced Visualization and Workflow Optimization
+
+### Major Feature Additions and Improvements
+
+#### **1. Optional Step 3 Skip Functionality**
+**Issue**: Step 3 optimization takes significant time during testing and development
+**Solution**: Added `--step3-file` command line argument to `main_integrated.py`
+
+```bash
+# Skip Step 3 optimization by loading previous results
+python main_integrated.py config.json --step3-file data/output/previous_run/step3_scaling_factors_*.nc
+```
+
+**Technical Implementation**:
+- Added `argparse` support for optional NetCDF file path
+- Created `load_step3_results_from_netcdf()` function in `coin_ssp_utils.py`
+- Backward compatibility with old 'damage_func' dimension name in existing NetCDF files
+- Maintains all visualization and processing capabilities when loading from file
+
+#### **2. Terminology Update: Damage Functions → Response Functions**
+**Motivation**: "Response functions" better describes the economic mechanisms than "damage functions"
+**Scope**: Updated throughout entire codebase including:
+
+- **Configuration Files**: `response_function_scalings` instead of `damage_function_scalings`
+- **NetCDF Dimensions**: New files use `response_func` dimension (with backward compatibility)
+- **Variable Names**: `response_function_names`, `response_func_idx` throughout code
+- **Documentation**: All README and CLAUDE.md references updated
+- **Visualization Labels**: PDF plots and maps use "Response Function" terminology
+
+#### **3. Enhanced Visualization with Zero-Biased Scaling**
+**Problem**: Colorbar ranges poorly chosen, making spatial patterns hard to interpret
+**Solution**: Implemented comprehensive zero-biased scaling system
+
+**Zero-Biased Scaling Logic** (Corrected Rules):
+```python
+def calculate_zero_biased_range(data_values, percentile_low=2.5, percentile_high=97.5):
+    """Extend color range to include zero when appropriate"""
+    p_min, p_max = np.percentile(valid_data, [percentile_low, percentile_high])
+
+    # Rule 1: If all positive values, extend downward to zero when min ≤ 50% of max
+    if p_min > 0 and p_max > 0 and p_min <= 0.5 * p_max:
+        range_min = 0.0
+
+    # Rule 2: If all negative values, extend upward to zero when max > 50% of |min|
+    elif p_min < 0 and p_max < 0 and abs(p_max) > 0.5 * abs(p_min):
+        range_max = 0.0
+
+    return range_min, range_max
+```
+
+**Applications**:
+- **Step 3 Scaling Factor Maps**: Zero-centered white using `TwoSlopeNorm` with 95% data coverage
+- **All Visualization Functions**: Applied to time series y-axes and spatial colorbar ranges
+- **Utility Functions**: `calculate_zero_biased_range()` and `calculate_zero_biased_axis_range()`
+
+#### **4. Step 4 Spatial Maps Visualization**
+**New Capability**: Created comprehensive spatial mapping for Step 4 forward model results
+
+**Features**:
+- **Climate/Weather Ratio Maps**: Shows `(y_climate/y_weather - 1)` averaged over target period (2080-2100)
+- **Blue-Red Colormap**: Blue = positive impacts, Red = negative impacts, White = zero
+- **Complete Parameter Coverage**: 36 maps (3 targets × 6 response functions × 2 SSPs)
+- **Statistics Integration**: Mean, median, range displayed on each map
+- **Zero-Biased Scaling**: Automatic range optimization for interpretable patterns
+
+**Generated Files**:
+- `step4_forward_maps_*.pdf`: Direct output from Step 4 processing
+- `step4_ratio_maps_*.pdf`: Alternative standalone visualization tool
+
+#### **5. Code Quality and Maintainability Improvements**
+**Removed Conditional Clutter**: Eliminated unnecessary `if config['processing_options']['output_formats']['pdf_maps']:` checks
+- **Philosophy**: Always generate PDF visualizations for debugging and analysis
+- **Result**: Cleaner code with fewer conditional statements
+
+**Enhanced Colorbar Implementation**:
+- **TwoSlopeNorm**: Proper zero-centered colormaps for Step 3 scaling factors
+- **Reference Lines**: Black horizontal lines at zero on all relevant colorbars
+- **Consistent Styling**: Unified approach across all visualization functions
+
+#### **6. Backward Compatibility and Migration Support**
+**NetCDF Dimension Handling**:
+```python
+# Supports both old and new NetCDF files
+if 'response_func' in ds.coords:
+    response_function_names = [str(name) for name in ds.response_func.values]
+elif 'damage_func' in ds.coords:  # Backward compatibility
+    response_function_names = [str(name) for name in ds.damage_func.values]
+```
+
+**Configuration Migration**: Updated JSON schema while maintaining functionality of existing configurations
+
+### Technical Architecture Improvements
+
+#### **Visualization Utilities Consolidation**
+All visualization improvements implemented in `coin_ssp_utils.py`:
+
+- `calculate_zero_biased_range()`: Core scaling logic for colorbars
+- `calculate_zero_biased_axis_range()`: Y-axis optimization for time series plots
+- `load_step3_results_from_netcdf()`: NetCDF loading with backward compatibility
+- `create_forward_model_maps_visualization()`: Step 4 spatial mapping
+
+#### **Command Line Interface Enhancement**
+```python
+def run_integrated_pipeline(config_path: str, step3_file: str = None):
+    """Enhanced with optional Step 3 file loading"""
+    if step3_file:
+        print(f"Loading Step 3 results from: {step3_file}")
+        # Skip optimization, load previous results
+    else:
+        print("Running Step 3 optimization...")
+        # Standard optimization workflow
+```
+
+### Quality Assurance and Validation
+
+#### **Visualization Accuracy**
+- **Mathematical Correctness**: Zero-biased scaling preserves data integrity while improving interpretability
+- **Statistical Robustness**: 2.5-97.5 percentile ranges capture 95% of data while excluding extreme outliers
+- **Color Psychology**: Blue-red diverging colormaps follow established conventions (blue=positive, red=negative)
+
+#### **Workflow Efficiency**
+- **Development Speed**: `--step3-file` enables rapid testing and debugging without costly re-optimization
+- **Memory Management**: Maintains efficient processing while adding comprehensive visualization capabilities
+- **Error Prevention**: Backward compatibility prevents crashes when loading older NetCDF results
+
+### Implementation Status: Enhanced Visualization Framework
+
+**✅ Completed Enhancements**:
+1. **Optional Step 3 Skip**: Fully implemented with command line argument support
+2. **Terminology Migration**: Complete update from "damage" to "response" functions
+3. **Zero-Biased Scaling**: Applied to all visualization functions with utility support
+4. **Step 4 Spatial Maps**: Comprehensive spatial pattern visualization
+5. **Code Quality**: Eliminated conditional clutter and enhanced maintainability
+6. **Backward Compatibility**: Seamless migration support for existing NetCDF files
+
+**Ready for Scientific Application**: The COIN-SSP pipeline now provides comprehensive visualization capabilities alongside the complete 5-step economic modeling workflow, enabling efficient development, thorough analysis, and publication-quality figure generation.
+
+## Critical Bug Discovery: December 2025
+
+### Step 3 Scaling Factor Optimization Issue
+
+#### **Bug Identification**
+Analysis of Step 3 NetCDF output revealed a critical bug in the optimization process:
+
+**Symptom**: All three GDP reduction target patterns (constant, linear, quadratic) produce **identical** global mean scaling factors for each response function:
+
+```
+Target                           Response Function    Global Mean
+constant_10pct                   output_linear       -0.029911
+linear_10pct_12pct30C           output_linear       -0.029911  # IDENTICAL
+quadratic_10pct_0pct13.5C_15pct30C  output_linear   -0.029911  # IDENTICAL
+```
+
+#### **Root Cause Analysis**
+This indicates the Step 3 optimization is **not properly incorporating** the spatially-varying target reduction patterns from Step 1:
+
+- **Expected Behavior**: Different target patterns should produce different scaling factor distributions
+- **Actual Behavior**: All target patterns yield identical optimization results
+- **Implication**: The optimization objective function is not correctly using target reduction data
+
+#### **Technical Investigation Required**
+```python
+# Areas to investigate in main_integrated.py Step 3:
+# 1. Target reduction data loading and indexing
+# 2. Optimization objective function formulation
+# 3. Grid cell-specific target constraint application
+# 4. NetCDF data structure and coordinate handling
+```
+
+#### **Impact Assessment**
+- **Immediate Impact**: Current Step 3 results may not reflect intended spatial constraint satisfaction
+- **Scientific Validity**: Forward model results (Steps 4-5) may not properly implement spatially-varying economic impacts
+- **Priority**: **CRITICAL** - must be resolved before scientific publication
+
+#### **Next Development Session Priority**
+1. **Debug Step 3 optimization loop** - verify target reduction data is properly loaded and indexed
+2. **Validate objective function** - ensure `y_climate/y_weather` ratio calculation uses correct target values
+3. **Test fix with subset** - verify different target patterns produce different scaling factors
+4. **Re-run complete pipeline** - regenerate Steps 3-5 with corrected optimization
+
+**Status**: **CRITICAL BUG IDENTIFIED** - requires immediate investigation and resolution

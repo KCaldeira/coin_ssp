@@ -50,10 +50,10 @@ def create_ratio_maps_from_netcdf(netcdf_path, output_dir=None, epsilon=1e-20):
 
     # Extract dimension labels
     ssp_names = [str(s) for s in ds.ssp.values]
-    damage_function_names = [str(d) for d in ds.damage_func.values]
+    response_function_names = [str(d) for d in ds.damage_func.values]
     target_names = [str(t) for t in ds.target.values]
 
-    print(f"Found {len(ssp_names)} SSPs, {len(damage_function_names)} damage functions, {len(target_names)} targets")
+    print(f"Found {len(ssp_names)} SSPs, {len(response_function_names)} response functions, {len(target_names)} targets")
     print(f"Time series: {len(years)} years ({years[0]:.0f}-{years[-1]:.0f})")
     print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
 
@@ -72,7 +72,7 @@ def create_ratio_maps_from_netcdf(netcdf_path, output_dir=None, epsilon=1e-20):
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Total number of maps
-    total_maps = len(ssp_names) * len(damage_function_names) * len(target_names)
+    total_maps = len(ssp_names) * len(response_function_names) * len(target_names)
     print(f"Creating {total_maps} ratio maps...")
 
     # Create PDF with multi-page layout
@@ -82,7 +82,7 @@ def create_ratio_maps_from_netcdf(netcdf_path, output_dir=None, epsilon=1e-20):
         # Loop through all combinations
         for ssp_idx, ssp in enumerate(ssp_names):
             for target_idx, target_name in enumerate(target_names):
-                for damage_idx, damage_name in enumerate(damage_function_names):
+                for damage_idx, damage_name in enumerate(response_function_names):
                     map_count += 1
 
                     # Create new page

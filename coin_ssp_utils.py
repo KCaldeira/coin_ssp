@@ -113,7 +113,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
     """
     Create comprehensive PDF visualization for Step 4 forward model results.
 
-    Generates a multi-page PDF with one page per (target, damage_function, SSP) combination.
+    Generates a multi-page PDF with one page per (target, response_function, SSP) combination.
     Each page shows global mean time series with three lines:
     - y_climate: GDP with full climate change effects
     - y_weather: GDP with weather variability only
@@ -148,11 +148,11 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
     # Extract metadata
     valid_mask = forward_results['valid_mask']
     lat = forward_results['_coordinates']['lat']
-    damage_function_names = forward_results['damage_function_names']
+    response_function_names = forward_results['response_function_names']
     target_names = forward_results['target_names']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
 
-    print(f"Creating Step 4 visualization with {len(target_names)} targets × {len(damage_function_names)} damage functions × {len(forward_ssps)} SSPs")
+    print(f"Creating Step 4 visualization with {len(target_names)} targets × {len(response_function_names)} damage functions × {len(forward_ssps)} SSPs")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
@@ -162,8 +162,8 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
         for target_idx, target_name in enumerate(target_names):
             target_config = config['gdp_reduction_targets'][target_idx]
 
-            for damage_idx, damage_name in enumerate(damage_function_names):
-                damage_config = config['damage_function_scalings'][damage_idx]
+            for damage_idx, damage_name in enumerate(response_function_names):
+                damage_config = config['response_function_scalings'][damage_idx]
 
                 for ssp in forward_ssps:
                     page_count += 1
@@ -173,8 +173,8 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
-                    gdp_climate = ssp_results['gdp_climate']  # [lat, lon, damage_func, target, time]
-                    gdp_weather = ssp_results['gdp_weather']  # [lat, lon, damage_func, target, time]
+                    gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
+                    gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
 
                     # Get baseline GDP data from all_netcdf_data
                     baseline_gdp = get_ssp_data(all_netcdf_data, ssp, 'gdp')  # [time, lat, lon]
@@ -211,13 +211,15 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
                     ax.legend(fontsize=10)
                     ax.grid(True, alpha=0.3)
 
-                    # Set reasonable y-axis limits
+                    # Set reasonable y-axis limits using zero-biased range
                     all_values = np.concatenate([y_climate_series, y_weather_series, baseline_series])
                     valid_values = all_values[np.isfinite(all_values)]
                     if len(valid_values) > 0:
-                        y_min, y_max = np.percentile(valid_values, [1, 99])
-                        y_range = y_max - y_min
-                        ax.set_ylim(y_min - 0.05*y_range, y_max + 0.05*y_range)
+                        # Use 1-99 percentiles to exclude extreme outliers
+                        percentile_values = valid_values[(valid_values >= np.percentile(valid_values, 1)) &
+                                                        (valid_values <= np.percentile(valid_values, 99))]
+                        y_min, y_max = calculate_zero_biased_axis_range(percentile_values)
+                        ax.set_ylim(y_min, y_max)
 
                     # Add target reduction info as text
                     if 'target_amount' in target_config:
@@ -233,6 +235,367 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
         print(f"Generated {page_count} pages in Step 4 visualization")
 
     print(f"Forward model visualization saved to {pdf_path}")
+    return pdf_path
+
+
+def calculate_zero_biased_range(data_values, percentile_low=2.5, percentile_high=97.5):
+    """
+    Calculate visualization range that includes zero when appropriate.
+
+    Logic:
+    - If all positive and min > 0.5 * max: extend range to include zero
+    - If all negative and max < 0.5 * min: extend range to include zero
+    - Always make symmetric around zero for proper colormap centering
+
+    Parameters
+    ----------
+    data_values : array-like
+        Data values to calculate range for (should be finite values only)
+    percentile_low : float
+        Lower percentile for range calculation (default 2.5 for 95% coverage)
+    percentile_high : float
+        Upper percentile for range calculation (default 97.5 for 95% coverage)
+
+    Returns
+    -------
+    tuple
+        (vmin, vmax) range values, symmetric around zero
+    """
+    if len(data_values) == 0:
+        return -0.01, 0.01
+
+    # Calculate percentile range
+    p_min = np.percentile(data_values, percentile_low)
+    p_max = np.percentile(data_values, percentile_high)
+
+    # Apply zero-bias logic
+    if p_min > 0 and p_max > 0:  # All positive
+        if p_min > 0.5 * p_max:  # Lower end is > 50% of upper end
+            range_min = 0.0  # Extend to zero
+        else:
+            range_min = p_min
+        range_max = p_max
+    elif p_min < 0 and p_max < 0:  # All negative
+        if p_max < 0.5 * p_min:  # Upper end is > 50% of |lower end|
+            range_max = 0.0  # Extend to zero
+        else:
+            range_max = p_max
+        range_min = p_min
+    else:  # Mixed positive and negative
+        range_min = p_min
+        range_max = p_max
+
+    # Always include zero if not already included
+    range_min = min(range_min, 0.0)
+    range_max = max(range_max, 0.0)
+
+    # Make symmetric around zero for proper colormap centering
+    abs_max = max(abs(range_min), abs(range_max))
+
+    # Ensure non-zero range
+    if abs_max == 0:
+        abs_max = 0.01
+
+    return -abs_max, abs_max
+
+
+def calculate_zero_biased_axis_range(data_values, padding_factor=0.05):
+    """
+    Calculate axis range for x-y plots that includes zero when appropriate.
+
+    Same zero-bias logic as color scales but without forcing symmetry.
+    Adds padding for visual clarity.
+
+    Parameters
+    ----------
+    data_values : array-like
+        Data values to calculate range for (should be finite values only)
+    padding_factor : float
+        Fraction of range to add as padding (default 0.05 for 5%)
+
+    Returns
+    -------
+    tuple
+        (ymin, ymax) range values with zero-bias logic and padding
+    """
+    if len(data_values) == 0:
+        return -0.1, 0.1
+
+    # Calculate data range
+    data_min = np.nanmin(data_values)
+    data_max = np.nanmax(data_values)
+
+    # Apply zero-bias logic (same as colormap function)
+    if data_min > 0 and data_max > 0:  # All positive
+        if data_min > 0.5 * data_max:  # Lower end is > 50% of upper end
+            range_min = 0.0  # Extend to zero
+        else:
+            range_min = data_min
+        range_max = data_max
+    elif data_min < 0 and data_max < 0:  # All negative
+        if data_max < 0.5 * data_min:  # Upper end is > 50% of |lower end|
+            range_max = 0.0  # Extend to zero
+        else:
+            range_max = data_max
+        range_min = data_min
+    else:  # Mixed positive and negative
+        range_min = data_min
+        range_max = data_max
+
+    # Add padding for visual clarity
+    data_range = range_max - range_min
+    if data_range > 0:
+        padding = data_range * padding_factor
+        range_min -= padding
+        range_max += padding
+
+    # Ensure non-zero range
+    if abs(range_max - range_min) < 1e-10:
+        center = (range_min + range_max) / 2
+        range_min = center - 0.1
+        range_max = center + 0.1
+
+    return range_min, range_max
+
+
+def load_step3_results_from_netcdf(netcdf_path: str) -> Dict[str, Any]:
+    """
+    Load Step 3 scaling factor results from NetCDF file.
+
+    Parameters
+    ----------
+    netcdf_path : str
+        Path to step3_scaling_factors_{model}.nc file
+
+    Returns
+    -------
+    Dict[str, Any]
+        Dictionary containing Step 3 results in the same format as step3_calculate_scaling_factors_per_cell()
+    """
+    import xarray as xr
+
+    print(f"Loading Step 3 results from: {netcdf_path}")
+
+    # Load NetCDF file
+    ds = xr.open_dataset(netcdf_path)
+
+    # Extract arrays
+    scaling_factors = ds.scaling_factors.values
+    optimization_errors = ds.optimization_errors.values
+    convergence_flags = ds.convergence_flags.values
+    scaled_parameters = ds.scaled_parameters.values
+    valid_mask = ds.valid_mask.values
+
+    # Extract coordinate labels (handle both old and new dimension names)
+    if 'response_func' in ds.coords:
+        response_function_names = [str(name) for name in ds.response_func.values]
+    elif 'damage_func' in ds.coords:
+        response_function_names = [str(name) for name in ds.damage_func.values]
+    else:
+        raise ValueError("Neither 'response_func' nor 'damage_func' dimension found in NetCDF file")
+
+    target_names = [str(name) for name in ds.target.values]
+    scaled_param_names = [str(name) for name in ds.param.values]
+
+    # Calculate summary statistics
+    total_grid_cells = int(np.sum(valid_mask))
+    successful_optimizations = int(np.sum(convergence_flags[valid_mask]))
+
+    # Create coordinate metadata
+    coordinates = {
+        'lat': ds.lat.values,
+        'lon': ds.lon.values,
+    }
+
+    # Create results dictionary matching Step 3 output format
+    scaling_results = {
+        'scaling_factors': scaling_factors,
+        'optimization_errors': optimization_errors,
+        'convergence_flags': convergence_flags,
+        'scaled_parameters': scaled_parameters,
+        'scaled_param_names': scaled_param_names,
+        'response_function_names': response_function_names,
+        'target_names': target_names,
+        'total_grid_cells': total_grid_cells,
+        'successful_optimizations': successful_optimizations,
+        'reference_ssp': ds.attrs.get('reference_ssp', 'unknown'),
+        'valid_mask': valid_mask,
+        '_coordinates': coordinates
+    }
+
+    ds.close()
+
+    print(f"Loaded Step 3 results:")
+    print(f"  Valid grid cells: {total_grid_cells}")
+    print(f"  Successful optimizations: {successful_optimizations}")
+    print(f"  Success rate: {100*successful_optimizations/max(1, total_grid_cells):.1f}%")
+    print(f"  Response functions: {len(response_function_names)}")
+    print(f"  Target patterns: {len(target_names)}")
+
+    return scaling_results
+
+
+def create_forward_model_maps_visualization(forward_results, config, output_dir, model_name, all_netcdf_data):
+    """
+    Create spatial maps visualization for Step 4 forward model results.
+
+    Generates a multi-page PDF with one map per (target, response_function, SSP) combination.
+    Each map shows the spatial pattern of climate impact: (y_climate/y_weather) - 1
+    averaged over the target period (2080-2100).
+
+    Parameters
+    ----------
+    forward_results : dict
+        Results from Step 4 forward integration containing SSP-specific data
+    config : dict
+        Configuration dictionary with scenarios and response functions
+    output_dir : str
+        Directory for output files
+    model_name : str
+        Climate model name for labeling
+    all_netcdf_data : dict
+        All loaded NetCDF data (not used but kept for consistency)
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    pdf_filename = f"step4_forward_model_maps_{model_name}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract metadata
+    valid_mask = forward_results['valid_mask']
+    lat = forward_results['_coordinates']['lat']
+    lon = forward_results['_coordinates']['lon']
+    response_function_names = forward_results['response_function_names']
+    target_names = forward_results['target_names']
+    forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
+
+    # Create coordinate grids for plotting
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+    # Define target period (2080-2100) - same as other visualizations
+    target_start = 2080
+    target_end = 2100
+
+    print(f"Creating Step 4 maps with {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+
+    # Create PDF with multi-page layout
+    with PdfPages(pdf_path) as pdf:
+        page_count = 0
+
+        # Loop through all combinations (same order as line plots)
+        for target_idx, target_name in enumerate(target_names):
+            target_config = config['gdp_reduction_targets'][target_idx]
+
+            for damage_idx, damage_name in enumerate(response_function_names):
+                damage_config = config['response_function_scalings'][damage_idx]
+
+                for ssp in forward_ssps:
+                    page_count += 1
+
+                    # Create new page
+                    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+
+                    # Get SSP-specific data
+                    ssp_results = forward_results['forward_results'][ssp]
+                    gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
+                    gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
+
+                    # Extract data for this combination: [lat, lon, time]
+                    gdp_climate_combo = gdp_climate[:, :, damage_idx, target_idx, :]
+                    gdp_weather_combo = gdp_weather[:, :, damage_idx, target_idx, :]
+
+                    # Calculate time indices for target period
+                    # Assuming time starts at 2015 (index 0) and goes to 2100 (index 85)
+                    start_year = 2015
+                    target_start_idx = target_start - start_year  # 2080 - 2015 = 65
+                    target_end_idx = target_end - start_year + 1   # 2100 - 2015 + 1 = 86
+
+                    # Calculate mean ratio over target period for each grid cell
+                    nlat, nlon = valid_mask.shape
+                    impact_ratio = np.full((nlat, nlon), np.nan)
+
+                    for lat_idx in range(nlat):
+                        for lon_idx in range(nlon):
+                            if valid_mask[lat_idx, lon_idx]:
+                                # Extract target period time series for this grid cell
+                                climate_target = gdp_climate_combo[lat_idx, lon_idx, target_start_idx:target_end_idx]
+                                weather_target = gdp_weather_combo[lat_idx, lon_idx, target_start_idx:target_end_idx]
+
+                                # Calculate mean ratio - 1
+                                if len(climate_target) > 0 and len(weather_target) > 0:
+                                    # Add epsilon to prevent division by zero
+                                    epsilon = 1e-20
+                                    ratios = climate_target / (weather_target + epsilon)
+                                    mean_ratio = np.nanmean(ratios)
+                                    impact_ratio[lat_idx, lon_idx] = mean_ratio - 1.0
+
+                    # Determine color scale using zero-biased range
+                    valid_impacts = impact_ratio[valid_mask & np.isfinite(impact_ratio)]
+                    if len(valid_impacts) > 0:
+                        vmin, vmax = calculate_zero_biased_range(valid_impacts)
+                    else:
+                        vmin, vmax = -0.01, 0.01
+
+                    # Create blue-red colormap (blue=positive, red=negative)
+                    # Note: RdBu_r gives red-white-blue, so we reverse it for blue-white-red
+                    cmap = plt.cm.RdBu  # Blue for positive, red for negative
+                    norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+
+                    # Plot the map
+                    masked_impact = np.where(valid_mask, impact_ratio, np.nan)
+                    im = ax.contourf(lon_grid, lat_grid, masked_impact, levels=20, cmap=cmap, norm=norm, extend='both')
+
+                    # Add coastlines (simplified using valid mask)
+                    ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
+
+                    # Formatting
+                    ax.set_xlabel('Longitude', fontsize=12)
+                    ax.set_ylabel('Latitude', fontsize=12)
+                    ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
+                                f'Climate Impact: (GDP_climate/GDP_weather - 1)\nTarget Period Mean: {target_start}-{target_end}',
+                                fontsize=14, fontweight='bold')
+
+                    # Add colorbar
+                    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+                    cbar.set_label('Climate Impact Ratio - 1', fontsize=11)
+
+                    # Add reference line at zero
+                    if hasattr(cbar, 'ax'):
+                        cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
+
+                    # Add statistics text
+                    if len(valid_impacts) > 0:
+                        mean_impact = np.nanmean(valid_impacts)
+                        median_impact = np.nanmedian(valid_impacts)
+                        min_impact = np.nanmin(valid_impacts)
+                        max_impact = np.nanmax(valid_impacts)
+
+                        stats_text = f"Mean: {mean_impact:.3f}\nMedian: {median_impact:.3f}\nRange: [{min_impact:.3f}, {max_impact:.3f}]"
+                        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                               fontsize=9, verticalalignment='top',
+                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+                    # Add map count
+                    ax.text(0.98, 0.98, f"Map {page_count}", transform=ax.transAxes,
+                           fontsize=9, verticalalignment='top', horizontalalignment='right',
+                           bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+
+                    plt.tight_layout()
+                    pdf.savefig(fig, bbox_inches='tight', dpi=150)
+                    plt.close(fig)
+
+        print(f"Generated {page_count} climate impact maps")
+
+    print(f"Forward model maps saved to: {pdf_path}")
     return pdf_path
 
 
@@ -1402,16 +1765,16 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # Extract data arrays and metadata
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, damage_func, target]
-    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, damage_func, target]
-    convergence_flags = scaling_results['convergence_flags']  # [lat, lon, damage_func, target]
-    scaled_parameters = scaling_results['scaled_parameters']  # [lat, lon, damage_func, target, param]
+    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
+    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
+    convergence_flags = scaling_results['convergence_flags']  # [lat, lon, response_func, target]
+    scaled_parameters = scaling_results['scaled_parameters']  # [lat, lon, response_func, target, param]
     valid_mask = scaling_results['valid_mask']  # [lat, lon]
     
     # Get dimensions and coordinate info
-    nlat, nlon, n_damage_func, n_target = scaling_factors.shape
+    nlat, nlon, n_response_func, n_target = scaling_factors.shape
     n_scaled_params = scaled_parameters.shape[4]
-    damage_function_names = scaling_results['damage_function_names']
+    response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
     scaled_param_names = scaling_results['scaled_param_names']
     coordinates = scaling_results['_coordinates']
@@ -1419,16 +1782,16 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     # Create xarray dataset
     ds = xr.Dataset(
         {
-            'scaling_factors': (['lat', 'lon', 'damage_func', 'target'], scaling_factors),
-            'optimization_errors': (['lat', 'lon', 'damage_func', 'target'], optimization_errors),
-            'convergence_flags': (['lat', 'lon', 'damage_func', 'target'], convergence_flags),
-            'scaled_parameters': (['lat', 'lon', 'damage_func', 'target', 'param'], scaled_parameters),
+            'scaling_factors': (['lat', 'lon', 'response_func', 'target'], scaling_factors),
+            'optimization_errors': (['lat', 'lon', 'response_func', 'target'], optimization_errors),
+            'convergence_flags': (['lat', 'lon', 'response_func', 'target'], convergence_flags),
+            'scaled_parameters': (['lat', 'lon', 'response_func', 'target', 'param'], scaled_parameters),
             'valid_mask': (['lat', 'lon'], valid_mask)
         },
         coords={
             'lat': coordinates['lat'],
             'lon': coordinates['lon'],
-            'damage_func': damage_function_names,
+            'response_func': response_function_names,
             'target': target_names,
             'param': scaled_param_names
         }
@@ -1476,7 +1839,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         'total_grid_cells': scaling_results['total_grid_cells'],
         'successful_optimizations': scaling_results['successful_optimizations'],
         'success_rate_percent': 100 * scaling_results['successful_optimizations'] / max(1, scaling_results['total_grid_cells']),
-        'damage_functions': ', '.join(damage_function_names),
+        'response_functions': ', '.join(response_function_names),
         'target_patterns': ', '.join(target_names),
         'description': 'Per-grid-cell scaling factors optimized using reference SSP scenario',
         'creation_date': datetime.now().isoformat()
@@ -1514,7 +1877,7 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
     
     # Extract metadata and structure
     forward_results = step4_results['forward_results']
-    damage_function_names = step4_results['damage_function_names']
+    response_function_names = step4_results['response_function_names']
     target_names = step4_results['target_names']
     valid_mask = step4_results['valid_mask']
     coordinates = step4_results['_coordinates']
@@ -1522,16 +1885,16 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
     # Get SSP names and dimensions from first SSP result
     ssp_names = list(forward_results.keys())
     first_ssp = forward_results[ssp_names[0]]
-    nlat, nlon, n_damage_func, n_target, ntime = first_ssp['gdp_climate'].shape
+    nlat, nlon, n_response_func, n_target, ntime = first_ssp['gdp_climate'].shape
     
-    # Create arrays for all SSPs: [ssp, lat, lon, damage_func, target, time]
+    # Create arrays for all SSPs: [ssp, lat, lon, response_func, target, time]
     n_ssps = len(ssp_names)
-    gdp_climate_all = np.full((n_ssps, nlat, nlon, n_damage_func, n_target, ntime), np.nan)
-    gdp_weather_all = np.full((n_ssps, nlat, nlon, n_damage_func, n_target, ntime), np.nan)
-    tfp_climate_all = np.full((n_ssps, nlat, nlon, n_damage_func, n_target, ntime), np.nan)
-    tfp_weather_all = np.full((n_ssps, nlat, nlon, n_damage_func, n_target, ntime), np.nan)
-    k_climate_all = np.full((n_ssps, nlat, nlon, n_damage_func, n_target, ntime), np.nan)
-    k_weather_all = np.full((n_ssps, nlat, nlon, n_damage_func, n_target, ntime), np.nan)
+    gdp_climate_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
+    gdp_weather_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
+    tfp_climate_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
+    tfp_weather_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
+    k_climate_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
+    k_weather_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
     
     # Stack results from all SSPs
     for i, ssp_name in enumerate(ssp_names):
@@ -1549,19 +1912,19 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
     # Create xarray dataset
     ds = xr.Dataset(
         {
-            'gdp_climate': (['ssp', 'lat', 'lon', 'damage_func', 'target', 'time'], gdp_climate_all),
-            'gdp_weather': (['ssp', 'lat', 'lon', 'damage_func', 'target', 'time'], gdp_weather_all),
-            'tfp_climate': (['ssp', 'lat', 'lon', 'damage_func', 'target', 'time'], tfp_climate_all),
-            'tfp_weather': (['ssp', 'lat', 'lon', 'damage_func', 'target', 'time'], tfp_weather_all),
-            'k_climate': (['ssp', 'lat', 'lon', 'damage_func', 'target', 'time'], k_climate_all),
-            'k_weather': (['ssp', 'lat', 'lon', 'damage_func', 'target', 'time'], k_weather_all),
+            'gdp_climate': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], gdp_climate_all),
+            'gdp_weather': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], gdp_weather_all),
+            'tfp_climate': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], tfp_climate_all),
+            'tfp_weather': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], tfp_weather_all),
+            'k_climate': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], k_climate_all),
+            'k_weather': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], k_weather_all),
             'valid_mask': (['lat', 'lon'], valid_mask)
         },
         coords={
             'ssp': ssp_names,
             'lat': coordinates['lat'],
             'lon': coordinates['lon'],
-            'damage_func': damage_function_names,
+            'response_func': response_function_names,
             'target': target_names,
             'time': time_coords
         }
@@ -1619,7 +1982,7 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
         'model_name': model_name,
         'total_ssps_processed': step4_results['total_ssps_processed'],
         'ssp_scenarios': ', '.join(ssp_names),
-        'damage_functions': ', '.join(damage_function_names),
+        'response_functions': ', '.join(response_function_names),
         'target_patterns': ', '.join(target_names), 
         'total_forward_runs': total_runs,
         'successful_forward_runs': total_successful,
@@ -1905,9 +2268,8 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 all_y_values.extend(values)
 
         if all_y_values:
-            y_min, y_max = min(all_y_values), max(all_y_values)
-            y_range = y_max - y_min
-            ax4.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+            y_min, y_max = calculate_zero_biased_axis_range(all_y_values, padding_factor=0.1)
+            ax4.set_ylim(y_min, y_max)
 
         # Adjust layout to prevent overlap
         plt.tight_layout()
@@ -1953,9 +2315,9 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract data arrays and metadata
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, damage_func, target]
+    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
     valid_mask = scaling_results['valid_mask']  # [lat, lon]
-    damage_function_names = scaling_results['damage_function_names']
+    response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
 
     # Get coordinate information
@@ -1978,7 +2340,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
         ncols = 4
         nrows = (total_maps + ncols - 1) // ncols
 
-    # Determine color scale across all scaling factors for valid cells
+    # Determine color scale across all scaling factors for valid cells (95% range with zero-centering)
     valid_scaling_factors = []
     for damage_idx in range(n_damage):
         for target_idx in range(n_targets):
@@ -1988,13 +2350,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                 valid_scaling_factors.extend(valid_values)
 
     if len(valid_scaling_factors) > 0:
-        vmin = np.percentile(valid_scaling_factors, 5)
-        vmax = np.percentile(valid_scaling_factors, 95)
-        # Ensure symmetric around zero if range includes both positive and negative
-        if vmin < 0 and vmax > 0:
-            vabs_max = max(abs(vmin), abs(vmax))
-            vmin = -vabs_max
-            vmax = vabs_max
+        vmin, vmax = calculate_zero_biased_range(valid_scaling_factors)
     else:
         vmin, vmax = -0.01, 0.01  # Default range
 
@@ -2007,7 +2363,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                     fontsize=16, fontweight='bold', y=0.98)
 
         map_idx = 0
-        for damage_idx, damage_name in enumerate(damage_function_names):
+        for damage_idx, damage_name in enumerate(response_function_names):
             for target_idx, target_name in enumerate(target_names):
                 map_idx += 1
                 ax = plt.subplot(nrows, ncols, map_idx)
@@ -2019,9 +2375,10 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                 sf_map_masked = np.copy(sf_map)
                 sf_map_masked[~valid_mask] = np.nan
 
-                # Create map
+                # Create map with proper zero-centered normalization
+                norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
                 im = ax.contourf(lon_grid, lat_grid, sf_map_masked,
-                               levels=20, cmap='RdBu_r', vmin=vmin, vmax=vmax, extend='both')
+                               levels=20, cmap='RdBu_r', norm=norm, extend='both')
 
                 # Add coastlines (basic grid)
                 ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
@@ -2188,10 +2545,9 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
         percentile_range = np.nanmax(percentile_timeseries) - np.nanmin(percentile_timeseries)
         print(f"  {percentile_name} percentile range over time: {percentile_range:.6e}")
 
-    # Determine color scale for maps
+    # Determine color scale for maps using zero-biased range
     all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
-    vmin = np.percentile(all_tfp_values, 5)
-    vmax = np.percentile(all_tfp_values, 95)
+    vmin, vmax = calculate_zero_biased_range(all_tfp_values, 5, 95)
 
     # Create colormap for TFP (use viridis - good for scientific data)
     cmap = plt.cm.viridis

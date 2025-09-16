@@ -1,0 +1,171 @@
+{
+  "run_metadata": {
+    "run_name": "CanESM5_ssp245_reference_experiment_v2",
+    "description": "Full processing pipeline for CanESM5 using SSP245 as reference scenario (reorganized by processing order)",
+    "created_date": "2025-09-15",
+    "reorganized_from": "coin_ssp_integrated_config_0001.json"
+  },
+
+  "_comment_processing_order": "Configuration sections organized by processing step order in main_integrated.py",
+
+  "climate_model": {
+    "_processing_step": "Data Loading (All Steps)",
+    "model_name": "CanESM5",
+    "input_directory": "data/input",
+    "netcdf_file_patterns": {
+      "temperature": "gridRawAlt_tas",
+      "precipitation": "gridRawAlt_pr",
+      "gdp": "Gridded_GDPdensity",
+      "population": "GriddedAlt_POPdensity",
+      "target_reductions": "target_gdp_reductions"
+    },
+    "description": "Files will be resolved as {input_directory}/{prefix}_{model_name}_{ssp_name}.nc"
+  },
+
+  "ssp_scenarios": {
+    "_processing_step": "Data Loading & Step Selection",
+    "reference_ssp": "ssp245",
+    "forward_simulation_ssps": ["ssp245", "ssp585"],
+    "description": "Reference SSP used for scaling factor calibration, forward simulation SSPs for TFP and projections"
+  },
+
+  "time_periods": {
+    "_processing_step": "Step 1 - Target GDP Changes",
+    "reference_period": {
+      "start_year": 2015,
+      "end_year": 2025,
+      "description": "Reference period for temperature and baseline calculations"
+    },
+    "target_period": {
+      "start_year": 2080,
+      "end_year": 2100,
+      "description": "Target period for constraint satisfaction and impact assessment"
+    },
+    "projection_period": {
+      "start_year": 2015,
+      "end_year": 2100,
+      "description": "Period for forward model projections"
+    }
+  },
+
+  "gdp_reduction_targets": [
+      {
+        "target_name": "constant_10pct",
+        "target_type": "constant",
+        "gdp_reduction": -0.10,
+        "description": "Uniform 10% GDP reduction across all grid cells"
+      },
+      {
+        "target_name": "linear_10pct_12pct30C",
+        "target_type": "linear",
+        "global_mean_reduction": -0.10,
+        "reference_temperature": 30.0,
+        "reduction_at_reference_temp": -0.12,
+        "description": "Linear temperature-dependent reduction, -12% at 30°C, -10% GDP-weighted global mean"
+      },
+      {
+        "target_name": "quadratic_10pct_0pct13.5C_15pct30C",
+        "target_type": "quadratic",
+        "global_mean_reduction": -0.10,
+        "reference_temperature": 30.0,
+        "reduction_at_reference_temp": -0.15,
+        "zero_reduction_temperature": 13.5,
+        "description": "Quadratic temperature-dependent reduction, -15% at 30°C, -10% GDP-weighted global mean, 0% at 13.5°C, capped at -80%"
+      }
+  ],
+
+  "model_params": {
+    "_processing_step": "Step 2 - Baseline TFP & Step 3 - Scaling Factors",
+    "_description": "Core economic model parameters (Solow-Swan growth model)",
+    "year_diverge": 2025,
+    "amount_scale": -0.10,
+    "s": 0.3,
+    "alpha": 0.3,
+    "delta": 0.1,
+    "tas0": 20.0,
+    "pr0": 1.0,
+    "k_tas1": 0.0,
+    "k_tas2": 0.0,
+    "k_pr1": 0.0,
+    "k_pr2": 0.0,
+    "tfp_tas1": 0.0,
+    "tfp_tas2": 0.0,
+    "tfp_pr1": 0.0,
+    "tfp_pr2": 0.0,
+    "y_tas1": 0.0,
+    "y_tas2": 0.0,
+    "y_pr1": 0.0,
+    "y_pr2": 0.0
+  },
+
+  "damage_function_scalings": [
+      {
+        "scaling_name": "output_linear",
+        "description": "Linear temperature sensitivity for output",
+         "y_tas1": 1.0,
+        "target_amount": -0.10
+      },
+      {
+        "scaling_name": "output_quadratic",
+        "description": "Quadratic temperature sensitivity for output",
+        "y_tas2": 1.0,
+        "target_amount": -0.10
+      },
+      {
+        "scaling_name": "capital_linear",
+        "description": "Linear temperature sensitivity for capital stock",
+        "k_tas1": 1.0,
+        "target_amount": -0.10
+      },
+      {
+        "scaling_name": "capital_quadratic",
+        "description": "Quadratic temperature sensitivity for capital stock",
+        "k_tas2": 1.0,
+        "target_amount": -0.10
+      },
+      {
+        "scaling_name": "tfp_linear",
+        "description": "Linear temperature sensitivity for TFP",
+        "tfp_tas1": 1.0,
+        "target_amount": -0.10
+      },
+      {
+        "scaling_name": "tfp_quadratic",
+        "description": "Quadratic temperature sensitivity for TFP",
+        "tfp_tas2": 1.0,
+        "target_amount": -0.10
+      }
+  ],
+
+  "processing_options": {
+    "_processing_step": "All Steps - Processing Control",
+    "grid_cell_processing": {
+      "enabled": true,
+      "parallel_processing": true,
+      "chunk_size": 1000
+    },
+    "output_formats": {
+      "netcdf": true,
+      "csv": false,
+      "pdf_maps": true,
+      "pdf_line_plots": true
+    },
+    "validation": {
+      "constraint_verification": true,
+      "economic_bounds_check": true,
+      "temperature_damage_relationship": true
+    }
+  },
+
+  "output_configuration": {
+    "_processing_step": "Step 5 - Output Generation",
+    "output_directory": "data/output",
+    "filename_patterns": {
+      "target_reductions": "{model_name}_{reference_ssp}_target_reductions_{timestamp}.nc",
+      "forward_results": "{model_name}_{ssp}_{scaling_name}_results_{timestamp}.nc",
+      "maps": "{model_name}_{reference_ssp}_maps_{timestamp}.pdf",
+      "diagnostics": "{model_name}_{reference_ssp}_diagnostics_{timestamp}.pdf"
+    },
+    "include_timestamp": true
+  }
+}

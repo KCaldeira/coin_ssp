@@ -30,7 +30,7 @@ from coin_ssp_utils import (
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
-    create_forward_model_visualization
+    create_forward_model_visualization, create_forward_model_maps_visualization, load_step3_results_from_netcdf
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
 from model_params_factory import ModelParamsFactory
@@ -129,21 +129,21 @@ def load_integrated_config(config_path: str) -> Dict[str, Any]:
 
     # Basic validation
     required_sections = ['climate_model', 'ssp_scenarios', 'time_periods',
-                        'model_params', 'damage_function_scalings', 'gdp_reduction_targets']
+                        'model_params', 'response_function_scalings', 'gdp_reduction_targets']
     
     for section in required_sections:
         if section not in config:
             raise ValueError(f"Required configuration section missing: {section}")
     
-    n_damage_functions = len(config['damage_function_scalings'])
+    n_response_functions = len(config['response_function_scalings'])
     n_gdp_targets = len(config['gdp_reduction_targets'])
-    n_combinations = n_damage_functions * n_gdp_targets
+    n_combinations = n_response_functions * n_gdp_targets
     
     print(f"Configuration loaded successfully:")
     print(f"  Climate model: {config['climate_model']['model_name']}")
     print(f"  Reference SSP: {config['ssp_scenarios']['reference_ssp']}")
     print(f"  Forward SSPs: {config['ssp_scenarios']['forward_simulation_ssps']}")
-    print(f"  Damage function scalings: {n_damage_functions}")
+    print(f"  Response function scalings: {n_response_functions}")
     print(f"  GDP reduction targets: {n_gdp_targets}")
     print(f"  Total combinations per grid cell: {n_combinations}")
     
@@ -516,22 +516,22 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     Returns
     -------
     Dict[str, Any]
-        Dictionary containing scaling factor arrays [lat, lon, damage_func, target] 
+        Dictionary containing scaling factor arrays [lat, lon, response_func, target] 
     """
     print("\n" + "="*80)
     print("STEP 3: CALCULATING SCALING FACTORS PER GRID CELL (SSP245)")
     print("="*80)
     
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    damage_scalings = config['damage_function_scalings']
+    damage_scalings = config['response_function_scalings']
     gdp_targets = config['gdp_reduction_targets']
     
-    n_damage_functions = len(damage_scalings)
+    n_response_functions = len(damage_scalings)
     n_gdp_targets = len(gdp_targets)
-    total_combinations = n_damage_functions * n_gdp_targets
+    total_combinations = n_response_functions * n_gdp_targets
     
     print(f"Reference SSP: {reference_ssp}")
-    print(f"Damage function scalings: {n_damage_functions}")
+    print(f"Response function scalings: {n_response_functions}")
     print(f"GDP reduction targets: {n_gdp_targets}")
     print(f"Total combinations per grid cell: {total_combinations}")
     
@@ -559,14 +559,14 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     ntime, nlat, nlon = temp_data.shape
     
     # Initialize scaling factor arrays 
-    scaling_factors = np.full((nlat, nlon, n_damage_functions, n_gdp_targets), np.nan)
-    optimization_errors = np.full((nlat, nlon, n_damage_functions, n_gdp_targets), np.nan)
-    convergence_flags = np.full((nlat, nlon, n_damage_functions, n_gdp_targets), False)
+    scaling_factors = np.full((nlat, nlon, n_response_functions, n_gdp_targets), np.nan)
+    optimization_errors = np.full((nlat, nlon, n_response_functions, n_gdp_targets), np.nan)
+    convergence_flags = np.full((nlat, nlon, n_response_functions, n_gdp_targets), False)
     
-    # Initialize arrays for scaled damage function parameters [lat, lon, damage_func, target, param]
+    # Initialize arrays for scaled damage function parameters [lat, lon, response_func, target, param]
     # The 12 parameters are: k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2
     n_scaled_params = 12
-    scaled_parameters = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, n_scaled_params), np.nan)
+    scaled_parameters = np.full((nlat, nlon, n_response_functions, n_gdp_targets, n_scaled_params), np.nan)
     
     # Define parameter names for NetCDF output
     scaled_param_names = ['k_tas1', 'k_tas2', 'k_pr1', 'k_pr2', 
@@ -603,7 +603,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         
         for damage_idx, damage_scaling in enumerate(damage_scalings):
             scaling_name = damage_scaling['scaling_name']
-            print(f"  Damage function: {scaling_name} ({damage_idx+1}/{n_damage_functions})")
+            print(f"  Response function: {scaling_name} ({damage_idx+1}/{n_response_functions})")
             
             # Create ScalingParams for this damage function
             scaling_config = filter_scaling_params(damage_scaling)
@@ -693,12 +693,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     # Create results dictionary
     scaling_results = {
-        'scaling_factors': scaling_factors,       # [lat, lon, damage_func_idx, target_idx] 
-        'optimization_errors': optimization_errors, # [lat, lon, damage_func_idx, target_idx]
-        'convergence_flags': convergence_flags,   # [lat, lon, damage_func_idx, target_idx] boolean
-        'scaled_parameters': scaled_parameters,   # [lat, lon, damage_func_idx, target_idx, param_idx]
+        'scaling_factors': scaling_factors,       # [lat, lon, response_func_idx, target_idx] 
+        'optimization_errors': optimization_errors, # [lat, lon, response_func_idx, target_idx]
+        'convergence_flags': convergence_flags,   # [lat, lon, response_func_idx, target_idx] boolean
+        'scaled_parameters': scaled_parameters,   # [lat, lon, response_func_idx, target_idx, param_idx]
         'scaled_param_names': scaled_param_names, # Parameter names for the last dimension
-        'damage_function_names': [df['scaling_name'] for df in damage_scalings],
+        'response_function_names': [df['scaling_name'] for df in damage_scalings],
         'target_names': [tgt['target_name'] for tgt in gdp_targets], 
         'total_grid_cells': total_grid_cells,
         'successful_optimizations': successful_optimizations,
@@ -754,9 +754,9 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     print("="*80)
     
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
-    n_damage_functions = len(config['damage_function_scalings'])
+    n_response_functions = len(config['response_function_scalings'])
     n_gdp_targets = len(config['gdp_reduction_targets'])
-    total_combinations = n_damage_functions * n_gdp_targets
+    total_combinations = n_response_functions * n_gdp_targets
     
     print(f"Processing {len(forward_ssps)} SSP scenarios")
     print(f"Using {total_combinations} scaling factor combinations per grid cell")
@@ -768,11 +768,11 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     
     # Create base ModelParams instance using factory
     base_params = config['model_params_factory'].create_base()
-    damage_function_names = scaling_results['damage_function_names']
+    response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
     valid_mask = scaling_results['valid_mask']
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, damage_func, target]
-    scaled_parameters = scaling_results['scaled_parameters']  # [lat, lon, damage_func, target, param]
+    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
+    scaled_parameters = scaling_results['scaled_parameters']  # [lat, lon, response_func, target, param]
     
     # Get grid dimensions
     nlat, nlon = valid_mask.shape
@@ -807,21 +807,21 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")
         
         # Initialize result arrays for this SSP
-        # [lat, lon, damage_func, target, time]
-        gdp_climate = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, ntime), np.nan)
-        gdp_weather = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, ntime), np.nan)
-        tfp_climate = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, ntime), np.nan)
-        tfp_weather = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, ntime), np.nan)
-        k_climate = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, ntime), np.nan)
-        k_weather = np.full((nlat, nlon, n_damage_functions, n_gdp_targets, ntime), np.nan)
+        # [lat, lon, response_func, target, time]
+        gdp_climate = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
+        gdp_weather = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
+        tfp_climate = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
+        tfp_weather = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
+        k_climate = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
+        k_weather = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
         
         successful_forward_runs = 0
         total_forward_runs = 0
         
         # Standard loop structure: damage function → target → spatial
-        for damage_idx in range(n_damage_functions):
-            damage_name = damage_function_names[damage_idx]
-            print(f"    Damage function: {damage_name} ({damage_idx+1}/{n_damage_functions})")
+        for damage_idx in range(n_response_functions):
+            damage_name = response_function_names[damage_idx]
+            print(f"    Response function: {damage_name} ({damage_idx+1}/{n_response_functions})")
             
             for target_idx in range(n_gdp_targets):
                 target_name = target_names[target_idx]
@@ -897,12 +897,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         
         # Store results for this SSP
         forward_results[ssp_name] = {
-            'gdp_climate': gdp_climate,        # [lat, lon, damage_func, target, time]
-            'gdp_weather': gdp_weather,        # [lat, lon, damage_func, target, time] 
-            'tfp_climate': tfp_climate,        # [lat, lon, damage_func, target, time]
-            'tfp_weather': tfp_weather,        # [lat, lon, damage_func, target, time]
-            'k_climate': k_climate,            # [lat, lon, damage_func, target, time]
-            'k_weather': k_weather,            # [lat, lon, damage_func, target, time]
+            'gdp_climate': gdp_climate,        # [lat, lon, response_func, target, time]
+            'gdp_weather': gdp_weather,        # [lat, lon, response_func, target, time] 
+            'tfp_climate': tfp_climate,        # [lat, lon, response_func, target, time]
+            'tfp_weather': tfp_weather,        # [lat, lon, response_func, target, time]
+            'k_climate': k_climate,            # [lat, lon, response_func, target, time]
+            'k_weather': k_weather,            # [lat, lon, response_func, target, time]
             'successful_forward_runs': successful_forward_runs,
             'total_forward_runs': total_forward_runs,
             'success_rate': successful_forward_runs / max(1, total_forward_runs)
@@ -911,7 +911,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     # Add metadata and coordinate information to results
     step4_results = {
         'forward_results': forward_results,  # SSP-specific results
-        'damage_function_names': damage_function_names,
+        'response_function_names': response_function_names,
         'target_names': target_names,
         'valid_mask': valid_mask,
         'total_ssps_processed': len(forward_ssps),
@@ -930,11 +930,16 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     output_path = get_step_output_path(output_dir, 4, model_name, file_type="nc")
     save_step4_results_netcdf(step4_results, output_path, model_name)
 
-    # Create PDF visualization
-    if config['processing_options']['output_formats']['pdf_line_plots']:
-        print("Creating Step 4 PDF visualization...")
-        pdf_path = create_forward_model_visualization(step4_results, config, output_dir, model_name, all_data)
-        print(f"Step 4 visualization saved to: {pdf_path}")
+    # Create PDF visualizations
+    print("Creating Step 4 PDF visualizations...")
+
+    # Line plots visualization
+    pdf_path = create_forward_model_visualization(step4_results, config, output_dir, model_name, all_data)
+    print(f"Step 4 line plots saved to: {pdf_path}")
+
+    # Maps visualization
+    maps_pdf_path = create_forward_model_maps_visualization(step4_results, config, output_dir, model_name, all_data)
+    print(f"Step 4 maps saved to: {maps_pdf_path}")
 
     print(f"\nStep 4 completed: Forward integration for {len(forward_results)} SSP scenarios")
     return step4_results
@@ -970,13 +975,13 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
-    damage_functions = config['damage_function_scalings']
+    response_functions = config['response_function_scalings']
     gdp_targets = config['gdp_reduction_targets']
     
     print(f"Climate Model: {model_name}")
     print(f"Reference SSP: {reference_ssp}")
     print(f"Forward SSPs: {len(forward_ssps)} scenarios ({', '.join(forward_ssps)})")
-    print(f"Damage Functions: {len(damage_functions)} configurations")
+    print(f"Damage Functions: {len(response_functions)} configurations")
     print(f"GDP Targets: {len(gdp_targets)} patterns") 
     
     print("\n" + "-"*60)
@@ -1001,7 +1006,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"\nStep 3 - Scaling Factor Optimization:")
     print(f"  ✅ Optimized {scaling_results['total_grid_cells']} valid grid cells")
     print(f"     • Success rate: {100*scaling_results['successful_optimizations']/max(1, scaling_results['total_grid_cells']):.1f}%")
-    print(f"     • Combinations per cell: {len(damage_functions)} damage × {len(gdp_targets)} targets = {len(damage_functions)*len(gdp_targets)}")
+    print(f"     • Combinations per cell: {len(response_functions)} damage × {len(gdp_targets)} targets = {len(response_functions)*len(gdp_targets)}")
     
     # Step 4 Summary
     print(f"\nStep 4 - Forward Model Integration:")
@@ -1026,7 +1031,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"  • Step 4: step4_forward_results_{model_name}.nc")
 
 
-def run_integrated_pipeline(config_path: str) -> None:
+def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
     """
     Execute the complete integrated processing pipeline following README Section 3.
     
@@ -1061,7 +1066,20 @@ def run_integrated_pipeline(config_path: str) -> None:
         # Execute 5-step processing flow
         target_results = step1_calculate_target_gdp_changes(config, output_dir, all_netcdf_data)
         tfp_results = step2_calculate_baseline_tfp(config, output_dir, all_netcdf_data)
-        scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir, all_netcdf_data)
+
+        # Step 3: Load from file or compute scaling factors
+        if step3_file:
+            print(f"\n🔄 LOADING STEP 3 FROM FILE: {step3_file}")
+            scaling_results = load_step3_results_from_netcdf(step3_file)
+
+            # Create Step 3 visualization even when loaded from file
+            print("Creating Step 3 PDF visualization from loaded data...")
+            model_name = config['climate_model']['model_name']
+            pdf_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
+            print(f"Step 3 visualization saved to: {pdf_path}")
+        else:
+            scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir, all_netcdf_data)
+
         forward_results = step4_forward_integration_all_ssps(config, scaling_results, tfp_results, output_dir, all_netcdf_data)
         step5_processing_summary(config, target_results, tfp_results, scaling_results, forward_results)
         
@@ -1078,15 +1096,27 @@ def run_integrated_pipeline(config_path: str) -> None:
 
 def main():
     """Main entry point for integrated processing pipeline."""
-    if len(sys.argv) != 2:
-        print("Usage: python main_integrated.py <integrated_config.json>")
-        print("\nExample: python main_integrated.py coin_ssp_integrated_config_example.json")
-        print("\nThis pipeline implements README.md Section 3: Grid Cell Processing")
-        print("Key feature: Per-grid-cell scaling factor optimization using optimize_climate_response_scaling")
-        sys.exit(1)
-    
-    config_path = sys.argv[1]
-    run_integrated_pipeline(config_path)
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="COIN-SSP Integrated Processing Pipeline",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python main_integrated.py coin_ssp_integrated_config_0002.json
+  python main_integrated.py config.json --step3-file data/output/previous_run/step3_scaling_factors_CanESM5.nc
+
+This pipeline implements README.md Section 3: Grid Cell Processing
+Key feature: Per-grid-cell scaling factor optimization using optimize_climate_response_scaling
+        """
+    )
+
+    parser.add_argument('config', help='Path to integrated configuration JSON file')
+    parser.add_argument('--step3-file', help='Path to existing Step 3 NetCDF file to load instead of running optimization')
+
+    args = parser.parse_args()
+
+    run_integrated_pipeline(args.config, step3_file=args.step3_file)
 
 
 if __name__ == "__main__":
