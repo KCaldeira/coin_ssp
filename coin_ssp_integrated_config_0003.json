@@ -50,25 +50,25 @@
 
   "gdp_reduction_targets": [
       {
-        "target_name": "constant_10pct",
+        "target_name": "const_10%",
         "target_type": "constant",
         "gdp_reduction": -0.10,
         "description": "Uniform 10% GDP reduction across all grid cells"
       },
       {
-        "target_name": "linear_10pct_12pct30C",
+        "target_name": "lin_10%_20%@30C",
         "target_type": "linear",
         "global_mean_reduction": -0.10,
         "reference_temperature": 30.0,
-        "reduction_at_reference_temp": -0.12,
+        "reduction_at_reference_temp": -0.20,
         "description": "Linear temperature-dependent reduction, -12% at 30°C, -10% GDP-weighted global mean"
       },
       {
-        "target_name": "quadratic_10pct_0pct13.5C_15pct30C",
+        "target_name": "quad_10%_0%@13.5C_20%@22C",
         "target_type": "quadratic",
         "global_mean_reduction": -0.10,
-        "reference_temperature": 30.0,
-        "reduction_at_reference_temp": -0.15,
+        "reference_temperature": 22.0,
+        "reduction_at_reference_temp": -0.20,
         "zero_reduction_temperature": 13.5,
         "description": "Quadratic temperature-dependent reduction, -15% at 30°C, -10% GDP-weighted global mean, 0% at 13.5°C, capped at -80%"
       }
@@ -98,42 +98,46 @@
     "y_pr2": 0.0
   },
 
-  "damage_function_scalings": [
+  "response_function_scalings": [
       {
         "scaling_name": "output_linear",
         "description": "Linear temperature sensitivity for output",
-         "y_tas1": 1.0,
-        "target_amount": -0.10
+        "y_tas1": 1.0
       },
       {
         "scaling_name": "output_quadratic",
         "description": "Quadratic temperature sensitivity for output",
-        "y_tas2": 1.0,
-        "target_amount": -0.10
+        "y_tas2": 1.0
       },
       {
         "scaling_name": "capital_linear",
         "description": "Linear temperature sensitivity for capital stock",
-        "k_tas1": 1.0,
-        "target_amount": -0.10
+        "k_tas1": 1.0
       },
       {
         "scaling_name": "capital_quadratic",
         "description": "Quadratic temperature sensitivity for capital stock",
-        "k_tas2": 1.0,
-        "target_amount": -0.10
+        "k_tas2": 1.0
       },
       {
         "scaling_name": "tfp_linear",
         "description": "Linear temperature sensitivity for TFP",
-        "tfp_tas1": 1.0,
-        "target_amount": -0.10
+        "tfp_tas1": 1.0
       },
       {
         "scaling_name": "tfp_quadratic",
         "description": "Quadratic temperature sensitivity for TFP",
-        "tfp_tas2": 1.0,
-        "target_amount": -0.10
+        "tfp_tas2": 1.0
+      },
+      {
+        "scaling_name": "combined_balanced_quadratic-based",
+        "description": "1/6 by each pathway based on single factor quadratic target",
+        "y_tas1": -0.029564,
+        "y_tas2": -0.014778,
+        "k_tas1": -0.022188,
+        "k_tas2": -0.010156,
+        "tfp_tas1": -0.001284,
+        "tfp_tas2": -0.000743
       }
   ],
 

@@ -25,8 +25,8 @@ from typing import Dict, List, Any, Tuple
 from coin_ssp_utils import filter_scaling_params
 
 from coin_ssp_utils import (
-    load_gridded_data, calculate_time_means, calculate_global_mean,
-    calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data,
+    load_gridded_data, calculate_time_means, calculate_global_mean, calculate_global_median,
+    calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data, get_grid_metadata,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
@@ -576,15 +576,20 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     # Create base ModelParams instance using factory
     params = config['model_params_factory'].create_base()
     
-    # Get years array (assume annual time steps starting from year 0)
-    base_year = 2015  # TODO: This should come from configuration
-    years = np.arange(base_year, base_year + ntime)
-    
-    # Calculate year diverge location for weather filtering
-    if params.year_diverge < years[0]:
-        year_diverge_loc = 0
-    else:
-        year_diverge_loc = np.where(years == params.year_diverge)[0][0]
+    # Get years array from pre-computed metadata
+    years = get_grid_metadata(all_data)['years']
+
+    # Calculate reference period indices for tas0/pr0 baseline calculation
+    time_periods = config['time_periods']
+    ref_start_year = time_periods['reference_period']['start_year']
+    ref_end_year = time_periods['reference_period']['end_year']
+
+    ref_start_idx = np.where(years == ref_start_year)[0][0]
+    ref_end_idx = np.where(years == ref_end_year)[0][0]
+
+    # Calculate year diverge location for weather filtering (reference period end + 1)
+    year_diverge = ref_end_year + 1
+    year_diverge_loc = np.where(years == year_diverge)[0][0]
     
     # Initialize counters
     total_grid_cells = 0
@@ -639,9 +644,9 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     # Create parameters for this grid cell using factory
                     params_cell = config['model_params_factory'].create_for_step(
                         "grid_cell_optimization",
-                        tas0=np.mean(cell_temp[:year_diverge_loc+1]),
-                        pr0=np.mean(cell_precip[:year_diverge_loc+1]),
-                        amount_scale=damage_scaling['target_amount']
+                        tas0=np.mean(cell_temp[ref_start_idx:ref_end_idx+1]),
+                        pr0=np.mean(cell_precip[ref_start_idx:ref_end_idx+1]),
+                        amount_scale=target_reduction
                     )
                     
                     # Create cell data dictionary matching gridcell_data structure
@@ -717,9 +722,128 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
     print(f"✅ Visualization saved: {visualization_path}")
 
+    # Display GDP-weighted scaling factor summary
+    print_gdp_weighted_scaling_summary(scaling_results, config, all_netcdf_data)
+
     print(f"\nStep 3 completed: Scaling factors calculated for each grid cell")
     print(f"Total combinations processed: {total_combinations} per valid grid cell")
     return scaling_results
+
+
+def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: Dict[str, Any], all_netcdf_data: Dict[str, Any]) -> None:
+    """
+    Print GDP-weighted summary of scaling factors to help identify optimization bugs.
+
+    Parameters
+    ----------
+    scaling_results : Dict[str, Any]
+        Results from Step 3 containing scaling factors
+    config : Dict[str, Any]
+        Configuration dictionary
+    all_netcdf_data : Dict[str, Any]
+        Pre-loaded NetCDF data containing GDP information
+    """
+    print("\n" + "="*80)
+    print("STEP 3 SCALING FACTOR SUMMARY")
+    print("="*80)
+
+    # Extract data
+    response_function_names = scaling_results['response_function_names']
+    target_names = scaling_results['target_names']
+    valid_mask = scaling_results['valid_mask']
+    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
+
+    # Get reference SSP GDP data for weighting
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    gdp_data = get_ssp_data(all_netcdf_data, reference_ssp, 'gdp')  # [time, lat, lon]
+
+    # Calculate target period GDP for weighting (use same period as target calculation)
+    target_start = config['time_periods']['target_period']['start_year']
+    target_end = config['time_periods']['target_period']['end_year']
+    years = get_grid_metadata(all_netcdf_data)['years']
+
+    start_idx = target_start - years[0]
+    end_idx = target_end - years[0] + 1
+
+    # Average GDP over target period for weighting
+    gdp_target_period = np.mean(gdp_data[start_idx:end_idx], axis=0)  # [lat, lon]
+
+    print(f"GDP-weighted global statistics for scaling factors (using {reference_ssp} GDP, {target_start}-{target_end}):")
+    print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
+    print()
+    print(f"{'Target':<35} {'Response Function':<20} {'GDP-Weighted Mean':<18} {'GDP-Weighted Median':<20} {'Area-Weighted Median':<20}")
+    print("-" * 113)
+
+    # Get coordinates from metadata
+    metadata = get_grid_metadata(all_netcdf_data)
+    lat_values = metadata['lat']
+
+    # Calculate GDP-weighted global means for each combination
+    for target_idx, target_name in enumerate(target_names):
+        for resp_idx, resp_name in enumerate(response_function_names):
+            # Extract scaling factor for this combination
+            scale_data = scaling_factors[:, :, resp_idx, target_idx]  # [lat, lon]
+
+            # Use calculate_global_mean with GDP*scaling data to get proper area+GDP weighted mean
+            # Since GDP is in units per km², calculate_global_mean will properly handle the spatial weighting
+            gdp_weighted_scaling_data = gdp_target_period * scale_data
+            total_weighted_scaling = calculate_global_mean(gdp_weighted_scaling_data, lat_values, valid_mask)
+            total_gdp = calculate_global_mean(gdp_target_period, lat_values, valid_mask)
+
+            # GDP-weighted mean = area_weighted_mean(GDP * scaling) / area_weighted_mean(GDP)
+            if total_gdp > 0:
+                gdp_weighted_mean = total_weighted_scaling / total_gdp
+            else:
+                gdp_weighted_mean = np.nan
+
+            # Calculate area-weighted median using existing function
+            area_weighted_median = calculate_global_median(scale_data, lat_values, valid_mask)
+
+            # Calculate GDP-weighted median using user's algorithm
+            # Create weights = cos(lat) * GDP and sort by scaling factor values
+            from coin_ssp_utils import calculate_area_weights
+            area_weights = calculate_area_weights(lat_values)
+            area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], scale_data.shape)
+
+            # Flatten arrays and apply valid mask
+            flat_scale = scale_data.flatten()
+            flat_gdp = gdp_target_period.flatten()
+            flat_area_weights = area_weights_2d.flatten()
+            flat_valid = valid_mask.flatten()
+
+            # Keep only valid entries
+            valid_indices = flat_valid & ~np.isnan(flat_scale) & ~np.isnan(flat_gdp)
+            valid_scale = flat_scale[valid_indices]
+            valid_gdp = flat_gdp[valid_indices]
+            valid_area_weights = flat_area_weights[valid_indices]
+
+            if len(valid_scale) > 0:
+                # Column 0: weights (cos(lat) * GDP), Column 1: scaling factors
+                gdp_area_weights = valid_area_weights * valid_gdp
+                combined = np.column_stack([gdp_area_weights, valid_scale])
+
+                # Sort by scaling factor values (column 1)
+                sorted_indices = np.argsort(combined[:, 1])
+                sorted_combined = combined[sorted_indices]
+
+                # Calculate cumulative sum of weights and find median
+                cumsum_weights = np.cumsum(sorted_combined[:, 0])
+                total_weight = cumsum_weights[-1]
+                half_weight = total_weight / 2.0
+
+                if half_weight <= cumsum_weights[0]:
+                    gdp_weighted_median = sorted_combined[0, 1]
+                elif half_weight >= cumsum_weights[-1]:
+                    gdp_weighted_median = sorted_combined[-1, 1]
+                else:
+                    gdp_weighted_median = np.interp(half_weight, cumsum_weights, sorted_combined[:, 1])
+            else:
+                gdp_weighted_median = np.nan
+
+            print(f"{target_name:<35} {resp_name:<20} {gdp_weighted_mean:<18.6f} {gdp_weighted_median:<20.6f} {area_weighted_median:<20.6f}")
+
+    print("-" * 113)
+    print()
 
 
 def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: Dict[str, Any],
@@ -777,8 +901,10 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     # Get grid dimensions
     nlat, nlon = valid_mask.shape
     
-    # Calculate year diverge location for weather filtering
-    base_year = 2015  # TODO: Get from configuration
+    # Calculate year diverge location for weather filtering (reference period end + 1)
+    years = get_grid_metadata(all_data)['years']
+    time_periods = config['time_periods']
+    year_diverge = time_periods['reference_period']['end_year'] + 1
     
     forward_results = {}
     
@@ -795,13 +921,16 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
 
         ntime = temp_data.shape[0]  # Time is first dimension
-        years = np.arange(base_year, base_year + ntime)
-        
+        years = get_grid_metadata(all_data)['years']
+
+        # Calculate reference period indices for tas0/pr0 baseline calculation
+        ref_start_year = time_periods['reference_period']['start_year']
+        ref_end_year = time_periods['reference_period']['end_year']
+        ref_start_idx = np.where(years == ref_start_year)[0][0]
+        ref_end_idx = np.where(years == ref_end_year)[0][0]
+
         # Calculate year diverge location for weather filtering
-        if base_params.year_diverge < years[0]:
-            year_diverge_loc = 0
-        else:
-            year_diverge_loc = np.where(years == base_params.year_diverge)[0][0]
+        year_diverge_loc = np.where(years == year_diverge)[0][0]
         
         print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")
@@ -853,8 +982,8 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         
                         # Create ModelParams with scaled damage function parameters
                         params_scaled = copy.deepcopy(base_params)
-                        params_scaled.tas0 = np.mean(cell_temp[:year_diverge_loc+1])
-                        params_scaled.pr0 = np.mean(cell_precip[:year_diverge_loc+1])
+                        params_scaled.tas0 = np.mean(cell_temp[ref_start_idx:ref_end_idx+1])
+                        params_scaled.pr0 = np.mean(cell_precip[ref_start_idx:ref_end_idx+1])
                         
                         # Set scaled damage function parameters from Step 3 results
                         params_scaled.k_tas1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0]

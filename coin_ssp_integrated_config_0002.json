@@ -98,42 +98,36 @@
     "y_pr2": 0.0
   },
 
-  "damage_function_scalings": [
+  "response_function_scalings": [
       {
         "scaling_name": "output_linear",
         "description": "Linear temperature sensitivity for output",
-         "y_tas1": 1.0,
-        "target_amount": -0.10
+        "y_tas1": 1.0
       },
       {
         "scaling_name": "output_quadratic",
         "description": "Quadratic temperature sensitivity for output",
-        "y_tas2": 1.0,
-        "target_amount": -0.10
+        "y_tas2": 1.0
       },
       {
         "scaling_name": "capital_linear",
         "description": "Linear temperature sensitivity for capital stock",
-        "k_tas1": 1.0,
-        "target_amount": -0.10
+        "k_tas1": 1.0
       },
       {
         "scaling_name": "capital_quadratic",
         "description": "Quadratic temperature sensitivity for capital stock",
-        "k_tas2": 1.0,
-        "target_amount": -0.10
+        "k_tas2": 1.0
       },
       {
         "scaling_name": "tfp_linear",
         "description": "Linear temperature sensitivity for TFP",
-        "tfp_tas1": 1.0,
-        "target_amount": -0.10
+        "tfp_tas1": 1.0
       },
       {
         "scaling_name": "tfp_quadratic",
         "description": "Quadratic temperature sensitivity for TFP",
-        "tfp_tas2": 1.0,
-        "target_amount": -0.10
+        "tfp_tas2": 1.0
       }
   ],
 

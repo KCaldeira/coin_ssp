@@ -545,9 +545,9 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     else:
                         vmin, vmax = -0.01, 0.01
 
-                    # Create blue-red colormap (blue=positive, red=negative)
-                    # Note: RdBu_r gives red-white-blue, so we reverse it for blue-white-red
-                    cmap = plt.cm.RdBu  # Blue for positive, red for negative
+                    # Create blue-red colormap (blue=positive, red=negative, white=zero)
+                    # RdBu_r gives blue-white-red (blue=positive, red=negative)
+                    cmap = plt.cm.RdBu_r  # Blue for positive, red for negative
                     norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
 
                     # Plot the map
@@ -939,6 +939,68 @@ def calculate_global_mean(data, lat, valid_mask):
 
     # Use np.nansum and np.sum to handle NaN values properly
     return np.nansum(masked_data * masked_weights) / np.sum(masked_weights)
+
+
+def calculate_global_median(data, lat, valid_mask):
+    """
+    Calculate area-weighted global median using only valid grid cells.
+
+    Uses the weighted median algorithm: sort data by value, compute cumulative
+    sum of weights, and interpolate to find the value at 50% cumulative weight.
+
+    Parameters
+    ----------
+    data : array
+        2D spatial data (lat, lon)
+    lat : array
+        Latitude coordinates
+    valid_mask : array
+        2D boolean mask (lat, lon) indicating valid grid cells
+
+    Returns
+    -------
+    float
+        Area-weighted global median over valid cells
+    """
+    weights = calculate_area_weights(lat)
+    # Expand weights to match data shape: (lat,) -> (lat, lon)
+    weights_2d = np.broadcast_to(weights[:, np.newaxis], data.shape)
+
+    # Apply mask to both data and weights
+    masked_data = np.where(valid_mask, data, np.nan)
+    masked_weights = np.where(valid_mask, weights_2d, 0.0)
+
+    # Flatten and remove NaN values
+    flat_data = masked_data.flatten()
+    flat_weights = masked_weights.flatten()
+
+    # Remove NaN entries
+    valid_indices = ~np.isnan(flat_data)
+    valid_data = flat_data[valid_indices]
+    valid_weights = flat_weights[valid_indices]
+
+    if len(valid_data) == 0:
+        return np.nan
+
+    # Create 2-column array and sort by data values (column 1)
+    # Column 0: weights, Column 1: data values
+    combined = np.column_stack([valid_weights, valid_data])
+    sorted_indices = np.argsort(combined[:, 1])  # Sort by column 1 (data values)
+    sorted_combined = combined[sorted_indices]
+
+    # Calculate cumulative sum of weights
+    cumsum_weights = np.cumsum(sorted_combined[:, 0])
+    total_weight = cumsum_weights[-1]
+    half_weight = total_weight / 2.0
+
+    # Find interpolated value at half total weight
+    if half_weight <= cumsum_weights[0]:
+        return sorted_combined[0, 1]  # First value
+    elif half_weight >= cumsum_weights[-1]:
+        return sorted_combined[-1, 1]  # Last value
+    else:
+        # Interpolate
+        return np.interp(half_weight, cumsum_weights, sorted_combined[:, 1])
 
 
 # =============================================================================
@@ -1340,7 +1402,8 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
                     'lat': ssp_data['lat'],
                     'lon': ssp_data['lon'],
                     'grid_shape': (len(ssp_data['lat']), len(ssp_data['lon'])),
-                    'time_shape': len(ssp_data['tas_years'])  # Assuming all same length
+                    'time_shape': len(ssp_data['tas_years']),  # Assuming all same length
+                    'years': ssp_data['common_years']  # Common years array computed once
                 })
             
             print(f"  Data shape: {ssp_data['tas'].shape}")
@@ -2045,14 +2108,20 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     # Create meshgrid for plotting
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
-    # Set fixed color scale limits
-    vmin = -0.25
-    vmax = 0.25
+    # Determine color scale using zero-biased range from all target reduction data
+    all_reduction_values = []
+    for target_name, result in target_results.items():
+        if target_name != '_metadata':
+            reduction_data = result['reduction_array'][valid_mask]
+            all_reduction_values.extend(reduction_data.flatten())
 
-    # Create red-white-blue colormap centered at zero
-    n_bins = 256
-    colors = ['red', 'white', 'blue']
-    cmap = mcolors.LinearSegmentedColormap.from_list('rwb', colors, N=n_bins)
+    if len(all_reduction_values) > 0:
+        vmin, vmax = calculate_zero_biased_range(all_reduction_values)
+    else:
+        vmin, vmax = -0.25, 0.25  # Fallback
+
+    # Use standard blue-red colormap (blue=positive, red=negative, white=zero)
+    cmap = plt.cm.RdBu_r
 
     # Calculate GDP-weighted temperature for target period (2080-2100)
     target_period_start = config['time_periods']['target_period']['start_year']
@@ -2073,15 +2142,18 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
         reduction_arrays[target_name] = reduction_array
         global_means[target_name] = global_mean
+
+        # Calculate ranges using only valid cells
+        valid_reduction_data = reduction_array[valid_mask]
         data_ranges[target_name] = {
-            'min': float(np.min(reduction_array)),
-            'max': float(np.max(reduction_array))
+            'min': float(np.min(valid_reduction_data)),
+            'max': float(np.max(valid_reduction_data))
         }
 
-    # Calculate overall data range for title annotation
-    all_data = np.concatenate([arr.flatten() for arr in reduction_arrays.values()])
-    overall_min = np.min(all_data)
-    overall_max = np.max(all_data)
+    # Calculate overall data range for title annotation (using only valid cells)
+    all_valid_data = np.concatenate([arr[valid_mask].flatten() for arr in reduction_arrays.values()])
+    overall_min = np.min(all_valid_data)
+    overall_max = np.max(all_valid_data)
 
     # Calculate GDP-weighted means for verification (like original code)
     gdp_weighted_means = {}
@@ -2113,9 +2185,11 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             # Create subplot
             ax = plt.subplot(*map_positions[i])
 
-            # Create map
-            im = ax.pcolormesh(lon_grid, lat_grid, reduction_array,
-                             cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+            # Create map with zero-centered normalization (mask invalid cells)
+            masked_reduction_array = np.where(valid_mask, reduction_array, np.nan)
+            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+            im = ax.pcolormesh(lon_grid, lat_grid, masked_reduction_array,
+                             cmap=cmap, norm=norm, shading='auto')
 
             # Format target name for display
             display_name = target_name.replace('_', ' ').title()
@@ -2545,9 +2619,10 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
         percentile_range = np.nanmax(percentile_timeseries) - np.nanmin(percentile_timeseries)
         print(f"  {percentile_name} percentile range over time: {percentile_range:.6e}")
 
-    # Determine color scale for maps using zero-biased range
+    # Determine color scale for maps (TFP values are always positive, use 0-to-max range)
     all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
-    vmin, vmax = calculate_zero_biased_range(all_tfp_values, 5, 95)
+    vmin = 0.0  # TFP values should always be positive
+    vmax = np.percentile(all_tfp_values, 95)  # Use 95th percentile to handle outliers
 
     # Create colormap for TFP (use viridis - good for scientific data)
     cmap = plt.cm.viridis
