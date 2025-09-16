@@ -14,6 +14,7 @@ Processing Flow (per README.md Section 3):
 5. Generate summary data products (global and regional aggregates)
 """
 
+import copy
 import json
 import os
 import sys
@@ -28,7 +29,8 @@ from coin_ssp_utils import (
     calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
-    create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization
+    create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
+    create_forward_model_visualization
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
 from model_params_factory import ModelParamsFactory
@@ -317,7 +319,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     # Create visualization
     print("Generating target GDP visualization...")
     visualization_path = create_target_gdp_visualization(target_results, config, output_dir,
-                                                        model_name, reference_ssp)
+                                                        model_name, reference_ssp, valid_mask)
     print(f"✅ Visualization saved: {visualization_path}")
 
     print(f"\nStep 1 completed: {len(gdp_targets)} target GDP change patterns calculated")
@@ -720,8 +722,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     return scaling_results
 
 
-def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: Dict[str, Any], 
-                                     tfp_results: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
+def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: Dict[str, Any],
+                                     tfp_results: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 4: Run forward model for all SSPs using per-cell scaling factors.
     
@@ -760,9 +762,9 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     print(f"Using {total_combinations} scaling factor combinations per grid cell")
     print(f"Total processing: {len(forward_ssps)} SSPs × {total_combinations} combinations")
     
-    # Load all climate and economic data for all SSPs upfront
-    print("Loading all NetCDF data for forward modeling...")
-    all_data = load_all_netcdf_data(config)
+    # Use pre-loaded climate and economic data
+    print("Using pre-loaded NetCDF data for forward modeling...")
+    all_data = all_netcdf_data
     
     # Create base ModelParams instance using factory
     base_params = config['model_params_factory'].create_base()
@@ -924,10 +926,16 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     }
     
     # Write results to NetCDF file
-    model_name = config['climate_model']['model_name'] 
+    model_name = config['climate_model']['model_name']
     output_path = get_step_output_path(output_dir, 4, model_name, file_type="nc")
     save_step4_results_netcdf(step4_results, output_path, model_name)
-    
+
+    # Create PDF visualization
+    if config['processing_options']['output_formats']['pdf_line_plots']:
+        print("Creating Step 4 PDF visualization...")
+        pdf_path = create_forward_model_visualization(step4_results, config, output_dir, model_name, all_data)
+        print(f"Step 4 visualization saved to: {pdf_path}")
+
     print(f"\nStep 4 completed: Forward integration for {len(forward_results)} SSP scenarios")
     return step4_results
 
@@ -1054,7 +1062,7 @@ def run_integrated_pipeline(config_path: str) -> None:
         target_results = step1_calculate_target_gdp_changes(config, output_dir, all_netcdf_data)
         tfp_results = step2_calculate_baseline_tfp(config, output_dir, all_netcdf_data)
         scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir, all_netcdf_data)
-        forward_results = step4_forward_integration_all_ssps(config, scaling_results, tfp_results, output_dir)
+        forward_results = step4_forward_integration_all_ssps(config, scaling_results, tfp_results, output_dir, all_netcdf_data)
         step5_processing_summary(config, target_results, tfp_results, scaling_results, forward_results)
         
         print("\n" + "="*100)

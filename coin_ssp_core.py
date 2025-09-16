@@ -331,7 +331,6 @@ def optimize_climate_response_scaling(
     if len(target_indices) == 0:
         raise ValueError(f"No years found in target period {start_year}-{end_year}")
 
-    print(f"    Target period: {start_year}-{end_year} ({len(target_indices)} years)")
 
     def objective(xarr):
         # xarr is a length-1 array because we're using scipy.optimize.minimize

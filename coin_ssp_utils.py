@@ -109,6 +109,133 @@ def filter_scaling_params(scaling_config):
     allowed_keys = set(ScalingParams.__dataclass_fields__.keys())
     return {k: v for k, v in scaling_config.items() if k in allowed_keys}
 
+def create_forward_model_visualization(forward_results, config, output_dir, model_name, all_netcdf_data):
+    """
+    Create comprehensive PDF visualization for Step 4 forward model results.
+
+    Generates a multi-page PDF with one page per (target, damage_function, SSP) combination.
+    Each page shows global mean time series with three lines:
+    - y_climate: GDP with full climate change effects
+    - y_weather: GDP with weather variability only
+    - baseline: Original SSP GDP projections
+
+    Parameters
+    ----------
+    forward_results : dict
+        Results from Step 4 forward integration containing SSP-specific data
+    config : dict
+        Configuration dictionary with scenarios and damage functions
+    output_dir : str
+        Directory for output files
+    model_name : str
+        Climate model name for labeling
+    all_netcdf_data : dict
+        All loaded NetCDF data for baseline GDP access
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    pdf_filename = f"step4_forward_model_visualization_{model_name}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract metadata
+    valid_mask = forward_results['valid_mask']
+    lat = forward_results['_coordinates']['lat']
+    damage_function_names = forward_results['damage_function_names']
+    target_names = forward_results['target_names']
+    forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
+
+    print(f"Creating Step 4 visualization with {len(target_names)} targets × {len(damage_function_names)} damage functions × {len(forward_ssps)} SSPs")
+
+    # Create PDF with multi-page layout
+    with PdfPages(pdf_path) as pdf:
+        page_count = 0
+
+        # Loop through all combinations
+        for target_idx, target_name in enumerate(target_names):
+            target_config = config['gdp_reduction_targets'][target_idx]
+
+            for damage_idx, damage_name in enumerate(damage_function_names):
+                damage_config = config['damage_function_scalings'][damage_idx]
+
+                for ssp in forward_ssps:
+                    page_count += 1
+
+                    # Create new page
+                    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+
+                    # Get SSP-specific data
+                    ssp_results = forward_results['forward_results'][ssp]
+                    gdp_climate = ssp_results['gdp_climate']  # [lat, lon, damage_func, target, time]
+                    gdp_weather = ssp_results['gdp_weather']  # [lat, lon, damage_func, target, time]
+
+                    # Get baseline GDP data from all_netcdf_data
+                    baseline_gdp = get_ssp_data(all_netcdf_data, ssp, 'gdp')  # [time, lat, lon]
+                    years = all_netcdf_data[ssp]['gdp_years']
+
+                    # Extract time series for this combination
+                    ntime = gdp_climate.shape[4]
+                    y_climate_series = np.zeros(ntime)
+                    y_weather_series = np.zeros(ntime)
+                    baseline_series = np.zeros(ntime)
+
+                    for t in range(ntime):
+                        # Extract spatial slice for this time
+                        gdp_climate_t = gdp_climate[:, :, damage_idx, target_idx, t]
+                        gdp_weather_t = gdp_weather[:, :, damage_idx, target_idx, t]
+                        baseline_t = baseline_gdp[t, :, :]  # Note: baseline is [time, lat, lon]
+
+                        # Calculate global means
+                        y_climate_series[t] = calculate_global_mean(gdp_climate_t, lat, valid_mask)
+                        y_weather_series[t] = calculate_global_mean(gdp_weather_t, lat, valid_mask)
+                        baseline_series[t] = calculate_global_mean(baseline_t, lat, valid_mask)
+
+                    # Plot the time series
+                    ax.plot(years, y_climate_series, 'r-', linewidth=2, label='GDP with Climate Effects')
+                    ax.plot(years, y_weather_series, 'b--', linewidth=2, label='GDP with Weather Only')
+                    ax.plot(years, baseline_series, 'k:', linewidth=2, label=f'Baseline {ssp.upper()} GDP')
+
+                    # Formatting
+                    ax.set_xlabel('Year', fontsize=12)
+                    ax.set_ylabel('Global Mean GDP', fontsize=12)
+                    ax.set_title(f'{target_config["target_name"]} × {damage_config["scaling_name"]} × {ssp.upper()}\n'
+                                f'({target_config.get("description", "")[:60]}...)',
+                                fontsize=14, fontweight='bold')
+                    ax.legend(fontsize=10)
+                    ax.grid(True, alpha=0.3)
+
+                    # Set reasonable y-axis limits
+                    all_values = np.concatenate([y_climate_series, y_weather_series, baseline_series])
+                    valid_values = all_values[np.isfinite(all_values)]
+                    if len(valid_values) > 0:
+                        y_min, y_max = np.percentile(valid_values, [1, 99])
+                        y_range = y_max - y_min
+                        ax.set_ylim(y_min - 0.05*y_range, y_max + 0.05*y_range)
+
+                    # Add target reduction info as text
+                    if 'target_amount' in target_config:
+                        target_text = f"Target Reduction: {target_config['target_amount']*100:.1f}%"
+                        ax.text(0.02, 0.98, target_text, transform=ax.transAxes,
+                               fontsize=10, verticalalignment='top',
+                               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+                    plt.tight_layout()
+                    pdf.savefig(fig, bbox_inches='tight')
+                    plt.close(fig)
+
+        print(f"Generated {page_count} pages in Step 4 visualization")
+
+    print(f"Forward model visualization saved to {pdf_path}")
+    return pdf_path
+
+
 def create_country_pdf_books(all_results, params, output_dir, run_name, timestamp):
     """Create PDF books with one book per country, one page per scaling set."""
     output_dir = Path(output_dir)
@@ -720,12 +847,12 @@ def calculate_all_target_reductions(target_configs, gridded_data):
 
         elif target_type == 'quadratic':
             # Quadratic reduction (has zero point)
-            result = calculate_quadratic_target_reduction(target_config, temp_ref, gdp_target, lat)
+            result = calculate_quadratic_target_reduction(target_config, temp_ref, gdp_target, lat, valid_mask)
             result['target_type'] = target_type
 
         elif target_type == 'linear':
             # Linear reduction (has global mean constraint)
-            result = calculate_linear_target_reduction(target_config, temp_ref, gdp_target, lat)
+            result = calculate_linear_target_reduction(target_config, temp_ref, gdp_target, lat, valid_mask)
             result['target_type'] = target_type
 
         else:
@@ -1508,7 +1635,7 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
 
 
 def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict[str, Any],
-                                   output_dir: str, model_name: str, reference_ssp: str) -> str:
+                                   output_dir: str, model_name: str, reference_ssp: str, valid_mask: np.ndarray) -> str:
     """
     Create comprehensive visualization of target GDP reduction results.
 
@@ -1567,7 +1694,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     # Calculate GDP-weighted temperature for target period (2080-2100)
     target_period_start = config['time_periods']['target_period']['start_year']
     target_period_end = config['time_periods']['target_period']['end_year']
-    gdp_weighted_temp_target = calculate_global_mean(gdp_target * temp_ref, lat) / global_gdp_target
+    gdp_weighted_temp_target = calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target
 
     # Extract reduction arrays and calculate statistics
     reduction_arrays = {}
@@ -1598,7 +1725,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     for target_name in target_names:
         reduction_array = reduction_arrays[target_name]
         # GDP-weighted mean calculation: sum(gdp * reduction) / sum(gdp)
-        gdp_weighted_mean = calculate_global_mean(gdp_target * (1 + reduction_array), lat) / calculate_global_mean(gdp_target, lat) - 1
+        gdp_weighted_mean = calculate_global_mean(gdp_target * (1 + reduction_array), lat, valid_mask) / calculate_global_mean(gdp_target, lat, valid_mask) - 1
         gdp_weighted_means[target_name] = gdp_weighted_mean
 
     with PdfPages(pdf_path) as pdf:
