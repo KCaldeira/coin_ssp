@@ -18,6 +18,7 @@ import copy
 import json
 import os
 import sys
+import time
 import numpy as np
 from datetime import datetime
 from pathlib import Path
@@ -180,7 +181,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     return filepath
 
 
-def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any] = None) -> Dict[str, Any]:
+def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 1: Develop target GDP changes using reference SSP scenario (global calculation).
     
@@ -214,30 +215,16 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     print(f"Climate model: {model_name}")
     print(f"Processing {len(gdp_targets)} GDP reduction targets")
     
-    # Use pre-loaded data if provided, otherwise load fresh
-    if all_netcdf_data is not None:
-        print(f"Using pre-loaded NetCDF data for {reference_ssp}...")
-        # Convert from all_netcdf_data format to Step 1's expected format
-        data = {
-            'tas': all_netcdf_data[reference_ssp]['temperature'],
-            'gdp': all_netcdf_data[reference_ssp]['gdp'],
-            'lat': all_netcdf_data['_metadata']['lat'],
-            'lon': all_netcdf_data['_metadata']['lon'],
-            'tas_years': all_netcdf_data[reference_ssp]['temperature_years'],
-            'gdp_years': all_netcdf_data[reference_ssp]['gdp_years']
-        }
-    else:
-        # Fallback to individual loading (backward compatibility)
-        print(f"Loading gridded data for {reference_ssp}...")
-
-        temp_file = resolve_netcdf_filepath(config, 'temperature', reference_ssp)
-        gdp_file = resolve_netcdf_filepath(config, 'gdp', reference_ssp)
-
-        print(f"  Temperature file: {temp_file}")
-        print(f"  GDP file: {gdp_file}")
-
-        # Load the gridded data
-        data = load_gridded_data(config, model_name, reference_ssp)
+    # Convert from all_netcdf_data format to Step 1's expected format
+    print(f"Using pre-loaded NetCDF data for {reference_ssp}...")
+    data = {
+        'tas': all_netcdf_data[reference_ssp]['temperature'],
+        'gdp': all_netcdf_data[reference_ssp]['gdp'],
+        'lat': all_netcdf_data['_metadata']['lat'],
+        'lon': all_netcdf_data['_metadata']['lon'],
+        'tas_years': all_netcdf_data[reference_ssp]['temperature_years'],
+        'gdp_years': all_netcdf_data[reference_ssp]['gdp_years']
+    }
     
     # Calculate temporal means
     print("Calculating temporal means...")
@@ -328,7 +315,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     return target_results
 
 
-def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any] = None) -> Dict[str, Any]:
+def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 2: Calculate baseline TFP for each SSP scenario (per grid cell, no climate effects).
     
@@ -359,14 +346,9 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
     print(f"Climate model: {model_name}")
     print(f"Processing {len(forward_ssps)} SSP scenarios: {forward_ssps}")
     
-    # Use pre-loaded data if provided, otherwise load fresh
-    if all_netcdf_data is not None:
-        print("Using pre-loaded NetCDF data...")
-        all_data = all_netcdf_data
-    else:
-        # Fallback to loading fresh (backward compatibility)
-        print("Loading all NetCDF data...")
-        all_data = load_all_netcdf_data(config)
+    # Use pre-loaded data
+    print("Using pre-loaded NetCDF data...")
+    all_data = all_netcdf_data
     
     # Create ModelParams instance using factory
     params = config['model_params_factory'].create_base()
@@ -484,7 +466,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
 
     # Generate TFP visualization
     print("Generating baseline TFP visualization...")
-    visualization_path = create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name)
+    visualization_path = create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name, all_data)
     print(f"✅ Visualization saved: {visualization_path}")
 
     print(f"\nStep 2 completed: Baseline TFP calculated for {len(tfp_results)} SSP scenarios")
@@ -536,14 +518,9 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print(f"GDP reduction targets: {n_gdp_targets}")
     print(f"Total combinations per grid cell: {total_combinations}")
     
-    # Use pre-loaded data if provided, otherwise load fresh
-    if all_netcdf_data is not None:
-        print(f"Using pre-loaded NetCDF data for {reference_ssp}...")
-        all_data = all_netcdf_data
-    else:
-        # Fallback to loading fresh (backward compatibility)
-        print(f"Loading climate data for {reference_ssp}...")
-        all_data = load_all_netcdf_data(config)
+    # Use pre-loaded NetCDF data
+    print(f"Using pre-loaded NetCDF data for {reference_ssp}...")
+    all_data = all_netcdf_data
     
     # Extract climate and population data
     temp_data = get_ssp_data(all_data, reference_ssp, 'temperature')  # [lat, lon, time]
@@ -1261,23 +1238,35 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
     print("Following README.md Section 3: Grid Cell Processing")
     print("="*100)
     
+    # Start overall timing
+    pipeline_start_time = time.time()
+    step_times = {}
+
     try:
         # Load configuration
         config = load_integrated_config(config_path)
-        
+
         # Setup output directory
         output_dir = setup_output_directory(config)
 
         # Load all NetCDF data once for efficiency (major optimization)
+        data_start = time.time()
         print("Loading all NetCDF data for entire pipeline...")
         all_netcdf_data = load_all_netcdf_data(config)
         print("✅ All NetCDF data loaded - will be reused across all processing steps")
+        step_times['Data Loading'] = time.time() - data_start
 
         # Execute 5-step processing flow
+        step1_start = time.time()
         target_results = step1_calculate_target_gdp_changes(config, output_dir, all_netcdf_data)
+        step_times['Step 1 - Target GDP'] = time.time() - step1_start
+
+        step2_start = time.time()
         tfp_results = step2_calculate_baseline_tfp(config, output_dir, all_netcdf_data)
+        step_times['Step 2 - Baseline TFP'] = time.time() - step2_start
 
         # Step 3: Load from file or compute scaling factors
+        step3_start = time.time()
         if step3_file:
             print(f"\n🔄 LOADING STEP 3 FROM FILE: {step3_file}")
             scaling_results = load_step3_results_from_netcdf(step3_file)
@@ -1293,19 +1282,48 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
             # Objective function visualization
             obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, model_name)
             print(f"✅ Objective function visualization saved to: {obj_func_path}")
+            step_times['Step 3 - Scaling Factors (Loaded)'] = time.time() - step3_start
         else:
             scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir, all_netcdf_data)
+            step_times['Step 3 - Scaling Factors (Computed)'] = time.time() - step3_start
 
+        step4_start = time.time()
         forward_results = step4_forward_integration_all_ssps(config, scaling_results, tfp_results, output_dir, all_netcdf_data)
+        step_times['Step 4 - Forward Integration'] = time.time() - step4_start
+
+        step5_start = time.time()
         step5_processing_summary(config, target_results, tfp_results, scaling_results, forward_results)
-        
+        step_times['Step 5 - Processing Summary'] = time.time() - step5_start
+
+        # Calculate total time and print timing report
+        total_time = time.time() - pipeline_start_time
+
+        print("\n" + "="*100)
+        print("PIPELINE TIMING REPORT")
+        print("="*100)
+        for step_name, duration in step_times.items():
+            print(f"{step_name:<35}: {duration:8.2f} seconds")
+        print("-" * 50)
+        print(f"{'TOTAL PIPELINE TIME':<35}: {total_time:8.2f} seconds")
+        print("="*100)
+
         print("\n" + "="*100)
         print("INTEGRATED PROCESSING COMPLETE")
         print("="*100)
         print("All 5 steps executed successfully!")
         print("Per-grid-cell scaling factors calculated and applied to all SSP scenarios")
-        
+
     except Exception as e:
+        # Print partial timing report even on failure
+        total_time = time.time() - pipeline_start_time
+        print(f"\n" + "="*60)
+        print("PARTIAL TIMING REPORT (before failure)")
+        print("="*60)
+        for step_name, duration in step_times.items():
+            print(f"{step_name:<35}: {duration:8.2f} seconds")
+        print("-" * 50)
+        print(f"{'TOTAL TIME TO FAILURE':<35}: {total_time:8.2f} seconds")
+        print("="*60)
         print(f"\nERROR: Processing failed with exception: {e}")
         raise
 

@@ -12,28 +12,34 @@
     "_processing_step": "Data Loading (All Steps)",
     "model_name": "CanESM5",
     "input_directory": "data/input",
-    "netcdf_file_patterns": {
-      "temperature": "gridRawAlt_tas",
-      "precipitation": "gridRawAlt_pr",
-      "gdp": "Gridded_GDPdensity",
-      "population": "GriddedAlt_POPdensity",
-      "target_reductions": "target_gdp_reductions"
+    "file_prefixes": {
+      "tas_file_prefix": "CLIMATE",
+      "pr_file_prefix": "CLIMATE",
+      "gdp_file_prefix": "GDP",
+      "pop_file_prefix": "POP",
+      "target_reductions_file_prefix": "target_gdp_reductions"
     },
-    "description": "Files will be resolved as {input_directory}/{prefix}_{model_name}_{ssp_name}.nc"
+    "variable_names": {
+      "tas_var_name": "tas",
+      "pr_var_name": "pr",
+      "gdp_var_name": "gdp_density",
+      "pop_var_name": "pop_density"
+    },
+    "description": "File patterns: {prefix}_{model_name}_historical.nc + {prefix}_{model_name}_{ssp}.nc for tas/pr/pop; {prefix}_{model_name}_{short_ssp}.nc for gdp"
   },
 
   "ssp_scenarios": {
     "_processing_step": "Data Loading & Step Selection",
     "reference_ssp": "ssp245",
-    "forward_simulation_ssps": ["ssp245", "ssp585"],
+    "forward_simulation_ssps": ["ssp126","ssp245","ssp460","ssp370", "ssp585"],
     "description": "Reference SSP used for scaling factor calibration, forward simulation SSPs for TFP and projections"
   },
 
   "time_periods": {
     "_processing_step": "Step 1 - Target GDP Changes",
     "reference_period": {
-      "start_year": 2015,
-      "end_year": 2025,
+      "start_year": 1861,
+      "end_year": 2014,
       "description": "Reference period for temperature and baseline calculations"
     },
     "target_period": {

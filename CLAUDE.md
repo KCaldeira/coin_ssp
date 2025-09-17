@@ -3,6 +3,17 @@
 ## Coding Philosophy
 This project prioritizes **elegant, fail-fast code** that surfaces errors quickly rather than hiding them.
 
+## 🔒 Preservation Markers for Critical Content
+Use these markers to indicate content that should NEVER be removed during documentation updates:
+
+- `<!-- CRITICAL-PRESERVE-START -->` and `<!-- CRITICAL-PRESERVE-END -->` for essential sections
+- `<!-- VALUABLE-PRESERVE-START -->` and `<!-- VALUABLE-PRESERVE-END -->` for important but updateable content
+- `<!-- LESSON-PRESERVE-START -->` and `<!-- LESSON-PRESERVE-END -->` for debugging lessons and technical insights
+
+These markers ensure critical institutional knowledge is never lost during refactoring.
+
+
+<!-- CRITICAL-PRESERVE-START -->`
 ## Core Style Requirements
 
 ### Error Handling
@@ -11,6 +22,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Fail fast** - prefer code that crashes immediately on invalid inputs rather than continuing with bad data
 - **No try-catch blocks** unless absolutely necessary for program logic (not error suppression)
 - **No optional function arguments** - all parameters must be explicitly provided
+- **No backward compatibility** - no conditional logic to handle missing arguments or legacy data formats
 - **Assume complete data** - do not check for missing data fields. If required data is missing, let the code fail with natural Python errors
 
 ### Code Elegance
@@ -24,6 +36,8 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - Functions should assume valid inputs and focus on their core mathematical/logical purpose
 - Let Python's natural error messages guide debugging rather than custom error handling
 - Prioritize algorithmic clarity over robustness checking
+- **All function arguments must be explicitly provided** - no default values (=None) or conditional logic
+- **Clean fail-fast approach** - if required arguments are not supplied, the code should fail immediately with a clear error
 
 ## Examples
 
@@ -38,6 +52,7 @@ def apply_damage_function(output, temperature, sensitivity):
 
 ### Avoid
 ```python
+# ❌ Defensive programming with input validation
 def calculate_growth_rate(values):
     if not isinstance(values, np.ndarray):
         raise TypeError("values must be numpy array")
@@ -48,6 +63,16 @@ def calculate_growth_rate(values):
     except Exception as e:
         logger.error(f"Growth calculation failed: {e}")
         return None
+
+# ❌ Optional arguments with backward compatibility
+def process_data(input_data, config, optional_data=None):
+    if optional_data is not None:
+        # Use provided data
+        data = optional_data
+    else:
+        # Fallback to loading fresh data
+        data = load_data(config)
+    return analyze(data)
 ```
 
 ## Project Architecture
@@ -56,6 +81,8 @@ def calculate_growth_rate(values):
 - **`coin_ssp_core.py`**: Core economic model functions and parameter classes
 - **`coin_ssp_utils.py`**: Consolidated utility functions for mathematical operations, visualization, NetCDF processing
 - **`main_integrated.py`**: Complete 5-step processing pipeline
+
+<!-- CRITICAL-PRESERVE-END -->`
 - **`main.py`**: Country-level workflow orchestration
 
 ### Key Technical Requirements

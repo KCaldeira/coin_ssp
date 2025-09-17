@@ -781,6 +781,173 @@ def interpolate_to_annual_grid(original_years, data_array, target_years):
 # Target GDP Utilities (moved from coin_ssp_target_gdp.py)
 # =============================================================================
 
+def load_and_concatenate_climate_data(config, model_name, ssp_name, data_type):
+    """
+    Load and concatenate historical and SSP-specific climate data files.
+
+    For temperature and precipitation, loads from:
+    1. CLIMATE_{model_name}_historical.nc
+    2. CLIMATE_{model_name}_{ssp_name}.nc
+    Then concatenates along time dimension.
+
+    Parameters
+    ----------
+    config : Dict[str, Any]
+        Configuration dictionary
+    model_name : str
+        Climate model name
+    ssp_name : str
+        SSP scenario name
+    data_type : str
+        'temperature' or 'precipitation'
+
+    Returns
+    -------
+    tuple
+        (concatenated_data, concatenated_years, valid_mask, coordinates)
+    """
+    import os
+
+    climate_model = config['climate_model']
+    input_dir = climate_model['input_directory']
+
+    # Get file prefix and variable name from new configuration structure
+    if data_type == 'temperature':
+        prefix = climate_model['file_prefixes']['tas_file_prefix']
+        var_name = climate_model['variable_names']['tas_var_name']
+    elif data_type == 'precipitation':
+        prefix = climate_model['file_prefixes']['pr_file_prefix']
+        var_name = climate_model['variable_names']['pr_var_name']
+    else:
+        raise ValueError(f"Unsupported data_type for climate data: {data_type}")
+
+    # Historical file
+    hist_filename = f"{prefix}_{model_name}_historical.nc"
+    hist_filepath = os.path.join(input_dir, hist_filename)
+
+    # SSP-specific file
+    ssp_filename = f"{prefix}_{model_name}_{ssp_name}.nc"
+    ssp_filepath = os.path.join(input_dir, ssp_filename)
+
+    print(f"    Loading historical: {hist_filename}")
+    print(f"    Loading SSP: {ssp_filename}")
+
+    # Load historical data
+    hist_ds = xr.open_dataset(hist_filepath, decode_times=False)
+    hist_years, hist_valid_mask = extract_year_coordinate(hist_ds)
+
+    # Load SSP data
+    ssp_ds = xr.open_dataset(ssp_filepath, decode_times=False)
+    ssp_years, ssp_valid_mask = extract_year_coordinate(ssp_ds)
+
+    # Extract data arrays
+    hist_data_all = hist_ds[var_name].values
+    ssp_data_all = ssp_ds[var_name].values
+
+    # Apply valid masks
+    hist_data = hist_data_all[hist_valid_mask]
+    ssp_data = ssp_data_all[ssp_valid_mask]
+
+    # Convert temperature from Kelvin to Celsius
+    if data_type == 'temperature':
+        hist_data = hist_data - 273.15
+        ssp_data = ssp_data - 273.15
+
+    # Concatenate along time dimension
+    concatenated_data = np.concatenate([hist_data, ssp_data], axis=0)
+    concatenated_years = np.concatenate([hist_years, ssp_years])
+
+    # Get coordinates from historical file (should be same for both)
+    lat = hist_ds.lat.values
+    lon = hist_ds.lon.values
+
+    print(f"    Historical: {len(hist_years)} years ({hist_years[0]}-{hist_years[-1]})")
+    print(f"    SSP: {len(ssp_years)} years ({ssp_years[0]}-{ssp_years[-1]})")
+    print(f"    Concatenated: {len(concatenated_years)} years ({concatenated_years[0]}-{concatenated_years[-1]})")
+
+    hist_ds.close()
+    ssp_ds.close()
+
+    return concatenated_data, concatenated_years, lat, lon
+
+
+def load_and_concatenate_population_data(config, model_name, ssp_name):
+    """
+    Load and concatenate historical and SSP-specific population data files.
+
+    Loads from:
+    1. POP_{model_name}_hist.nc
+    2. POP_{model_name}_{short_ssp_name}.nc
+    Then concatenates along time dimension.
+
+    Parameters
+    ----------
+    config : Dict[str, Any]
+        Configuration dictionary
+    model_name : str
+        Climate model name
+    ssp_name : str
+        SSP scenario name (e.g., 'ssp245')
+
+    Returns
+    -------
+    tuple
+        (concatenated_data, concatenated_years, coordinates)
+    """
+    import os
+
+    climate_model = config['climate_model']
+    input_dir = climate_model['input_directory']
+    prefix = climate_model['file_prefixes']['pop_file_prefix']
+    var_name = climate_model['variable_names']['pop_var_name']
+
+    # Truncate SSP name to short form (e.g., 'ssp245' -> 'ssp2')
+    if ssp_name.startswith('ssp') and len(ssp_name) >= 4:
+        short_ssp = ssp_name[:4]  # Keep 'ssp' + first digit
+    else:
+        short_ssp = ssp_name
+
+    # Historical file
+    hist_filename = f"{prefix}_{model_name}_hist.nc"
+    hist_filepath = os.path.join(input_dir, hist_filename)
+
+    # SSP-specific file
+    ssp_filename = f"{prefix}_{model_name}_{short_ssp}.nc"
+    ssp_filepath = os.path.join(input_dir, ssp_filename)
+
+    print(f"    Loading historical: {hist_filename}")
+    print(f"    Loading SSP: {ssp_filename}")
+
+    # Load historical data
+    hist_ds = xr.open_dataset(hist_filepath, decode_times=False)
+    hist_years, hist_valid_mask = extract_year_coordinate(hist_ds)
+    hist_data_all = hist_ds[var_name].values
+    hist_data = hist_data_all[hist_valid_mask]
+
+    # Load SSP data
+    ssp_ds = xr.open_dataset(ssp_filepath, decode_times=False)
+    ssp_years, ssp_valid_mask = extract_year_coordinate(ssp_ds)
+    ssp_data_all = ssp_ds[var_name].values
+    ssp_data = ssp_data_all[ssp_valid_mask]
+
+    # Concatenate along time dimension
+    concatenated_data = np.concatenate([hist_data, ssp_data], axis=0)
+    concatenated_years = np.concatenate([hist_years, ssp_years])
+
+    # Get coordinates from historical file
+    lat = hist_ds.lat.values
+    lon = hist_ds.lon.values
+
+    print(f"    Historical: {len(hist_years)} years ({hist_years[0]}-{hist_years[-1]})")
+    print(f"    SSP: {len(ssp_years)} years ({ssp_years[0]}-{ssp_years[-1]})")
+    print(f"    Concatenated: {len(concatenated_years)} years ({concatenated_years[0]}-{concatenated_years[-1]})")
+
+    hist_ds.close()
+    ssp_ds.close()
+
+    return concatenated_data, concatenated_years, lat, lon
+
+
 def load_gridded_data(config, model_name, case_name):
     """
     Load all four NetCDF files and return as a temporally-aligned dataset.
@@ -813,47 +980,43 @@ def load_gridded_data(config, model_name, case_name):
         - 'pop_years': population time axis (annual years)
         - 'common_years': final common year range for all variables
     """
+    import os
     print(f"Loading and aligning NetCDF data for {model_name} {case_name}...")
 
-    # Load temperature data
+    # Load temperature data (concatenate historical + SSP)
     print("  Loading temperature data...")
-    temp_file = resolve_netcdf_filepath(config, 'temperature', case_name)
-    tas_ds = xr.open_dataset(temp_file, decode_times=False)
-    tas_raw_all = tas_ds.tas.values - 273.15  # Convert from Kelvin to Celsius
-    tas_years_raw, tas_valid_mask = extract_year_coordinate(tas_ds)
-    tas_raw = tas_raw_all[tas_valid_mask]
+    tas_raw, tas_years_raw, lat, lon = load_and_concatenate_climate_data(config, model_name, case_name, 'temperature')
 
-    # Load precipitation data
+    # Load precipitation data (concatenate historical + SSP)
     print("  Loading precipitation data...")
-    precip_file = resolve_netcdf_filepath(config, 'precipitation', case_name)
-    pr_ds = xr.open_dataset(precip_file, decode_times=False)
-    pr_raw_all = pr_ds.pr.values
-    pr_years_raw, pr_valid_mask = extract_year_coordinate(pr_ds)
-    pr_raw = pr_raw_all[pr_valid_mask]
+    pr_raw, pr_years_raw, _, _ = load_and_concatenate_climate_data(config, model_name, case_name, 'precipitation')
 
-    # Load GDP data
+    # Load GDP data (single file with short SSP name, no concatenation)
     print("  Loading GDP data...")
-    # Load GDP data
-    print("  Loading GDP data...")
-    gdp_file = resolve_netcdf_filepath(config, 'gdp', case_name)
+    climate_model = config['climate_model']
+    input_dir = climate_model['input_directory']
+    gdp_prefix = climate_model['file_prefixes']['gdp_file_prefix']
+    gdp_var_name = climate_model['variable_names']['gdp_var_name']
+
+    # Truncate SSP name to short form (e.g., 'ssp245' -> 'ssp2')
+    if case_name.startswith('ssp') and len(case_name) >= 4:
+        short_ssp = case_name[:4]  # Keep 'ssp' + first digit
+    else:
+        short_ssp = case_name
+
+    gdp_filename = f"{gdp_prefix}_{model_name}_{short_ssp}.nc"
+    gdp_file = os.path.join(input_dir, gdp_filename)
+    print(f"    Loading: {gdp_filename}")
+
     gdp_ds = xr.open_dataset(gdp_file, decode_times=False)
-    gdp_raw_all = gdp_ds.gdp_density.values
+    gdp_raw_all = gdp_ds[gdp_var_name].values
     gdp_years_raw, gdp_valid_mask = extract_year_coordinate(gdp_ds)
     gdp_raw = gdp_raw_all[gdp_valid_mask]
+    gdp_ds.close()
 
-    # Load population data
+    # Load population data (concatenate historical + SSP)
     print("  Loading population data...")
-    # Load population data
-    print("  Loading population data...")
-    pop_file = resolve_netcdf_filepath(config, 'population', case_name)
-    pop_ds = xr.open_dataset(pop_file, decode_times=False)
-    pop_raw_all = pop_ds.pop_density.values
-    pop_years_raw, pop_valid_mask = extract_year_coordinate(pop_ds)
-    pop_raw = pop_raw_all[pop_valid_mask]
-
-    # Get coordinate arrays
-    lat = tas_ds.lat.values
-    lon = tas_ds.lon.values
+    pop_raw, pop_years_raw, _, _ = load_and_concatenate_population_data(config, model_name, case_name)
 
     print(f"  Original time ranges:")
     print(f"    Temperature: {tas_years_raw.min()}-{tas_years_raw.max()} ({len(tas_years_raw)} points)")
@@ -902,11 +1065,7 @@ def load_gridded_data(config, model_name, case_name):
 
     print(f"  ✅ All variables aligned to {len(common_years)} common years")
 
-    # Close datasets
-    tas_ds.close()
-    pr_ds.close()
-    gdp_ds.close()
-    pop_ds.close()
+    # Note: Individual datasets are closed within their respective loading functions
 
     return {
         'tas': tas_aligned,
@@ -1370,10 +1529,10 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
         Structure:
         {
             'ssp245': {
-                'temperature': np.array([lat, lon, time]),  # °C
-                'precipitation': np.array([lat, lon, time]), # mm/day  
-                'gdp': np.array([lat, lon, time]),          # economic units
-                'population': np.array([lat, lon, time])    # people
+                'temperature': np.array([time, lat, lon]),  # °C
+                'precipitation': np.array([time, lat, lon]), # mm/day
+                'gdp': np.array([time, lat, lon]),          # economic units
+                'population': np.array([time, lat, lon])    # people
             },
             'ssp585': { ... },
             '_metadata': {
@@ -1437,10 +1596,10 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
             
             # Store in organized structure
             all_data[ssp_name] = {
-                'temperature': ssp_data['tas'],      # [lat, lon, time]
-                'precipitation': ssp_data['pr'],     # [lat, lon, time]  
-                'gdp': ssp_data['gdp'],              # [lat, lon, time]
-                'population': ssp_data['pop'],       # [lat, lon, time]
+                'temperature': ssp_data['tas'],      # [time, lat, lon]
+                'precipitation': ssp_data['pr'],     # [time, lat, lon]
+                'gdp': ssp_data['gdp'],              # [time, lat, lon]
+                'population': ssp_data['pop'],       # [time, lat, lon]
                 'temperature_years': ssp_data['tas_years'],
                 'precipitation_years': ssp_data['pr_years'],
                 'gdp_years': ssp_data['gdp_years'],
@@ -1524,10 +1683,10 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: str) -> str:
     """
-    Resolve NetCDF file path using naming convention: {prefix}_{model_name}_{ssp_name}.nc
+    Resolve NetCDF file path using new configuration structure.
 
-    For GDP and population files, SSP names are truncated from 'sspXXX' to 'sspX' format
-    (e.g., 'ssp245' becomes 'ssp2', 'ssp585' becomes 'ssp5').
+    NOTE: This function is deprecated in favor of specialized loading functions.
+    It's maintained for backward compatibility and file path display purposes.
 
     Parameters
     ----------
@@ -1541,23 +1700,37 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     Returns
     -------
     str
-        Full path to NetCDF file
+        Full path to NetCDF file (returns first file for concatenated data types)
     """
     climate_model = config['climate_model']
     model_name = climate_model['model_name']
     input_dir = climate_model['input_directory']
-    prefix = climate_model['netcdf_file_patterns'][data_type]
 
-    # For GDP and population files, truncate SSP name to first digit only
-    # e.g., 'ssp245' -> 'ssp2', 'ssp585' -> 'ssp5'
-    if data_type in ['gdp', 'population'] and ssp_name.startswith('ssp') and len(ssp_name) >= 4:
-        truncated_ssp = ssp_name[:4]  # Keep 'ssp' + first digit
-        filename = f"{prefix}_{model_name}_{truncated_ssp}.nc"
-    else:
+    # Map old data_type names to new configuration structure
+    if data_type == 'temperature':
+        prefix = climate_model['file_prefixes']['tas_file_prefix']
+        filename = f"{prefix}_{model_name}_historical.nc"  # Return historical file
+    elif data_type == 'precipitation':
+        prefix = climate_model['file_prefixes']['pr_file_prefix']
+        filename = f"{prefix}_{model_name}_historical.nc"  # Return historical file
+    elif data_type == 'gdp':
+        prefix = climate_model['file_prefixes']['gdp_file_prefix']
+        # Truncate SSP name for GDP files
+        if ssp_name.startswith('ssp') and len(ssp_name) >= 4:
+            short_ssp = ssp_name[:4]
+        else:
+            short_ssp = ssp_name
+        filename = f"{prefix}_{model_name}_{short_ssp}.nc"
+    elif data_type == 'population':
+        prefix = climate_model['file_prefixes']['pop_file_prefix']
+        filename = f"{prefix}_{model_name}_hist.nc"  # Return historical file
+    elif data_type == 'target_reductions':
+        prefix = climate_model['file_prefixes']['target_reductions_file_prefix']
         filename = f"{prefix}_{model_name}_{ssp_name}.nc"
+    else:
+        raise ValueError(f"Unknown data_type: {data_type}")
 
     filepath = os.path.join(input_dir, filename)
-
     return filepath
 
 
@@ -2712,7 +2885,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
     return pdf_path
 
 
-def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name):
+def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name, all_netcdf_data):
     """
     Create comprehensive PDF visualization for Step 2 baseline TFP results.
 
@@ -2956,19 +3129,13 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
                     max_pop_series = np.full(len(years), np.nan)
                     max_gdp_series = np.full(len(years), np.nan)
 
-                    # Load the data directly using the same approach as the main pipeline
-                    model_name_inner = config['climate_model']['model_name']
-                    try:
-                        # Use load_gridded_data to get the full time series data
-                        ssp_data = load_gridded_data(config, model_name_inner, viz_ssp)
-                        if 'pop' in ssp_data and 'gdp' in ssp_data:
-                            min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
-                            max_pop_series = ssp_data['pop'][:, max_lat, max_lon]
-                            min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
-                            max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
-                    except Exception as e:
-                        print(f"  Warning: Could not load GDP/population data for CSV: {e}")
-                        # Leave as NaN arrays if loading fails
+                    # Extract data from pre-loaded all_netcdf_data
+                    # NOTE: all_netcdf_data has shape [time, lat, lon] same as TFP
+                    ssp_data = all_netcdf_data[viz_ssp]
+                    min_pop_series = ssp_data['population'][:, min_lat, min_lon]
+                    max_pop_series = ssp_data['population'][:, max_lat, max_lon]
+                    min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
+                    max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
 
                     # Create DataFrame and save to CSV
                     import pandas as pd
