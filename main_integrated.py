@@ -30,6 +30,7 @@ from coin_ssp_utils import (
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
+    create_objective_function_visualization,
     create_forward_model_visualization, create_forward_model_maps_visualization, load_step3_results_from_netcdf
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
@@ -720,7 +721,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     # Generate scaling factors visualization
     print("Generating scaling factors visualization...")
     visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
-    print(f"✅ Visualization saved: {visualization_path}")
+    print(f"✅ Scaling factors visualization saved: {visualization_path}")
+
+    # Generate objective function visualization
+    print("Generating objective function visualization...")
+    obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, model_name)
+    print(f"✅ Objective function visualization saved: {obj_func_path}")
 
     # Display GDP-weighted scaling factor summary
     print_gdp_weighted_scaling_summary(scaling_results, config, all_netcdf_data, output_dir)
@@ -1276,11 +1282,17 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
             print(f"\n🔄 LOADING STEP 3 FROM FILE: {step3_file}")
             scaling_results = load_step3_results_from_netcdf(step3_file)
 
-            # Create Step 3 visualization even when loaded from file
-            print("Creating Step 3 PDF visualization from loaded data...")
+            # Create Step 3 visualizations even when loaded from file
+            print("Creating Step 3 PDF visualizations from loaded data...")
             model_name = config['climate_model']['model_name']
+
+            # Scaling factors visualization
             pdf_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
-            print(f"Step 3 visualization saved to: {pdf_path}")
+            print(f"✅ Scaling factors visualization saved to: {pdf_path}")
+
+            # Objective function visualization
+            obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, model_name)
+            print(f"✅ Objective function visualization saved to: {obj_func_path}")
         else:
             scaling_results = step3_calculate_scaling_factors_per_cell(config, target_results, tfp_results, output_dir, all_netcdf_data)
 

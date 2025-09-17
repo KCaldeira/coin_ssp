@@ -152,24 +152,46 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
     target_names = forward_results['target_names']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
 
-    print(f"Creating Step 4 visualization with {len(target_names)} targets × {len(response_function_names)} damage functions × {len(forward_ssps)} SSPs")
+    # Calculate total charts and pages
+    total_charts = len(target_names) * len(response_function_names) * len(forward_ssps)
+    charts_per_page = 3
+    total_pages = (total_charts + charts_per_page - 1) // charts_per_page  # Ceiling division
+
+    print(f"Creating Step 4 line charts: {total_charts} charts across {total_pages} pages (3 charts per page)")
+    print(f"  {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
-        page_count = 0
+        chart_idx = 0
+        page_num = 0
 
-        # Loop through all combinations
-        for target_idx, target_name in enumerate(target_names):
-            target_config = config['gdp_reduction_targets'][target_idx]
+        # Loop through all combinations (target innermost for 3-per-page grouping)
+        for damage_idx, damage_name in enumerate(response_function_names):
+            damage_config = config['response_function_scalings'][damage_idx]
 
-            for damage_idx, damage_name in enumerate(response_function_names):
-                damage_config = config['response_function_scalings'][damage_idx]
+            for ssp in forward_ssps:
 
-                for ssp in forward_ssps:
-                    page_count += 1
+                for target_idx, target_name in enumerate(target_names):
+                    target_config = config['gdp_reduction_targets'][target_idx]
 
-                    # Create new page
-                    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+                    # Start new page if needed (every 3 charts)
+                    if chart_idx % charts_per_page == 0:
+                        if chart_idx > 0:
+                            # Save previous page
+                            plt.tight_layout()
+                            plt.subplots_adjust(top=0.93, bottom=0.05)
+                            pdf.savefig(fig, bbox_inches='tight')
+                            plt.close(fig)
+
+                        # Create new page
+                        page_num += 1
+                        fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
+                        fig.suptitle(f'Step 4: Forward Model Time Series - {model_name} - Page {page_num}/{total_pages}',
+                                    fontsize=16, fontweight='bold', y=0.98)
+
+                    # Position on current page (1-3)
+                    subplot_idx = (chart_idx % charts_per_page) + 1
+                    ax = plt.subplot(charts_per_page, 1, subplot_idx)  # 3 rows, 1 column
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
@@ -228,11 +250,17 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
                                fontsize=10, verticalalignment='top',
                                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-                    plt.tight_layout()
-                    pdf.savefig(fig, bbox_inches='tight')
-                    plt.close(fig)
+                    # Increment chart counter
+                    chart_idx += 1
 
-        print(f"Generated {page_count} pages in Step 4 visualization")
+        # Save final page if there are any charts on it
+        if chart_idx > 0:
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.93, bottom=0.05)
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+
+        print(f"Generated {total_pages} pages in Step 4 visualization")
 
     print(f"Forward model visualization saved to {pdf_path}")
     return pdf_path
@@ -2520,6 +2548,167 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
             plt.close(fig)
 
     print(f"Scaling factors visualization saved to {pdf_path} ({total_pages} pages, 3 maps per page)")
+    return pdf_path
+
+
+def create_objective_function_visualization(scaling_results, config, output_dir, model_name):
+    """
+    Create comprehensive PDF visualization for Step 3 objective function values.
+
+    Generates one page per 3 maps (same layout as scaling factors) showing optimization
+    objective function values across grid cells. Lower values indicate better constraint
+    satisfaction for each response function × target combination.
+
+    Parameters
+    ----------
+    scaling_results : dict
+        Results from Step 3 scaling factor calculation
+    config : dict
+        Configuration dictionary
+    output_dir : str
+        Directory for output files
+    model_name : str
+        Climate model name for labeling
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    pdf_filename = f"step3_objective_function_visualization_{model_name}_{reference_ssp}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract data arrays and metadata
+    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
+    valid_mask = scaling_results['valid_mask']  # [lat, lon]
+    response_function_names = scaling_results['response_function_names']
+    target_names = scaling_results['target_names']
+
+    # Get coordinate information
+    coordinates = scaling_results['_coordinates']
+    lat = coordinates['lat']
+    lon = coordinates['lon']
+
+    # Create meshgrid for plotting
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+    # Get dimensions
+    nlat, nlon, n_response, n_targets = optimization_errors.shape
+    total_maps = n_response * n_targets
+
+    # New layout: 3 maps per page, arranged vertically
+    maps_per_page = 3
+    total_pages = (total_maps + maps_per_page - 1) // maps_per_page  # Ceiling division
+
+    print(f"Creating Step 3 objective function visualization: {total_maps} maps across {total_pages} pages (3 maps per page)")
+
+    # Create PDF with multi-page layout
+    with PdfPages(pdf_path) as pdf:
+        map_idx = 0
+        page_num = 0
+
+        for response_idx, response_name in enumerate(response_function_names):
+            for target_idx, target_name in enumerate(target_names):
+
+                # Start new page if needed (every 3 maps)
+                if map_idx % maps_per_page == 0:
+                    if map_idx > 0:
+                        # Save previous page
+                        plt.tight_layout()
+                        plt.subplots_adjust(top=0.93, bottom=0.05)
+                        pdf.savefig(fig, bbox_inches='tight')
+                        plt.close(fig)
+
+                    # Create new page
+                    page_num += 1
+                    fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
+                    fig.suptitle(f'Step 3: Objective Function Values - {model_name} ({reference_ssp}) - Page {page_num}/{total_pages}',
+                                fontsize=16, fontweight='bold', y=0.98)
+
+                # Position on current page (1-3)
+                subplot_idx = (map_idx % maps_per_page) + 1
+                ax = plt.subplot(maps_per_page, 1, subplot_idx)  # 3 rows, 1 column
+
+                # Extract objective function map for this combination
+                obj_map = optimization_errors[:, :, response_idx, target_idx]
+
+                # Mask invalid cells and ocean
+                obj_map_masked = np.copy(obj_map)
+                obj_map_masked[~valid_mask] = np.nan
+
+                # Calculate range for this map (objective function values are always >= 0)
+                valid_values = obj_map[valid_mask & np.isfinite(obj_map)]
+                if len(valid_values) > 0:
+                    actual_min = np.min(valid_values)
+                    actual_max = np.max(valid_values)
+                else:
+                    actual_min = actual_max = 0.0
+
+                # Apply log10 transformation for visualization
+                # Set minimum threshold to avoid log(0) issues
+                min_threshold = 1e-14
+                obj_map_log = np.copy(obj_map_masked)
+
+                # Replace values below threshold with threshold, and zeros/negatives with threshold
+                valid_finite_mask = valid_mask & np.isfinite(obj_map) & (obj_map > 0)
+                obj_map_log[valid_finite_mask] = np.maximum(obj_map[valid_finite_mask], min_threshold)
+                obj_map_log[~valid_finite_mask] = np.nan
+
+                # Take log10
+                obj_map_log[valid_finite_mask] = np.log10(obj_map_log[valid_finite_mask])
+
+                # Set fixed log10 range: 1e-14 to 1
+                vmin_log = np.log10(min_threshold)  # log10(1e-14) = -14
+                vmax_log = np.log10(1.0)            # log10(1) = 0
+
+                # Create map with log10 color scaling (viridis good for objective functions)
+                cmap = plt.cm.viridis  # Dark = low error (good), bright = high error (poor)
+                im = ax.pcolormesh(lon_grid, lat_grid, obj_map_log,
+                                 cmap=cmap, vmin=vmin_log, vmax=vmax_log, shading='auto')
+
+                # Add coastlines (basic grid)
+                ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
+                          levels=[0.5], colors='white', linewidths=0.5, alpha=0.7)
+
+                # Labels and formatting (larger fonts for better visibility)
+                ax.set_title(f'{response_name}\n{target_name}', fontsize=14, fontweight='bold')
+                ax.set_xlabel('Longitude', fontsize=12)
+                ax.set_ylabel('Latitude', fontsize=12)
+                ax.tick_params(labelsize=10)
+
+                # Set aspect ratio and limits
+                ax.set_xlim(lon.min(), lon.max())
+                ax.set_ylim(lat.min(), lat.max())
+                ax.set_aspect('equal')
+
+                # Add max/min value box in lower part of the map
+                max_min_text = f'Max: {actual_max:.6f}\nMin: {actual_min:.6f}'
+                ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
+                       fontsize=10, verticalalignment='bottom')
+
+                # Add colorbar for each subplot (larger for better visibility)
+                cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=12)
+                cbar.set_label('log₁₀(Objective Function Value)\n(Lower = Better Fit)', rotation=270, labelpad=15, fontsize=12)
+                cbar.ax.tick_params(labelsize=10)
+
+                map_idx += 1
+
+        # Save the final page
+        if map_idx > 0:
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.93, bottom=0.05)
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+
+    print(f"Objective function visualization saved to {pdf_path} ({total_pages} pages, 3 maps per page)")
     return pdf_path
 
 
