@@ -752,6 +752,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
     target_names = scaling_results['target_names']
     valid_mask = scaling_results['valid_mask']
     scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
+    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
 
     # Get reference SSP GDP data for weighting
     reference_ssp = config['ssp_scenarios']['reference_ssp']
@@ -771,8 +772,8 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
     print(f"GDP-weighted global statistics for scaling factors (using {reference_ssp} GDP, {target_start}-{target_end}):")
     print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
     print()
-    print(f"{'Target':<35} {'Response Function':<20} {'GDP-Weighted Mean':<18} {'GDP-Weighted Median':<20} {'Area-Weighted Median':<20}")
-    print("-" * 113)
+    print(f"{'Target':<35} {'Response Function':<20} {'GDP-Weighted Mean':<18} {'GDP-Weighted Median':<20} {'Obj Func Max':<12} {'Obj Func Mean':<13} {'Obj Func Std':<12} {'Obj Func Min':<12}")
+    print("-" * 142)
 
     # Get coordinates from metadata
     metadata = get_grid_metadata(all_netcdf_data)
@@ -795,9 +796,6 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                 gdp_weighted_mean = total_weighted_scaling / total_gdp
             else:
                 gdp_weighted_mean = np.nan
-
-            # Calculate area-weighted median using existing function
-            area_weighted_median = calculate_global_median(scale_data, lat_values, valid_mask)
 
             # Calculate GDP-weighted median using user's algorithm
             # Create weights = cos(lat) * GDP and sort by scaling factor values
@@ -840,9 +838,21 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             else:
                 gdp_weighted_median = np.nan
 
-            print(f"{target_name:<35} {resp_name:<20} {gdp_weighted_mean:<18.6f} {gdp_weighted_median:<20.6f} {area_weighted_median:<20.6f}")
+            # Calculate objective function statistics
+            error_data = optimization_errors[:, :, resp_idx, target_idx]  # [lat, lon]
+            valid_errors = error_data[valid_mask & np.isfinite(error_data)]
 
-    print("-" * 113)
+            if len(valid_errors) > 0:
+                obj_func_max = np.max(valid_errors)
+                obj_func_mean = np.mean(valid_errors)
+                obj_func_std = np.std(valid_errors)
+                obj_func_min = np.min(valid_errors)
+            else:
+                obj_func_max = obj_func_mean = obj_func_std = obj_func_min = np.nan
+
+            print(f"{target_name:<35} {resp_name:<20} {gdp_weighted_mean:<18.6f} {gdp_weighted_median:<20.6f} {obj_func_max:<12.6f} {obj_func_mean:<13.6f} {obj_func_std:<12.6f} {obj_func_min:<12.6f}")
+
+    print("-" * 142)
     print()
 
 

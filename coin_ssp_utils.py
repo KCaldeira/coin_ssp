@@ -552,7 +552,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
                     # Plot the map
                     masked_impact = np.where(valid_mask, impact_ratio, np.nan)
-                    im = ax.contourf(lon_grid, lat_grid, masked_impact, levels=20, cmap=cmap, norm=norm, extend='both')
+                    im = ax.pcolormesh(lon_grid, lat_grid, masked_impact, cmap=cmap, norm=norm, shading='auto')
 
                     # Add coastlines (simplified using valid mask)
                     ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
@@ -2414,19 +2414,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
         ncols = 4
         nrows = (total_maps + ncols - 1) // ncols
 
-    # Determine color scale across all scaling factors for valid cells (95% range with zero-centering)
-    valid_scaling_factors = []
-    for damage_idx in range(n_damage):
-        for target_idx in range(n_targets):
-            sf_map = scaling_factors[:, :, damage_idx, target_idx]
-            valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
-            if len(valid_values) > 0:
-                valid_scaling_factors.extend(valid_values)
-
-    if len(valid_scaling_factors) > 0:
-        vmin, vmax = calculate_zero_biased_range(valid_scaling_factors)
-    else:
-        vmin, vmax = -0.01, 0.01  # Default range
+    # Calculate independent color scales for each map (zero-biased ranging)
 
     # Create PDF with multi-panel layout
     with PdfPages(pdf_path) as pdf:
@@ -2449,10 +2437,17 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                 sf_map_masked = np.copy(sf_map)
                 sf_map_masked[~valid_mask] = np.nan
 
+                # Calculate independent zero-biased range for this map
+                valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
+                if len(valid_values) > 0:
+                    vmin, vmax = calculate_zero_biased_range(valid_values)
+                else:
+                    vmin, vmax = -0.01, 0.01  # Default range
+
                 # Create map with proper zero-centered normalization
                 norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
-                im = ax.contourf(lon_grid, lat_grid, sf_map_masked,
-                               levels=20, cmap='RdBu_r', norm=norm, extend='both')
+                im = ax.pcolormesh(lon_grid, lat_grid, sf_map_masked,
+                                 cmap='RdBu_r', norm=norm, shading='auto')
 
                 # Add coastlines (basic grid)
                 ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
@@ -2474,13 +2469,22 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                 cbar.set_label('Scaling Factor', rotation=270, labelpad=12, fontsize=8)
                 cbar.ax.tick_params(labelsize=7)
 
-        # Add summary statistics text box
-        if len(valid_scaling_factors) > 0:
+        # Add summary statistics text box (calculate across all maps)
+        all_valid_scaling_factors = []
+        for damage_idx in range(n_damage):
+            for target_idx in range(n_targets):
+                sf_map = scaling_factors[:, :, damage_idx, target_idx]
+                valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
+                if len(valid_values) > 0:
+                    all_valid_scaling_factors.extend(valid_values)
+
+        if len(all_valid_scaling_factors) > 0:
             stats_text = (f'Global Statistics (Valid Cells):\n'
-                         f'Range: {np.min(valid_scaling_factors):.4f} to {np.max(valid_scaling_factors):.4f}\n'
-                         f'Mean: {np.mean(valid_scaling_factors):.4f}\n'
-                         f'Std: {np.std(valid_scaling_factors):.4f}\n'
-                         f'Valid cells: {np.sum(valid_mask):,}')
+                         f'Range: {np.min(all_valid_scaling_factors):.4f} to {np.max(all_valid_scaling_factors):.4f}\n'
+                         f'Mean: {np.mean(all_valid_scaling_factors):.4f}\n'
+                         f'Std: {np.std(all_valid_scaling_factors):.4f}\n'
+                         f'Valid cells: {np.sum(valid_mask):,}\n'
+                         f'Note: Each map uses independent zero-biased scaling')
 
             fig.text(0.02, 0.02, stats_text, fontsize=9,
                     bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8),

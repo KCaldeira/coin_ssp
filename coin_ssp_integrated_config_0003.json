@@ -131,13 +131,13 @@
       },
       {
         "scaling_name": "combined_balanced_quadratic-based",
-        "description": "1/6 by each pathway based on single factor quadratic target",
-        "y_tas1": -0.029564,
-        "y_tas2": -0.014778,
-        "k_tas1": -0.022188,
-        "k_tas2": -0.010156,
-        "tfp_tas1": -0.001284,
-        "tfp_tas2": -0.000743
+        "description": "1/6 by each pathway based on single factor quadratic target scaled to average 1/6 each",
+        "y_tas1": 0.375592,
+        "y_tas2": 0.187745,
+        "k_tas1": 0.281885,
+        "k_tas2": 0.129026,
+        "tfp_tas1": 0.0163124,
+        "tfp_tas2": 0.00943036
       }
   ],
 

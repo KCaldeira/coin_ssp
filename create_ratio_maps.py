@@ -136,7 +136,7 @@ def create_ratio_maps_from_netcdf(netcdf_path, output_dir=None, epsilon=1e-20):
 
                     # Plot the map
                     masked_ratio = np.where(valid_mask, ratio_map, np.nan)
-                    im = ax.contourf(lon_grid, lat_grid, masked_ratio, levels=20, cmap=cmap, norm=norm, extend='both')
+                    im = ax.pcolormesh(lon_grid, lat_grid, masked_ratio, cmap=cmap, norm=norm, shading='auto')
 
                     # Add coastlines (simplified)
                     ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
