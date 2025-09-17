@@ -294,7 +294,13 @@ def optimize_climate_response_scaling(
         maxiter: int = 500,
         tol: float = 1e-8):
     """
-    Optimize the scaling factor with a starting guess and bound constraints.
+    Optimize the scaling factor with adaptive bounds expansion.
+
+    Performs initial optimization within specified bounds. If the result hits the bounds
+    (within tolerance), expands search in the indicated direction by factor of 5 and
+    retries optimization. Avoids re-searching the original parameter space.
+    Returns the better of the two optimization results.
+
     Returns (optimal_scale, final_error, scaled_params).
 
     Parameters
@@ -310,11 +316,18 @@ def optimize_climate_response_scaling(
     x0 : float
         Starting guess for optimization
     bounds : tuple
-        Bounds for optimization
+        Initial bounds for optimization (will be expanded if needed)
     maxiter : int
-        Maximum iterations
+        Maximum iterations per optimization attempt
     tol : float
         Tolerance for optimization
+
+    Notes
+    -----
+    The adaptive bounds expansion uses efficient directional search:
+    - Hit lower bound: new search region is [10×lower, old_lower]
+    - Hit upper bound: new search region is [old_upper, 10×upper]
+    This avoids re-searching the original bounds while expanding in the promising direction.
     """
     # Ensure starting guess is inside bounds
     lo, hi = bounds
@@ -396,6 +409,7 @@ def optimize_climate_response_scaling(
         # print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")  # Commented out to reduce verbose output
         return objective_value
 
+    # Initial optimization with original bounds
     res = minimize(
         objective,
         x0=[x0],
@@ -407,5 +421,55 @@ def optimize_climate_response_scaling(
 
     optimal_scale = float(res.x[0])
     final_error = float(res.fun)
+
+    # Check if optimization hit the bounds and retry with expanded bounds if needed
+    lo, hi = bounds
+    bound_tolerance = 1e-6  # Consider "at bounds" if within this tolerance
+
+    if (optimal_scale <= lo + bound_tolerance) or (optimal_scale >= hi - bound_tolerance):
+        # Hit bounds - expand by factor of 10 and retry
+        expansion_factor = 10.0
+
+        # Diagnostic: track bounds expansion
+        bound_type = "lower" if optimal_scale <= lo + bound_tolerance else "upper"
+
+        if optimal_scale <= lo + bound_tolerance:
+            # Hit lower bound - search lower region, avoid re-searching upper region
+            new_lo = lo * expansion_factor if lo < 0 else lo / expansion_factor  # Expand downward 5x
+            new_hi = lo  # Upper bound becomes the old lower bound
+        else:
+            # Hit upper bound - search higher region, avoid re-searching lower region
+            new_lo = hi  # Lower bound becomes the old upper bound
+            new_hi = hi * expansion_factor if hi > 0 else hi / expansion_factor  # Expand upward 5x
+
+        expanded_bounds = (new_lo, new_hi)
+
+        # Retry optimization with expanded bounds
+        res_expanded = minimize(
+            objective,
+            x0=[optimal_scale],  # Start from previous result
+            bounds=[expanded_bounds],
+            method="L-BFGS-B",
+            options={"maxiter": maxiter},
+            tol=tol
+        )
+
+        # Use expanded result if it's better (lower error)
+        if res_expanded.success and res_expanded.fun < final_error:
+            old_scale = optimal_scale
+            old_error = final_error
+            optimal_scale = float(res_expanded.x[0])
+            final_error = float(res_expanded.fun)
+
+            # Print improvement notice (uncomment for debugging)
+            # print(f"    Bounds expansion improved result: {bound_type} bound hit, "
+            #       f"scale {old_scale:.6f} → {optimal_scale:.6f}, error {old_error:.6e} → {final_error:.6e}")
+        else:
+            # Expansion didn't help, keep original result
+            pass
+            # print(f"    Bounds expansion at {bound_type} bound didn't improve result, keeping original")
+
+        # Optional: Could add another round of expansion if still hitting bounds
+
     scaled_params = create_scaled_params(params, scaling, optimal_scale)
     return optimal_scale, final_error, scaled_params

@@ -485,11 +485,18 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     target_start = 2080
     target_end = 2100
 
-    print(f"Creating Step 4 maps with {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+    # Calculate total maps and pages
+    total_maps = len(target_names) * len(response_function_names) * len(forward_ssps)
+    maps_per_page = 3
+    total_pages = (total_maps + maps_per_page - 1) // maps_per_page  # Ceiling division
+
+    print(f"Creating Step 4 maps: {total_maps} maps across {total_pages} pages (3 maps per page)")
+    print(f"  {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
-        page_count = 0
+        map_idx = 0
+        page_num = 0
 
         # Loop through all combinations (same order as line plots)
         for target_idx, target_name in enumerate(target_names):
@@ -499,10 +506,25 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                 damage_config = config['response_function_scalings'][damage_idx]
 
                 for ssp in forward_ssps:
-                    page_count += 1
 
-                    # Create new page
-                    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+                    # Start new page if needed (every 3 maps)
+                    if map_idx % maps_per_page == 0:
+                        if map_idx > 0:
+                            # Save previous page
+                            plt.tight_layout()
+                            plt.subplots_adjust(top=0.93, bottom=0.05)
+                            pdf.savefig(fig, bbox_inches='tight')
+                            plt.close(fig)
+
+                        # Create new page
+                        page_num += 1
+                        fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
+                        fig.suptitle(f'Step 4: Forward Model Results - {model_name} - Page {page_num}/{total_pages}',
+                                    fontsize=16, fontweight='bold', y=0.98)
+
+                    # Position on current page (1-3)
+                    subplot_idx = (map_idx % maps_per_page) + 1
+                    ax = plt.subplot(maps_per_page, 1, subplot_idx)  # 3 rows, 1 column
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
@@ -538,12 +560,15 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                                     mean_ratio = np.nanmean(ratios)
                                     impact_ratio[lat_idx, lon_idx] = mean_ratio - 1.0
 
-                    # Determine color scale using zero-biased range
+                    # Determine color scale using zero-biased range and get actual min/max
                     valid_impacts = impact_ratio[valid_mask & np.isfinite(impact_ratio)]
                     if len(valid_impacts) > 0:
                         vmin, vmax = calculate_zero_biased_range(valid_impacts)
+                        actual_min = np.min(valid_impacts)
+                        actual_max = np.max(valid_impacts)
                     else:
                         vmin, vmax = -0.01, 0.01
+                        actual_min = actual_max = 0.0
 
                     # Create blue-red colormap (blue=positive, red=negative, white=zero)
                     # RdBu_r gives blue-white-red (blue=positive, red=negative)
@@ -557,45 +582,43 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     # Add coastlines (simplified using valid mask)
                     ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
 
-                    # Formatting
+                    # Formatting (larger fonts for better visibility)
                     ax.set_xlabel('Longitude', fontsize=12)
                     ax.set_ylabel('Latitude', fontsize=12)
                     ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
                                 f'Climate Impact: (GDP_climate/GDP_weather - 1)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
-                    # Add colorbar
-                    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
-                    cbar.set_label('Climate Impact Ratio - 1', fontsize=11)
+                    # Add max/min value box in lower part of the map
+                    max_min_text = f'Max: {actual_max:.4f}\nMin: {actual_min:.4f}'
+                    ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
+                           fontsize=10, verticalalignment='bottom')
 
-                    # Add reference line at zero
+                    # Add colorbar (larger for better visibility)
+                    cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=12)
+                    cbar.set_label('Climate Impact Ratio - 1', rotation=270, labelpad=15, fontsize=12)
+                    cbar.ax.tick_params(labelsize=10)
+
+                    # Set aspect ratio and limits
+                    ax.set_xlim(lon.min(), lon.max())
+                    ax.set_ylim(lat.min(), lat.max())
+                    ax.set_aspect('equal')
+
+                    map_idx += 1
+
+                    # Add reference line at zero on colorbar
                     if hasattr(cbar, 'ax'):
                         cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
 
-                    # Add statistics text
-                    if len(valid_impacts) > 0:
-                        mean_impact = np.nanmean(valid_impacts)
-                        median_impact = np.nanmedian(valid_impacts)
-                        min_impact = np.nanmin(valid_impacts)
-                        max_impact = np.nanmax(valid_impacts)
+        # Save the final page
+        if map_idx > 0:
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.93, bottom=0.05)
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
 
-                        stats_text = f"Mean: {mean_impact:.3f}\nMedian: {median_impact:.3f}\nRange: [{min_impact:.3f}, {max_impact:.3f}]"
-                        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                               fontsize=9, verticalalignment='top',
-                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
-                    # Add map count
-                    ax.text(0.98, 0.98, f"Map {page_count}", transform=ax.transAxes,
-                           fontsize=9, verticalalignment='top', horizontalalignment='right',
-                           bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
-
-                    plt.tight_layout()
-                    pdf.savefig(fig, bbox_inches='tight', dpi=150)
-                    plt.close(fig)
-
-        print(f"Generated {page_count} climate impact maps")
-
-    print(f"Forward model maps saved to: {pdf_path}")
+    print(f"Forward model maps saved to: {pdf_path} ({total_pages} pages, 3 maps per page)")
     return pdf_path
 
 
@@ -2406,29 +2429,38 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
     nlat, nlon, n_damage, n_targets = scaling_factors.shape
     total_maps = n_damage * n_targets
 
-    # Calculate subplot layout (prefer rectangular layout)
-    if total_maps <= 6:
-        ncols = 3 if total_maps > 3 else total_maps
-        nrows = (total_maps + ncols - 1) // ncols  # Ceiling division
-    else:
-        ncols = 4
-        nrows = (total_maps + ncols - 1) // ncols
+    # New layout: 3 maps per page, arranged vertically
+    maps_per_page = 3
+    total_pages = (total_maps + maps_per_page - 1) // maps_per_page  # Ceiling division
 
-    # Calculate independent color scales for each map (zero-biased ranging)
+    print(f"Creating Step 3 visualization: {total_maps} maps across {total_pages} pages (3 maps per page)")
 
-    # Create PDF with multi-panel layout
+    # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
-        fig = plt.figure(figsize=(15, 4 * nrows))
-
-        # Main title
-        fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp})',
-                    fontsize=16, fontweight='bold', y=0.98)
-
         map_idx = 0
+        page_num = 0
+
         for damage_idx, damage_name in enumerate(response_function_names):
             for target_idx, target_name in enumerate(target_names):
-                map_idx += 1
-                ax = plt.subplot(nrows, ncols, map_idx)
+
+                # Start new page if needed (every 3 maps)
+                if map_idx % maps_per_page == 0:
+                    if map_idx > 0:
+                        # Save previous page
+                        plt.tight_layout()
+                        plt.subplots_adjust(top=0.93, bottom=0.05)
+                        pdf.savefig(fig, bbox_inches='tight')
+                        plt.close(fig)
+
+                    # Create new page
+                    page_num += 1
+                    fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
+                    fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp}) - Page {page_num}/{total_pages}',
+                                fontsize=16, fontweight='bold', y=0.98)
+
+                # Position on current page (1-3)
+                subplot_idx = (map_idx % maps_per_page) + 1
+                ax = plt.subplot(maps_per_page, 1, subplot_idx)  # 3 rows, 1 column
 
                 # Extract scaling factor map for this combination
                 sf_map = scaling_factors[:, :, damage_idx, target_idx]
@@ -2441,8 +2473,11 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                 valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
                 if len(valid_values) > 0:
                     vmin, vmax = calculate_zero_biased_range(valid_values)
+                    actual_min = np.min(valid_values)
+                    actual_max = np.max(valid_values)
                 else:
                     vmin, vmax = -0.01, 0.01  # Default range
+                    actual_min = actual_max = 0.0
 
                 # Create map with proper zero-centered normalization
                 norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
@@ -2453,52 +2488,38 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
                 ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
                           levels=[0.5], colors='black', linewidths=0.5, alpha=0.3)
 
-                # Labels and formatting
-                ax.set_title(f'{damage_name}\n{target_name}', fontsize=10, fontweight='bold')
-                ax.set_xlabel('Longitude', fontsize=9)
-                ax.set_ylabel('Latitude', fontsize=9)
-                ax.tick_params(labelsize=8)
+                # Labels and formatting (larger fonts for better visibility)
+                ax.set_title(f'{damage_name}\n{target_name}', fontsize=14, fontweight='bold')
+                ax.set_xlabel('Longitude', fontsize=12)
+                ax.set_ylabel('Latitude', fontsize=12)
+                ax.tick_params(labelsize=10)
 
                 # Set aspect ratio and limits
                 ax.set_xlim(lon.min(), lon.max())
                 ax.set_ylim(lat.min(), lat.max())
                 ax.set_aspect('equal')
 
-                # Add colorbar for each subplot
-                cbar = plt.colorbar(im, ax=ax, shrink=0.8, aspect=15)
-                cbar.set_label('Scaling Factor', rotation=270, labelpad=12, fontsize=8)
-                cbar.ax.tick_params(labelsize=7)
+                # Add max/min value box in lower part of the map
+                max_min_text = f'Max: {actual_max:.4f}\nMin: {actual_min:.4f}'
+                ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
+                       fontsize=10, verticalalignment='bottom')
 
-        # Add summary statistics text box (calculate across all maps)
-        all_valid_scaling_factors = []
-        for damage_idx in range(n_damage):
-            for target_idx in range(n_targets):
-                sf_map = scaling_factors[:, :, damage_idx, target_idx]
-                valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
-                if len(valid_values) > 0:
-                    all_valid_scaling_factors.extend(valid_values)
+                # Add colorbar for each subplot (larger for better visibility)
+                cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=12)
+                cbar.set_label('Scaling Factor', rotation=270, labelpad=15, fontsize=12)
+                cbar.ax.tick_params(labelsize=10)
 
-        if len(all_valid_scaling_factors) > 0:
-            stats_text = (f'Global Statistics (Valid Cells):\n'
-                         f'Range: {np.min(all_valid_scaling_factors):.4f} to {np.max(all_valid_scaling_factors):.4f}\n'
-                         f'Mean: {np.mean(all_valid_scaling_factors):.4f}\n'
-                         f'Std: {np.std(all_valid_scaling_factors):.4f}\n'
-                         f'Valid cells: {np.sum(valid_mask):,}\n'
-                         f'Note: Each map uses independent zero-biased scaling')
+                map_idx += 1
 
-            fig.text(0.02, 0.02, stats_text, fontsize=9,
-                    bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8),
-                    verticalalignment='bottom')
+        # Save the final page
+        if map_idx > 0:
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.93, bottom=0.05)
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
 
-        # Adjust layout
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.92, bottom=0.15)  # Make room for title and stats
-
-        # Save page
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close()
-
-    print(f"Scaling factors visualization saved to {pdf_path}")
+    print(f"Scaling factors visualization saved to {pdf_path} ({total_pages} pages, 3 maps per page)")
     return pdf_path
 
 
@@ -2506,7 +2527,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     """
     Create comprehensive PDF visualization for Step 2 baseline TFP results.
 
-    Generates a 3-panel visualization:
+    Generates one page per forward simulation SSP, each with 3-panel visualization:
     1. Map of mean TFP for reference period (2015-2025)
     2. Map of mean TFP for target period (2080-2100)
     3. Time series percentile plot (min, 10%, 25%, 50%, 75%, 90%, max)
@@ -2534,9 +2555,9 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
-    reference_ssp = config['ssp_scenarios']['reference_ssp']
-    pdf_filename = f"step2_baseline_tfp_visualization_{model_name}_{reference_ssp}.pdf"
+    # Generate output filename (now includes all forward SSPs)
+    forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
+    pdf_filename = f"step2_baseline_tfp_visualization_{model_name}_multi_ssp.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata and coordinates
@@ -2554,236 +2575,237 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     # Create meshgrid for plotting
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
-    # Get forward simulation SSPs and use first one for visualization
-    forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
-    viz_ssp = forward_ssps[0]  # Use first SSP for maps
-
-    # Extract TFP data for visualization SSP
-    tfp_timeseries = tfp_results[viz_ssp]['tfp_baseline']  # Shape: [time, lat, lon]
-
     # Find time indices for reference and target periods
     ref_mask = (years >= ref_start) & (years <= ref_end)
     target_mask = (years >= target_start) & (years <= target_end)
 
-    # Calculate period means (axis=0 for time dimension in [time, lat, lon])
-    tfp_ref_mean = np.mean(tfp_timeseries[ref_mask], axis=0)  # [lat, lon]
-    tfp_target_mean = np.mean(tfp_timeseries[target_mask], axis=0)  # [lat, lon]
-
-    # Use pre-computed valid mask from TFP results (computed once during data loading)
-    valid_mask = tfp_results[viz_ssp]['valid_mask']
-    print(f"Using pre-computed valid mask: {np.sum(valid_mask)} valid cells")
-
-    # If no valid cells found, use fallback
-    if np.sum(valid_mask) == 0:
-        print("WARNING: No valid cells found - using sample cells for visualization")
-        valid_mask = np.zeros_like(tfp_ref_mean, dtype=bool)
-        # Set a few cells as valid for basic visualization
-        valid_mask[32, 64] = True  # Single test cell
-        valid_mask[16, 32] = True  # Another test cell
-
-    # Calculate percentiles across valid grid cells for time series
-    percentiles = [0, 10, 25, 50, 75, 90, 100]  # min, 10%, 25%, 50%, 75%, 90%, max
-    percentile_labels = ['Min', '10%', '25%', 'Median', '75%', '90%', 'Max']
-    percentile_colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple']
-
-    # Extract time series for valid cells only
-    tfp_percentiles = np.zeros((len(percentiles), len(years)))
-
-    for t_idx, year in enumerate(years):
-        tfp_slice = tfp_timeseries[t_idx]  # [lat, lon]
-        valid_values = tfp_slice[valid_mask]
-
-        # Diagnostic output for first few time steps
-        if t_idx < 3:
-            print(f"DEBUG: t_idx={t_idx}, year={year}")
-            print(f"  tfp_slice shape: {tfp_slice.shape}, range: {np.nanmin(tfp_slice):.6e} to {np.nanmax(tfp_slice):.6e}")
-            print(f"  valid_mask sum: {np.sum(valid_mask)}")
-            print(f"  valid_values shape: {valid_values.shape}, range: {np.nanmin(valid_values):.6e} to {np.nanmax(valid_values):.6e}")
-            if len(valid_values) > 0:
-                calculated_percentiles = np.percentile(valid_values, percentiles)
-                print(f"  calculated percentiles: {calculated_percentiles}")
-                print(f"  percentile spread: {calculated_percentiles[-1] - calculated_percentiles[0]:.6e}")
-
-        if len(valid_values) > 0:
-            tfp_percentiles[:, t_idx] = np.percentile(valid_values, percentiles)
-        else:
-            tfp_percentiles[:, t_idx] = np.nan
-
-    # Diagnostic output for percentile results
-    print(f"DEBUG: PERCENTILE CALCULATION COMPLETE")
-    print(f"  tfp_percentiles shape: {tfp_percentiles.shape}")
-    print(f"  tfp_percentiles range: {np.nanmin(tfp_percentiles):.6e} to {np.nanmax(tfp_percentiles):.6e}")
-    print(f"  tfp_percentiles NaN count: {np.sum(np.isnan(tfp_percentiles))}")
-    print(f"  Sample percentiles for year 0 (1964): {tfp_percentiles[:, 0]}")
-    print(f"  Sample percentiles for year 50: {tfp_percentiles[:, 50] if tfp_percentiles.shape[1] > 50 else 'N/A'}")
-
-    # Check if all percentiles are identical (explaining overlapping lines)
-    for p_idx, percentile_name in enumerate(percentile_labels):
-        percentile_timeseries = tfp_percentiles[p_idx, :]
-        percentile_range = np.nanmax(percentile_timeseries) - np.nanmin(percentile_timeseries)
-        print(f"  {percentile_name} percentile range over time: {percentile_range:.6e}")
-
-    # Determine color scale for maps (TFP values are always positive, use 0-to-max range)
-    all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
-    vmin = 0.0  # TFP values should always be positive
-    vmax = np.percentile(all_tfp_values, 95)  # Use 95th percentile to handle outliers
-
-    # Create colormap for TFP (use viridis - good for scientific data)
-    cmap = plt.cm.viridis
-
-    # Create PDF with 3-panel layout
+    # Create PDF with multiple pages (one per forward SSP)
     with PdfPages(pdf_path) as pdf:
-        fig = plt.figure(figsize=(18, 10))
+        for ssp_idx, viz_ssp in enumerate(forward_ssps):
+            print(f"Creating TFP visualization page for {viz_ssp} ({ssp_idx+1}/{len(forward_ssps)})")
 
-        # Overall title
-        fig.suptitle(f'Baseline Total Factor Productivity - {model_name} {viz_ssp.upper()}\n'
-                    f'Reference Period: {ref_start}-{ref_end} | Target Period: {target_start}-{target_end}',
-                    fontsize=16, fontweight='bold')
+            # Extract TFP data for this SSP
+            tfp_timeseries = tfp_results[viz_ssp]['tfp_baseline']  # Shape: [time, lat, lon]
 
-        # Panel 1: Reference period mean TFP map
-        ax1 = plt.subplot(2, 3, (1, 2))  # Top left, spans 2 columns
-        im1 = ax1.pcolormesh(lon_grid, lat_grid, tfp_ref_mean,
-                            cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
-        ax1.set_title(f'Mean TFP: Reference Period ({ref_start}-{ref_end})',
-                     fontsize=14, fontweight='bold')
-        ax1.set_xlabel('Longitude')
-        ax1.set_ylabel('Latitude')
+            # Calculate period means (axis=0 for time dimension in [time, lat, lon])
+            tfp_ref_mean = np.mean(tfp_timeseries[ref_mask], axis=0)  # [lat, lon]
+            tfp_target_mean = np.mean(tfp_timeseries[target_mask], axis=0)  # [lat, lon]
 
-        # Add coastlines if available
-        ax1.set_xlim(lon.min(), lon.max())
-        ax1.set_ylim(lat.min(), lat.max())
+            # Use pre-computed valid mask from TFP results (computed once during data loading)
+            valid_mask = tfp_results[viz_ssp]['valid_mask']
+            print(f"  Using pre-computed valid mask: {np.sum(valid_mask)} valid cells")
 
-        # Colorbar for reference map
-        cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8, aspect=20)
-        cbar1.set_label('TFP', rotation=270, labelpad=15)
+            # If no valid cells found, use fallback
+            if np.sum(valid_mask) == 0:
+                print(f"  WARNING: No valid cells found for {viz_ssp} - using sample cells for visualization")
+                valid_mask = np.zeros_like(tfp_ref_mean, dtype=bool)
+                # Set a few cells as valid for basic visualization
+                valid_mask[32, 64] = True  # Single test cell
+                valid_mask[16, 32] = True  # Another test cell
 
-        # Panel 2: Target period mean TFP map
-        ax2 = plt.subplot(2, 3, (4, 5))  # Bottom left, spans 2 columns
-        im2 = ax2.pcolormesh(lon_grid, lat_grid, tfp_target_mean,
-                            cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
-        ax2.set_title(f'Mean TFP: Target Period ({target_start}-{target_end})',
-                     fontsize=14, fontweight='bold')
-        ax2.set_xlabel('Longitude')
-        ax2.set_ylabel('Latitude')
+            # Calculate percentiles across valid grid cells for time series
+            percentiles = [0, 10, 25, 50, 75, 90, 100]  # min, 10%, 25%, 50%, 75%, 90%, max
+            percentile_labels = ['Min', '10%', '25%', 'Median', '75%', '90%', 'Max']
+            percentile_colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple']
 
-        ax2.set_xlim(lon.min(), lon.max())
-        ax2.set_ylim(lat.min(), lat.max())
+            # Extract time series for valid cells only
+            tfp_percentiles = np.zeros((len(percentiles), len(years)))
 
-        # Colorbar for target map
-        cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8, aspect=20)
-        cbar2.set_label('TFP', rotation=270, labelpad=15)
+            for t_idx, year in enumerate(years):
+                tfp_slice = tfp_timeseries[t_idx]  # [lat, lon]
+                valid_values = tfp_slice[valid_mask]
 
-        # Panel 3: Time series percentiles
-        ax3 = plt.subplot(1, 3, 3)  # Right side, full height
+                # Diagnostic output for first few time steps
+                if t_idx < 3:
+                    print(f"  DEBUG: t_idx={t_idx}, year={year}")
+                    print(f"    tfp_slice shape: {tfp_slice.shape}, range: {np.nanmin(tfp_slice):.6e} to {np.nanmax(tfp_slice):.6e}")
+                    print(f"    valid_mask sum: {np.sum(valid_mask)}")
+                    print(f"    valid_values shape: {valid_values.shape}, range: {np.nanmin(valid_values):.6e} to {np.nanmax(valid_values):.6e}")
+                    if len(valid_values) > 0:
+                        calculated_percentiles = np.percentile(valid_values, percentiles)
+                        print(f"    calculated percentiles: {calculated_percentiles}")
+                        print(f"    percentile spread: {calculated_percentiles[-1] - calculated_percentiles[0]:.6e}")
 
-        for i, (percentile, label, color) in enumerate(zip(percentiles, percentile_labels, percentile_colors)):
-            ax3.plot(years, tfp_percentiles[i], color=color, linewidth=2,
-                    label=label, alpha=0.8)
+                if len(valid_values) > 0:
+                    tfp_percentiles[:, t_idx] = np.percentile(valid_values, percentiles)
+                else:
+                    tfp_percentiles[:, t_idx] = np.nan
 
-        ax3.set_xlabel('Year', fontsize=12)
-        ax3.set_ylabel('Total Factor Productivity', fontsize=12)
-        ax3.set_title('TFP Percentiles Across Valid Grid Cells', fontsize=14, fontweight='bold')
-        ax3.grid(True, alpha=0.3)
-        ax3.legend(fontsize=10, loc='best')
+            # Diagnostic output for percentile results
+            print(f"  DEBUG: PERCENTILE CALCULATION COMPLETE for {viz_ssp}")
+            print(f"    tfp_percentiles shape: {tfp_percentiles.shape}")
+            print(f"    tfp_percentiles range: {np.nanmin(tfp_percentiles):.6e} to {np.nanmax(tfp_percentiles):.6e}")
+            print(f"    tfp_percentiles NaN count: {np.sum(np.isnan(tfp_percentiles))}")
+            print(f"    Sample percentiles for year 0 (1964): {tfp_percentiles[:, 0]}")
+            print(f"    Sample percentiles for year 50: {tfp_percentiles[:, 50] if tfp_percentiles.shape[1] > 50 else 'N/A'}")
 
-        # Add reference lines for time periods
-        ax3.axvspan(ref_start, ref_end, alpha=0.2, color='blue', label='Reference Period')
-        ax3.axvspan(target_start, target_end, alpha=0.2, color='red', label='Target Period')
+            # Check if all percentiles are identical (explaining overlapping lines)
+            for p_idx, percentile_name in enumerate(percentile_labels):
+                percentile_timeseries = tfp_percentiles[p_idx, :]
+                percentile_range = np.nanmax(percentile_timeseries) - np.nanmin(percentile_timeseries)
+                print(f"    {percentile_name} percentile range over time: {percentile_range:.6e}")
 
-        # Set reasonable axis limits
-        ax3.set_xlim(years.min(), years.max())
+            # Determine color scale for maps (TFP values are always positive, use 0-to-max range)
+            all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
+            vmin = 0.0  # TFP values should always be positive
+            vmax = np.percentile(all_tfp_values, 95)  # Use 95th percentile to handle outliers
 
-        # Set y-axis limits using 90th percentile to avoid outlier distortion
-        if np.all(np.isnan(tfp_percentiles)):
-            print("WARNING: All TFP percentile values are NaN - using default y-axis limits")
-            ax3.set_ylim(0, 1)
-        else:
-            # Use 90th percentile (index 5) for max, 0 for min to avoid outlier distortion
-            percentile_90_max = np.nanmax(tfp_percentiles[5, :])  # 90th percentile line maximum
-            global_min = np.nanmin(tfp_percentiles)
-            global_max = np.nanmax(tfp_percentiles)
+            # Create colormap for TFP (use viridis - good for scientific data)
+            cmap = plt.cm.viridis
 
-            # Find coordinates of global min and max values in the full timeseries data
-            global_min_full = np.nanmin(tfp_timeseries)
-            global_max_full = np.nanmax(tfp_timeseries)
+            # Create page layout for this SSP
+            fig = plt.figure(figsize=(18, 10))
 
-            # Find indices of min and max values (first occurrence if multiple)
-            min_indices = np.unravel_index(np.nanargmin(tfp_timeseries), tfp_timeseries.shape)
-            max_indices = np.unravel_index(np.nanargmax(tfp_timeseries), tfp_timeseries.shape)
-            min_t, min_lat, min_lon = min_indices
-            max_t, max_lat, max_lon = max_indices
+            # Overall title
+            fig.suptitle(f'Baseline Total Factor Productivity - {model_name} {viz_ssp.upper()}\n'
+                        f'Reference Period: {ref_start}-{ref_end} | Target Period: {target_start}-{target_end}',
+                        fontsize=16, fontweight='bold')
 
-            # Convert time index to year
-            min_year = years[min_t]
-            max_year = years[max_t]
+            # Panel 1: Reference period mean TFP map
+            ax1 = plt.subplot(2, 3, (1, 2))  # Top left, spans 2 columns
+            im1 = ax1.pcolormesh(lon_grid, lat_grid, tfp_ref_mean,
+                                cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+            ax1.set_title(f'Mean TFP: Reference Period ({ref_start}-{ref_end})',
+                         fontsize=14, fontweight='bold')
+            ax1.set_xlabel('Longitude')
+            ax1.set_ylabel('Latitude')
 
-            if np.isfinite(percentile_90_max) and percentile_90_max > 0:
-                # Set y-axis from 0 to 90th percentile max with small buffer
-                y_max = percentile_90_max * 1.1
-                ax3.set_ylim(0, y_max)
+            # Add coastlines if available
+            ax1.set_xlim(lon.min(), lon.max())
+            ax1.set_ylim(lat.min(), lat.max())
 
-                # Add text annotation showing global min/max ranges with coordinates
-                annotation_text = (f'Global range: {global_min_full:.3f} to {global_max_full:.1f}\n'
-                                 f'Min: year {min_year}, lat[{min_lat}], lon[{min_lon}]\n'
-                                 f'Max: year {max_year}, lat[{max_lat}], lon[{max_lon}]')
-                ax3.text(0.02, 0.98, annotation_text,
-                        transform=ax3.transAxes, verticalalignment='top',
-                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                        fontsize=9)
+            # Colorbar for reference map
+            cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8, aspect=20)
+            cbar1.set_label('TFP', rotation=270, labelpad=15)
 
-                # Create CSV file with time series for min and max grid points
-                csv_filename = f"step2_baseline_tfp_extremes_{model_name}_{reference_ssp}.csv"
-                csv_path = os.path.join(output_dir, csv_filename)
+            # Panel 2: Target period mean TFP map
+            ax2 = plt.subplot(2, 3, (4, 5))  # Bottom left, spans 2 columns
+            im2 = ax2.pcolormesh(lon_grid, lat_grid, tfp_target_mean,
+                                cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+            ax2.set_title(f'Mean TFP: Target Period ({target_start}-{target_end})',
+                         fontsize=14, fontweight='bold')
+            ax2.set_xlabel('Longitude')
+            ax2.set_ylabel('Latitude')
 
-                # Extract time series for min and max grid cells
-                min_tfp_series = tfp_timeseries[:, min_lat, min_lon]
-                max_tfp_series = tfp_timeseries[:, max_lat, max_lon]
+            ax2.set_xlim(lon.min(), lon.max())
+            ax2.set_ylim(lat.min(), lat.max())
 
-                # Get GDP and population data for these cells
-                # Access data directly from the current function call via load_gridded_data
-                min_pop_series = np.full(len(years), np.nan)
-                min_gdp_series = np.full(len(years), np.nan)
-                max_pop_series = np.full(len(years), np.nan)
-                max_gdp_series = np.full(len(years), np.nan)
+            # Colorbar for target map
+            cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8, aspect=20)
+            cbar2.set_label('TFP', rotation=270, labelpad=15)
 
-                # Load the data directly using the same approach as the main pipeline
-                model_name = config['climate_model']['model_name']
-                try:
-                    # Use load_gridded_data to get the full time series data
-                    ssp_data = load_gridded_data(config, model_name, reference_ssp)
-                    if 'pop' in ssp_data and 'gdp' in ssp_data:
-                        min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
-                        max_pop_series = ssp_data['pop'][:, max_lat, max_lon]
-                        min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
-                        max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
-                except Exception as e:
-                    print(f"Warning: Could not load GDP/population data for CSV: {e}")
-                    # Leave as NaN arrays if loading fails
+            # Panel 3: Time series percentiles
+            ax3 = plt.subplot(1, 3, 3)  # Right side, full height
 
-                # Create DataFrame and save to CSV
-                import pandas as pd
-                extremes_data = {
-                    'year': years,
-                    'min_pop': min_pop_series,
-                    'min_gdp': min_gdp_series,
-                    'min_tfp': min_tfp_series,
-                    'max_pop': max_pop_series,
-                    'max_gdp': max_gdp_series,
-                    'max_tfp': max_tfp_series
-                }
-                df = pd.DataFrame(extremes_data)
-                df.to_csv(csv_path, index=False)
-                print(f"Extremes CSV saved: {csv_path}")
-            else:
-                print("WARNING: Invalid 90th percentile range - using default y-axis limits")
+            for i, (percentile, label, color) in enumerate(zip(percentiles, percentile_labels, percentile_colors)):
+                ax3.plot(years, tfp_percentiles[i], color=color, linewidth=2,
+                        label=label, alpha=0.8)
+
+            ax3.set_xlabel('Year', fontsize=12)
+            ax3.set_ylabel('Total Factor Productivity', fontsize=12)
+            ax3.set_title('TFP Percentiles Across Valid Grid Cells', fontsize=14, fontweight='bold')
+            ax3.grid(True, alpha=0.3)
+            ax3.legend(fontsize=10, loc='best')
+
+            # Add reference lines for time periods
+            ax3.axvspan(ref_start, ref_end, alpha=0.2, color='blue', label='Reference Period')
+            ax3.axvspan(target_start, target_end, alpha=0.2, color='red', label='Target Period')
+
+            # Set reasonable axis limits
+            ax3.set_xlim(years.min(), years.max())
+
+            # Set y-axis limits using 90th percentile to avoid outlier distortion
+            if np.all(np.isnan(tfp_percentiles)):
+                print("  WARNING: All TFP percentile values are NaN - using default y-axis limits")
                 ax3.set_ylim(0, 1)
+            else:
+                # Use 90th percentile (index 5) for max, 0 for min to avoid outlier distortion
+                percentile_90_max = np.nanmax(tfp_percentiles[5, :])  # 90th percentile line maximum
+                global_min = np.nanmin(tfp_percentiles)
+                global_max = np.nanmax(tfp_percentiles)
 
-        # Adjust layout
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.9)  # Make room for suptitle
+                # Find coordinates of global min and max values in the full timeseries data
+                global_min_full = np.nanmin(tfp_timeseries)
+                global_max_full = np.nanmax(tfp_timeseries)
 
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
+                # Find indices of min and max values (first occurrence if multiple)
+                min_indices = np.unravel_index(np.nanargmin(tfp_timeseries), tfp_timeseries.shape)
+                max_indices = np.unravel_index(np.nanargmax(tfp_timeseries), tfp_timeseries.shape)
+                min_t, min_lat, min_lon = min_indices
+                max_t, max_lat, max_lon = max_indices
 
-    print(f"Baseline TFP visualization saved to {pdf_path}")
+                # Convert time index to year
+                min_year = years[min_t]
+                max_year = years[max_t]
+
+                if np.isfinite(percentile_90_max) and percentile_90_max > 0:
+                    # Set y-axis from 0 to 90th percentile max with small buffer
+                    y_max = percentile_90_max * 1.1
+                    ax3.set_ylim(0, y_max)
+
+                    # Add text annotation showing global min/max ranges with coordinates
+                    annotation_text = (f'Global range: {global_min_full:.3f} to {global_max_full:.1f}\n'
+                                     f'Min: year {min_year}, lat[{min_lat}], lon[{min_lon}]\n'
+                                     f'Max: year {max_year}, lat[{max_lat}], lon[{max_lon}]')
+                    ax3.text(0.02, 0.98, annotation_text,
+                            transform=ax3.transAxes, verticalalignment='top',
+                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                            fontsize=9)
+
+                    # Create CSV file with time series for min and max grid points (per SSP)
+                    csv_filename = f"step2_baseline_tfp_extremes_{model_name}_{viz_ssp}.csv"
+                    csv_path = os.path.join(output_dir, csv_filename)
+
+                    # Extract time series for min and max grid cells
+                    min_tfp_series = tfp_timeseries[:, min_lat, min_lon]
+                    max_tfp_series = tfp_timeseries[:, max_lat, max_lon]
+
+                    # Get GDP and population data for these cells
+                    # Access data directly from the current function call via load_gridded_data
+                    min_pop_series = np.full(len(years), np.nan)
+                    min_gdp_series = np.full(len(years), np.nan)
+                    max_pop_series = np.full(len(years), np.nan)
+                    max_gdp_series = np.full(len(years), np.nan)
+
+                    # Load the data directly using the same approach as the main pipeline
+                    model_name_inner = config['climate_model']['model_name']
+                    try:
+                        # Use load_gridded_data to get the full time series data
+                        ssp_data = load_gridded_data(config, model_name_inner, viz_ssp)
+                        if 'pop' in ssp_data and 'gdp' in ssp_data:
+                            min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
+                            max_pop_series = ssp_data['pop'][:, max_lat, max_lon]
+                            min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
+                            max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
+                    except Exception as e:
+                        print(f"  Warning: Could not load GDP/population data for CSV: {e}")
+                        # Leave as NaN arrays if loading fails
+
+                    # Create DataFrame and save to CSV
+                    import pandas as pd
+                    extremes_data = {
+                        'year': years,
+                        'min_pop': min_pop_series,
+                        'min_gdp': min_gdp_series,
+                        'min_tfp': min_tfp_series,
+                        'max_pop': max_pop_series,
+                        'max_gdp': max_gdp_series,
+                        'max_tfp': max_tfp_series
+                    }
+                    df = pd.DataFrame(extremes_data)
+                    df.to_csv(csv_path, index=False)
+                    print(f"  Extremes CSV saved: {csv_path}")
+                else:
+                    print("  WARNING: Invalid 90th percentile range - using default y-axis limits")
+                    ax3.set_ylim(0, 1)
+
+            # Adjust layout
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.9)  # Make room for suptitle
+
+            # Save this page to PDF
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+
+    print(f"Baseline TFP visualization saved to {pdf_path} ({len(forward_ssps)} pages)")
     return pdf_path
