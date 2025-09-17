@@ -723,16 +723,16 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print(f"✅ Visualization saved: {visualization_path}")
 
     # Display GDP-weighted scaling factor summary
-    print_gdp_weighted_scaling_summary(scaling_results, config, all_netcdf_data)
+    print_gdp_weighted_scaling_summary(scaling_results, config, all_netcdf_data, output_dir)
 
     print(f"\nStep 3 completed: Scaling factors calculated for each grid cell")
     print(f"Total combinations processed: {total_combinations} per valid grid cell")
     return scaling_results
 
 
-def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: Dict[str, Any], all_netcdf_data: Dict[str, Any]) -> None:
+def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: Dict[str, Any], all_netcdf_data: Dict[str, Any], output_dir: str = None) -> None:
     """
-    Print GDP-weighted summary of scaling factors to help identify optimization bugs.
+    Generate GDP-weighted summary of scaling factors and write to CSV file.
 
     Parameters
     ----------
@@ -742,6 +742,8 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
         Configuration dictionary
     all_netcdf_data : Dict[str, Any]
         Pre-loaded NetCDF data containing GDP information
+    output_dir : str, optional
+        Directory to write CSV file. If None, prints to terminal.
     """
     print("\n" + "="*80)
     print("STEP 3 SCALING FACTOR SUMMARY")
@@ -771,9 +773,9 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
 
     print(f"GDP-weighted global statistics for scaling factors (using {reference_ssp} GDP, {target_start}-{target_end}):")
     print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
-    print()
-    print(f"{'Target':<35} {'Response Function':<20} {'GDP-Weighted Mean':<18} {'GDP-Weighted Median':<20} {'Obj Func Max':<12} {'Obj Func Mean':<13} {'Obj Func Std':<12} {'Obj Func Min':<12}")
-    print("-" * 142)
+
+    # Prepare data for CSV
+    csv_data = []
 
     # Get coordinates from metadata
     metadata = get_grid_metadata(all_netcdf_data)
@@ -838,6 +840,14 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             else:
                 gdp_weighted_median = np.nan
 
+            # Calculate scaling factor max/min statistics
+            valid_scaling = scale_data[valid_mask & np.isfinite(scale_data)]
+            if len(valid_scaling) > 0:
+                scaling_max = np.max(valid_scaling)
+                scaling_min = np.min(valid_scaling)
+            else:
+                scaling_max = scaling_min = np.nan
+
             # Calculate objective function statistics
             error_data = optimization_errors[:, :, resp_idx, target_idx]  # [lat, lon]
             valid_errors = error_data[valid_mask & np.isfinite(error_data)]
@@ -850,9 +860,64 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             else:
                 obj_func_max = obj_func_mean = obj_func_std = obj_func_min = np.nan
 
-            print(f"{target_name:<35} {resp_name:<20} {gdp_weighted_mean:<18.6f} {gdp_weighted_median:<20.6f} {obj_func_max:<12.6f} {obj_func_mean:<13.6f} {obj_func_std:<12.6f} {obj_func_min:<12.6f}")
+            # Collect data for CSV
+            csv_data.append({
+                'target_name': target_name,
+                'response_function': resp_name,
+                'gdp_weighted_mean': gdp_weighted_mean,
+                'gdp_weighted_median': gdp_weighted_median,
+                'scaling_max': scaling_max,
+                'scaling_min': scaling_min,
+                'obj_func_max': obj_func_max,
+                'obj_func_mean': obj_func_mean,
+                'obj_func_std': obj_func_std,
+                'obj_func_min': obj_func_min
+            })
 
-    print("-" * 142)
+    # Write to CSV file if output_dir provided
+    if output_dir and csv_data:
+        import pandas as pd
+        import os
+
+        model_name = config['climate_model']['model_name']
+        reference_ssp = config['ssp_scenarios']['reference_ssp']
+        csv_filename = f"step3_scaling_factors_summary_{model_name}_{reference_ssp}.csv"
+        csv_path = os.path.join(output_dir, csv_filename)
+
+        # Create DataFrame and write to CSV
+        df = pd.DataFrame(csv_data)
+        df.to_csv(csv_path, index=False, float_format='%.6f')
+
+        print(f"Scaling factors summary written to: {csv_path}")
+        print()
+
+        # Also display table in terminal with updated columns
+        print("Summary Table (also saved to CSV):")
+        print(f"{'Target':<35} {'Response Function':<20} {'GDP-Wtd Mean':<13} {'GDP-Wtd Median':<15} {'Max':<10} {'Min':<10} {'ObjFunc Max':<11} {'ObjFunc Mean':<12} {'ObjFunc Std':<11} {'ObjFunc Min':<11}")
+        print("-" * 158)
+
+        for row in csv_data:
+            print(f"{row['target_name']:<35} {row['response_function']:<20} "
+                  f"{row['gdp_weighted_mean']:<13.6f} {row['gdp_weighted_median']:<15.6f} "
+                  f"{row['scaling_max']:<10.6f} {row['scaling_min']:<10.6f} "
+                  f"{row['obj_func_max']:<11.6f} {row['obj_func_mean']:<12.6f} "
+                  f"{row['obj_func_std']:<11.6f} {row['obj_func_min']:<11.6f}")
+
+        print("-" * 158)
+    else:
+        # Fallback: print to terminal only (old format)
+        print(f"{'Target':<35} {'Response Function':<20} {'GDP-Wtd Mean':<13} {'GDP-Wtd Median':<15} {'Max':<10} {'Min':<10} {'ObjFunc Max':<11} {'ObjFunc Mean':<12} {'ObjFunc Std':<11} {'ObjFunc Min':<11}")
+        print("-" * 158)
+
+        for row in csv_data:
+            print(f"{row['target_name']:<35} {row['response_function']:<20} "
+                  f"{row['gdp_weighted_mean']:<13.6f} {row['gdp_weighted_median']:<15.6f} "
+                  f"{row['scaling_max']:<10.6f} {row['scaling_min']:<10.6f} "
+                  f"{row['obj_func_max']:<11.6f} {row['obj_func_mean']:<12.6f} "
+                  f"{row['obj_func_std']:<11.6f} {row['obj_func_min']:<11.6f}")
+
+        print("-" * 158)
+
     print()
 
 

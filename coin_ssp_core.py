@@ -291,8 +291,8 @@ def optimize_climate_response_scaling(
         gridcell_data, params: ModelParams, scaling: ScalingParams,
         target_period, x0: float = -0.001,  # starting guess for the scale
         bounds: tuple = (-0.1, 0.1),  # keeping current bounds as default
-        maxiter: int = 200,
-        tol: float = None):
+        maxiter: int = 500,
+        tol: float = 1e-8):
     """
     Optimize the scaling factor with a starting guess and bound constraints.
     Returns (optimal_scale, final_error, scaled_params).
