@@ -445,11 +445,11 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                     ax.grid(True, alpha=0.3)
                     ax.legend(fontsize=10, loc='best')
 
-                    # Set reasonable y-axis limits using zero-biased range
+                    # Set reasonable y-axis limits using zero-biased range with 20% padding
                     all_values = np.concatenate([weather_ratio, climate_ratio])
                     valid_values = all_values[np.isfinite(all_values)]
                     if len(valid_values) > 0:
-                        vmin, vmax = calculate_zero_biased_range(valid_values)
+                        vmin, vmax = calculate_zero_biased_axis_range(valid_values, padding_factor=0.20)
                         ax.set_ylim(vmin, vmax)
 
                     # Add info box with final values
