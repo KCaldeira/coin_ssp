@@ -801,21 +801,28 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     plt.figure(log10_fig.number)
                     log10_ax = plt.subplot(maps_per_page, 1, subplot_idx)
 
-                    # Determine color scale for log10
+                    # Determine color scale for log10 - use FULL data range to show outliers
                     valid_log10 = impact_ratio_log10[valid_mask & np.isfinite(impact_ratio_log10)]
                     if len(valid_log10) > 0:
                         log_actual_min = np.min(valid_log10)
                         log_actual_max = np.max(valid_log10)
-                        # Symmetric log scale around 0 (log10(1) = 0)
-                        log_max_abs = max(abs(log_actual_min), abs(log_actual_max))
-                        log_vmin, log_vmax = -log_max_abs, log_max_abs
+                        # Use full data range (not symmetric) to highlight outliers
+                        log_vmin, log_vmax = log_actual_min, log_actual_max
+
+                        # Report extreme ratios for diagnostic purposes
+                        if log_actual_max > 5:  # log10(ratio) > 5 means ratio > 100,000
+                            print(f"    WARNING: Extreme high ratios detected for {ssp.upper()} × {target_name} × {damage_name}")
+                            print(f"             log10(max_ratio) = {log_actual_max:.2f} (ratio = {10**log_actual_max:.2e})")
+                        if log_actual_min < -5:  # log10(ratio) < -5 means ratio < 0.00001
+                            print(f"    WARNING: Extreme low ratios detected for {ssp.upper()} × {target_name} × {damage_name}")
+                            print(f"             log10(min_ratio) = {log_actual_min:.2f} (ratio = {10**log_actual_min:.2e})")
                     else:
                         log_vmin, log_vmax = -0.1, 0.1
                         log_actual_min = log_actual_max = 0.0
 
-                    # Log10 map: blue-red colormap with symmetric range around 0
-                    log_cmap = plt.cm.RdBu_r
-                    log_norm = mcolors.TwoSlopeNorm(vmin=log_vmin, vcenter=0.0, vmax=log_vmax)
+                    # Log10 map: viridis colormap for non-zero-centered scales (standard for outlier detection)
+                    log_cmap = plt.cm.viridis
+                    log_norm = mcolors.Normalize(vmin=log_vmin, vmax=log_vmax)
 
                     masked_log10 = np.where(valid_mask, impact_ratio_log10, np.nan)
                     log_im = log10_ax.pcolormesh(lon_grid, lat_grid, masked_log10, cmap=log_cmap, norm=log_norm, shading='auto')
@@ -830,18 +837,21 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                                 f'Climate Impact: log10(GDP_climate/GDP_weather)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
-                    # Log10 max/min box
-                    log_max_min_text = f'Max: {log_actual_max:.2f}\nMin: {log_actual_min:.2f}'
+                    # Log10 max/min box (show both log and original ratio values)
+                    if len(valid_log10) > 0:
+                        max_ratio = 10**log_actual_max
+                        min_ratio = 10**log_actual_min
+                        log_max_min_text = f'Max: {log_actual_max:.2f} (×{max_ratio:.2e})\nMin: {log_actual_min:.2f} (×{min_ratio:.2e})'
+                    else:
+                        log_max_min_text = 'No valid data'
                     log10_ax.text(0.02, 0.08, log_max_min_text, transform=log10_ax.transAxes,
                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
                            fontsize=10, verticalalignment='bottom')
 
-                    # Log10 colorbar
+                    # Log10 colorbar (no zero reference line for viridis)
                     log_cbar = plt.colorbar(log_im, ax=log10_ax, shrink=0.6, aspect=12)
                     log_cbar.set_label('log10(GDP_climate/GDP_weather)', rotation=270, labelpad=15, fontsize=12)
                     log_cbar.ax.tick_params(labelsize=10)
-                    if hasattr(log_cbar, 'ax'):
-                        log_cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
 
                     # Set log10 map aspect and limits
                     log10_ax.set_xlim(lon.min(), lon.max())

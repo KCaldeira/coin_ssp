@@ -130,6 +130,14 @@ if not is_valid_economic_grid_cell(gdp_cell, pop_cell):
 - **Valid cell filtering**: Apply `valid_mask` before calculating ranges and statistics
 - **Consistent layouts**: 3 maps/charts per page arranged vertically with max/min value boxes
 
+#### Colormap Strategy
+- **RdBu_r (Red-Blue)**: For zero-centered data with symmetric scaling (climate impacts, GDP changes)
+  - Blue = positive values, Red = negative values, White = zero
+  - Always use with `TwoSlopeNorm(vcenter=0.0)`
+- **Viridis**: For non-zero-centered data and outlier detection (TFP, objective functions, log ratios)
+  - Use full data range to highlight outliers and extreme values
+  - Use with `Normalize()` for min-to-max scaling
+
 ## Current Status (December 2025)
 
 ### ✅ **Production Ready**
