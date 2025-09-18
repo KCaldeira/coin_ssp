@@ -259,7 +259,7 @@ The integrated processing pipeline encountered NaN generation during optimizatio
 - **Complete Parameter Integration**: Uses Step 1 target reductions and Step 2 baseline TFP as inputs
 - **Standard Loop Structure**: Follows `target → damage_function → spatial` hierarchy for consistency
 - **Enhanced NetCDF Output**: 5D scaled parameter arrays `[lat, lon, damage_func, target, param]` including all 12 climate damage parameters
-- **Weather Filtering Integration**: Applies LOESS filtering to separate climate trends from variability
+- **Weather Filtering Integration**: Applies LOESS filtering to extract weather variability (detrends relative to reference period mean)
 - **Comprehensive Results**: Scaling factors, optimization errors, convergence flags, and scaled damage function parameters
 - **Performance Tracking**: Success rates, processing statistics, and error handling with graceful degradation
 
@@ -318,7 +318,7 @@ Once testing and visualization are complete, the pipeline will be ready for full
   - `calculate_coin_ssp_forward_model()` - climate-integrated economic projections with robust capital stock handling
   - `optimize_climate_response_scaling()` - L-BFGS-B optimization for climate parameter calibration
 - **Utilities** (`coin_ssp_utils.py`): 
-  - `apply_time_series_filter()` - LOESS filtering for climate trend separation
+  - `apply_time_series_filter()` - LOESS filtering for weather extraction (detrends relative to reference period mean)
   - `create_scaled_params()` - centralized parameter scaling (compute once, use many times)
   - `create_country_scaling_page()` - three-panel visualization generation
   - `create_country_pdf_books()` - automated PDF report generation
@@ -539,7 +539,7 @@ The model uses JSON files named `coin_ssp_*.json` containing two main sections:
 ```
 
 **Model Parameters** (optional - uses defaults if not specified):
-- `year_diverge`: Year when climate effects begin (default: 2025)
+- `year_diverge`: Year when climate effects begin (used to define reference period end, default: 2025)
 - `year_scale`: Target year for optimization (default: 2100)  
 - `amount_scale`: Target climate impact on GDP (e.g., -0.05 for 5% loss)
 - Economic parameters: `s`, `alpha`, `delta`

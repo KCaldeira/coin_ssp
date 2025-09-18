@@ -29,7 +29,7 @@ from coin_ssp_utils import (
     load_gridded_data, calculate_time_means, calculate_global_mean, calculate_global_median,
     calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data, get_grid_metadata,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
-    apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
+    apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf_split,
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
     create_objective_function_visualization,
     create_forward_model_visualization, create_forward_model_maps_visualization,
@@ -617,8 +617,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     
                     # Create weather (filtered) time series
                     filter_width = 30  # years (same as country-level code)
-                    cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, year_diverge_loc)
-                    cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, year_diverge_loc)
+                    cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
+                    cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
                     
                     # Create parameters for this grid cell using factory
                     params_cell = config['model_params_factory'].create_for_step(
@@ -1036,8 +1036,8 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         
                         # Create weather (filtered) time series
                         filter_width = 30  # years (same as country-level code)
-                        cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, year_diverge_loc)
-                        cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, year_diverge_loc)
+                        cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
+                        cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
                         
                         # Create ModelParams with scaled damage function parameters
                         params_scaled = copy.deepcopy(base_params)
@@ -1113,10 +1113,10 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         '_coordinates': all_data['_metadata']
     }
     
-    # Write results to NetCDF file
+    # Write results to separate NetCDF files per SSP/variable
     model_name = config['climate_model']['model_name']
-    output_path = get_step_output_path(output_dir, 4, model_name, file_type="nc")
-    save_step4_results_netcdf(step4_results, output_path, model_name)
+    saved_files = save_step4_results_netcdf_split(step4_results, output_dir, model_name)
+    print(f"Step 4 NetCDF files saved: {len(saved_files)} files")
 
     # Create PDF visualizations
     print("Creating Step 4 PDF visualizations...")

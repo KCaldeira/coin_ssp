@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
 import xarray as xr
+import pandas as pd
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 from coin_ssp_core import ScalingParams
 
-def apply_time_series_filter(time_series, filter_width, start_year):
+def apply_time_series_filter(time_series, filter_width, ref_start_idx, ref_end_idx):
     """
-    Apply LOESS filter to time series with temporal constraints.
+    Apply LOESS filter to time series and remove trend relative to reference period mean.
 
     Parameters
     ----------
@@ -20,18 +21,22 @@ def apply_time_series_filter(time_series, filter_width, start_year):
         Annual time series values (first element corresponds to year 0)
     filter_width : int
         Width parameter (approx. number of years to smooth over)
-    start_year : int
-        Year at which filtering begins (0-indexed)
+    ref_start_idx : int
+        Start index of reference period (0-indexed)
+    ref_end_idx : int
+        End index of reference period (0-indexed, inclusive)
 
     Returns
     -------
     numpy.ndarray
-        Filtered time series with original values for t <= start_year,
-        and adjusted values for t > start_year
+        Filtered time series with trend removed and reference period mean added back
     """
     ts = np.array(time_series, dtype=float)
     n = len(ts)
     t = np.arange(n, dtype=float)
+
+    # Calculate reference period mean
+    mean_of_reference_period = np.mean(ts[ref_start_idx:ref_end_idx+1])
 
     # LOWESS expects frac = proportion of data used in each local regression
     # Map filter_width (years) to fraction of total series
@@ -41,14 +46,8 @@ def apply_time_series_filter(time_series, filter_width, start_year):
     filtered_series = sm.nonparametric.lowess(ts, t, frac=frac,
                                               it=1, return_sorted=False)
 
-    # Create result array starting with original series
-    result = np.copy(ts)
-
-    # Apply the same adjustment logic you used for Savitzky–Golay
-    if start_year < n:
-        filtered_at_start = filtered_series[start_year]
-        for ti in range(start_year + 1, n):
-            result[ti] = ts[ti] - filtered_series[ti] + filtered_at_start
+    # Apply detrending to all years: remove trend and add reference period mean
+    result = ts - filtered_series + mean_of_reference_period
 
     return result
 
@@ -1548,31 +1547,30 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
 
 def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target, lat, valid_mask):
     """
-    Calculate quadratic temperature-dependent GDP reduction using constraint satisfaction.
-    
+    Calculate quadratic temperature-dependent GDP reduction using derivative constraint.
+
     Implements the mathematical framework:
-    reduction(T) = a + b * (T - T0) + c * (T - T0)²
-    
+    reduction(T) = a + b*T + c*T²
+
     Subject to three constraints:
-    1. Zero point: reduction(T0) = 0
-    2. Reference point: reduction(T_ref) = value_at_ref  
+    1. Zero point: reduction(T₀) = 0
+    2. Derivative at zero: reduction'(T₀) = derivative_at_zero_reduction_temperature
     3. GDP-weighted global mean: ∑[w_i * gdp_i * (1 + reduction(T_i))] / ∑[w_i * gdp_i] = target_mean
-    
+
     Parameters
     ----------
     quadratic_config : dict
         Configuration containing:
         - 'global_mean_reduction': Target GDP-weighted global mean (e.g., -0.10)
-        - 'reference_temperature': Reference temperature point (e.g., 30.0)
-        - 'reduction_at_reference_temp': Reduction at reference temperature (e.g., -0.75)
         - 'zero_reduction_temperature': Temperature with zero reduction (e.g., 13.5)
+        - 'derivative_at_zero_reduction_temperature': Slope at T₀ (e.g., -0.01)
     temp_ref : np.ndarray
         Reference period temperature array [lat, lon]
     gdp_target : np.ndarray
         Target period GDP array [lat, lon]
     lat : np.ndarray
         Latitude coordinate array for area weighting
-        
+
     Returns
     -------
     dict
@@ -1583,45 +1581,39 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
     """
     # Extract configuration parameters
     global_mean_quad = quadratic_config['global_mean_reduction']
-    T_ref_quad = quadratic_config['reference_temperature']
-    value_at_ref_quad = quadratic_config['reduction_at_reference_temp']
     T0 = quadratic_config['zero_reduction_temperature']
-    
+    derivative_at_T0 = quadratic_config['derivative_at_zero_reduction_temperature']
+
     # Calculate GDP-weighted global means
     global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
     gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target)
     gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, lat, valid_mask) / global_gdp_target)
-    
-    # Set up constraint system for quadratic: a + b*T + c*T²
-    # Constraint 1: a + b*T0 + c*T0² = 0  (zero point constraint)
-    # Constraint 2: a + b*T_ref + c*T_ref² = value_at_ref_quad  (reference point constraint)
-    # Constraint 3: a + b*GDP_weighted_temp_mean + c*GDP_weighted_temp2_mean = global_mean_quad  (GDP-weighted constraint)
 
-    # Solve the 3x3 system for [a, b, c]
-    X = np.array([
-        [1, T0, T0**2],                                                  # Zero point constraint
-        [1, T_ref_quad, T_ref_quad**2],                                  # Reference point constraint
-        [1, gdp_weighted_temp_mean, gdp_weighted_temp2_mean]             # GDP-weighted constraint
-    ], dtype=np.float64)
+    # Mathematical solution for quadratic: f(T) = a + b*T + c*T²
+    # Given constraints:
+    # 1. f(T₀) = 0 (zero reduction at T₀)
+    # 2. f'(T₀) = derivative_at_T0 (slope at T₀)
+    # 3. GDP-weighted global mean = global_mean_quad
 
-    y = np.array([
-        0.0,                        # Zero reduction at T0
-        value_at_ref_quad,          # Target at reference temperature
-        global_mean_quad            # Target GDP-weighted global mean
-    ], dtype=np.float64)
+    # From constraint derivation:
+    # c = (global_mean_reduction - derivative_at_T0*(GDP_weighted_temp_mean - T0)) /
+    #     (T0² - 2*T0*GDP_weighted_temp_mean + GDP_weighted_temp2_mean)
+    # b = derivative_at_T0 - 2*c*T0
+    # a = -derivative_at_T0*T0 + c*T0²
 
-    # Solve for coefficients: [a, b, c]
-    abc_coefficients = np.linalg.solve(X, y)
-    a_quad, b_quad, c_quad = abc_coefficients
+    denominator = T0**2 - 2*T0*gdp_weighted_temp_mean + gdp_weighted_temp2_mean
+    c_quad = (global_mean_quad - derivative_at_T0*(gdp_weighted_temp_mean - T0)) / denominator
+    b_quad = derivative_at_T0 - 2*c_quad*T0
+    a_quad = -derivative_at_T0*T0 + c_quad*T0**2
 
     # Calculate quadratic reduction array using absolute temperature
     quadratic_reduction = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
 
     # Verify constraint satisfaction
     constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
-    constraint2_check = a_quad + b_quad * T_ref_quad + c_quad * T_ref_quad**2  # Should equal value_at_ref_quad at T_ref
+    constraint2_check = b_quad + 2 * c_quad * T0  # Derivative at T0: should equal derivative_at_T0
     constraint3_check = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat, valid_mask) / global_gdp_target - 1
-    
+
     return {
         'reduction_array': quadratic_reduction.astype(np.float64),
         'coefficients': {'a': float(a_quad), 'b': float(b_quad), 'c': float(c_quad)},
@@ -1631,10 +1623,10 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
                 'target': 0.0,
                 'error': float(abs(constraint1_check))
             },
-            'reference_point_constraint': {
+            'derivative_constraint': {
                 'achieved': float(constraint2_check),
-                'target': float(value_at_ref_quad),
-                'error': float(abs(constraint2_check - value_at_ref_quad))
+                'target': float(derivative_at_T0),
+                'error': float(abs(constraint2_check - derivative_at_T0))
             },
             'global_mean_constraint': {
                 'achieved': float(constraint3_check),
@@ -1643,7 +1635,9 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
             }
         },
         'gdp_weighted_temp_mean': float(gdp_weighted_temp_mean),
-        'gdp_weighted_temp2_mean': float(gdp_weighted_temp2_mean)
+        'gdp_weighted_temp2_mean': float(gdp_weighted_temp2_mean),
+        'derivative_at_zero_temp': float(derivative_at_T0),
+        'zero_reduction_temperature': float(T0)
     }
 
 
@@ -1881,20 +1875,66 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
     print(f"  Actual data dimensions: {ntime_actual} time × {nlat_actual} lat × {nlon_actual} lon")
 
     valid_mask = np.zeros((nlat_actual, nlon_actual), dtype=bool)
-    valid_count = 0
+
+    # Diagnostic counters
+    total_cells = nlat_actual * nlon_actual
+    cells_with_positive_values = 0
+    cells_with_extreme_gdp_changes = 0
+    cells_with_extreme_pop_changes = 0
+    final_valid_count = 0
+
+    # Get time coordinates for 5-year change detection
+    years = all_data[reference_ssp]['gdp_years']
+
+    def detect_extreme_changes(time_series, years, factor_threshold=10):
+        """Detect if any 5-year period has changes exceeding factor_threshold."""
+        for i in range(len(years)):
+            # Find all points exactly 5 years later
+            target_year = years[i] + 5
+            j_indices = np.where(years == target_year)[0]
+
+            if len(j_indices) > 0:
+                j = j_indices[0]  # Take first match
+
+                # Calculate ratio (handle zero/negative values)
+                if time_series[i] > 0 and time_series[j] > 0:
+                    ratio = time_series[j] / time_series[i]
+
+                    # Check if change exceeds threshold in either direction
+                    if ratio > factor_threshold or ratio < (1.0 / factor_threshold):
+                        return True  # Mark as invalid
+
+        return False  # No extreme changes detected
 
     for lat_idx in range(nlat_actual):
         for lon_idx in range(nlon_actual):
             gdp_timeseries = ref_gdp[:, lat_idx, lon_idx]  # [time] - extract all time points for this location
             pop_timeseries = ref_pop[:, lat_idx, lon_idx]  # [time]
 
-            # Grid cell is valid if GDP and population are positive at ALL time points
+            # Step 1: Check if GDP and population are positive at ALL time points
             if np.all(gdp_timeseries > 0) and np.all(pop_timeseries > 0):
-                valid_mask[lat_idx, lon_idx] = True
-                valid_count += 1
+                cells_with_positive_values += 1
 
-    actual_total_cells = nlat_actual * nlon_actual
-    print(f"  Valid economic grid cells: {valid_count} / {actual_total_cells} ({100*valid_count/actual_total_cells:.1f}%)")
+                # Step 2: Check for extreme changes over any 5-year period
+                has_extreme_gdp = detect_extreme_changes(gdp_timeseries, years)
+                has_extreme_pop = detect_extreme_changes(pop_timeseries, years)
+
+                if has_extreme_gdp:
+                    cells_with_extreme_gdp_changes += 1
+                if has_extreme_pop:
+                    cells_with_extreme_pop_changes += 1
+
+                # Cell is valid only if it passes all tests
+                if not has_extreme_gdp and not has_extreme_pop:
+                    valid_mask[lat_idx, lon_idx] = True
+                    final_valid_count += 1
+
+    print(f"  Grid cell validation results:")
+    print(f"    Total cells: {total_cells}")
+    print(f"    Cells with positive GDP/population: {cells_with_positive_values} ({100*cells_with_positive_values/total_cells:.1f}%)")
+    print(f"    Cells eliminated by extreme GDP changes (>10× in 5 years): {cells_with_extreme_gdp_changes}")
+    print(f"    Cells eliminated by extreme population changes (>10× in 5 years): {cells_with_extreme_pop_changes}")
+    print(f"    Final valid economic grid cells: {final_valid_count} / {total_cells} ({100*final_valid_count/total_cells:.1f}%)")
 
     # Update metadata with correct dimensions
     all_data['_metadata']['grid_shape'] = (nlat_actual, nlon_actual)
@@ -1902,7 +1942,7 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Add valid mask to metadata
     all_data['_metadata']['valid_mask'] = valid_mask
-    all_data['_metadata']['valid_count'] = valid_count
+    all_data['_metadata']['valid_count'] = final_valid_count
 
     return all_data
 
@@ -2292,21 +2332,27 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     scaled_param_names = scaling_results['scaled_param_names']
     coordinates = scaling_results['_coordinates']
     
-    # Create xarray dataset
+    # Transpose arrays to put lat,lon last: [lat, lon, response_func, target] -> [response_func, target, lat, lon]
+    scaling_factors_t = scaling_factors.transpose(2, 3, 0, 1)  # [response_func, target, lat, lon]
+    optimization_errors_t = optimization_errors.transpose(2, 3, 0, 1)  # [response_func, target, lat, lon]
+    convergence_flags_t = convergence_flags.transpose(2, 3, 0, 1)  # [response_func, target, lat, lon]
+    scaled_parameters_t = scaled_parameters.transpose(2, 3, 4, 0, 1)  # [response_func, target, param, lat, lon]
+
+    # Create xarray dataset with lat,lon as last dimensions
     ds = xr.Dataset(
         {
-            'scaling_factors': (['lat', 'lon', 'response_func', 'target'], scaling_factors),
-            'optimization_errors': (['lat', 'lon', 'response_func', 'target'], optimization_errors),
-            'convergence_flags': (['lat', 'lon', 'response_func', 'target'], convergence_flags),
-            'scaled_parameters': (['lat', 'lon', 'response_func', 'target', 'param'], scaled_parameters),
+            'scaling_factors': (['response_func', 'target', 'lat', 'lon'], scaling_factors_t),
+            'optimization_errors': (['response_func', 'target', 'lat', 'lon'], optimization_errors_t),
+            'convergence_flags': (['response_func', 'target', 'lat', 'lon'], convergence_flags_t),
+            'scaled_parameters': (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters_t),
             'valid_mask': (['lat', 'lon'], valid_mask)
         },
         coords={
-            'lat': coordinates['lat'],
-            'lon': coordinates['lon'],
             'response_func': response_function_names,
             'target': target_names,
-            'param': scaled_param_names
+            'param': scaled_param_names,
+            'lat': coordinates['lat'],
+            'lon': coordinates['lon']
         }
     )
     
@@ -2364,7 +2410,140 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     return output_path
 
 
-def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, model_name: str) -> str:
+def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, model_name: str) -> List[str]:
+    """
+    Save Step 4 forward model results to separate NetCDF files per SSP/variable combination.
+
+    Creates 15 files (5 SSPs × 3 variables), each containing climate and weather variants
+    of the variable with coordinate ordering: (target, response_func, time, lat, lon).
+
+    Parameters
+    ----------
+    step4_results : Dict[str, Any]
+        Results from step4_forward_integration_all_ssps()
+    output_dir : str
+        Output directory path
+    model_name : str
+        Climate model name
+
+    Returns
+    -------
+    List[str]
+        List of paths to saved NetCDF files
+    """
+    import xarray as xr
+    import os
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Extract metadata and structure
+    forward_results = step4_results['forward_results']
+    response_function_names = step4_results['response_function_names']
+    target_names = step4_results['target_names']
+    valid_mask = step4_results['valid_mask']
+    coordinates = step4_results['_coordinates']
+
+    # Get SSP names and dimensions from first SSP result
+    ssp_names = list(forward_results.keys())
+    first_ssp = forward_results[ssp_names[0]]
+    nlat, nlon, n_response_func, n_target, ntime = first_ssp['gdp_climate'].shape
+
+    # Variables to process (climate and weather variants paired)
+    variable_pairs = [
+        ('gdp_climate', 'gdp_weather', 'gdp'),
+        ('tfp_climate', 'tfp_weather', 'tfp'),
+        ('k_climate', 'k_weather', 'capital')
+    ]
+
+    saved_files = []
+
+    # Create separate file for each SSP/variable combination
+    for ssp_name in ssp_names:
+        ssp_result = forward_results[ssp_name]
+
+        for climate_var, weather_var, var_base in variable_pairs:
+            # Reorder coordinates from [lat, lon, response_func, target, time]
+            # to [target, response_func, time, lat, lon]
+            climate_data = ssp_result[climate_var].transpose(3, 2, 4, 0, 1)  # [target, response_func, time, lat, lon]
+            weather_data = ssp_result[weather_var].transpose(3, 2, 4, 0, 1)  # [target, response_func, time, lat, lon]
+
+            # Create dataset for this SSP/variable combination
+            ds = xr.Dataset(
+                {
+                    f'{var_base}_climate': (['target', 'response_func', 'time', 'lat', 'lon'], climate_data),
+                    f'{var_base}_weather': (['target', 'response_func', 'time', 'lat', 'lon'], weather_data),
+                    'valid_mask': (['lat', 'lon'], valid_mask)
+                },
+                coords={
+                    'target': target_names,
+                    'response_func': response_function_names,
+                    'time': coordinates['years'],  # Use actual years
+                    'lat': coordinates['lat'],
+                    'lon': coordinates['lon']
+                }
+            )
+
+            # Add comprehensive attributes
+            ds.attrs.update({
+                'title': f'COIN-SSP Step 4 Forward Model Results - {ssp_name.upper()} - {var_base.upper()}',
+                'description': f'Forward economic modeling results for {ssp_name.upper()} scenario, {var_base} variables',
+                'model': model_name,
+                'ssp_scenario': ssp_name,
+                'variable_type': var_base,
+                'coordinate_order': 'target, response_func, time, lat, lon',
+                'variables_included': f'{var_base}_climate, {var_base}_weather, valid_mask',
+                'creation_date': pd.Timestamp.now().isoformat(),
+                'contact': 'Generated by COIN-SSP pipeline'
+            })
+
+            # Variable-specific attributes
+            ds[f'{var_base}_climate'].attrs = {
+                'long_name': f'{var_base.upper()} with climate effects',
+                'description': f'{var_base.upper()} projections including both weather variability and climate trends',
+                'units': 'model units'
+            }
+
+            ds[f'{var_base}_weather'].attrs = {
+                'long_name': f'{var_base.upper()} with weather only',
+                'description': f'{var_base.upper()} projections with weather variability but climate trends removed',
+                'units': 'model units'
+            }
+
+            ds.valid_mask.attrs = {
+                'long_name': 'Valid economic grid cell mask',
+                'description': 'Boolean mask indicating grid cells with valid economic data (positive GDP/population, no extreme changes)',
+                'note': 'Cells with extreme changes (>10× in 5 years) or non-positive values excluded'
+            }
+
+            # Coordinate attributes
+            ds.target.attrs = {'long_name': 'GDP reduction target scenarios'}
+            ds.response_func.attrs = {'long_name': 'Climate response function names'}
+            ds.time.attrs = {'long_name': 'Year', 'units': 'years'}
+            ds.lat.attrs = {'long_name': 'Latitude', 'units': 'degrees_north'}
+            ds.lon.attrs = {'long_name': 'Longitude', 'units': 'degrees_east'}
+
+            # Generate filename and save
+            filename = f"step4_forward_{ssp_name}_{var_base}_{model_name}.nc"
+            filepath = os.path.join(output_dir, filename)
+
+            # Save with compression
+            encoding = {
+                f'{var_base}_climate': {'zlib': True, 'complevel': 4},
+                f'{var_base}_weather': {'zlib': True, 'complevel': 4},
+                'valid_mask': {'zlib': True, 'complevel': 4}
+            }
+
+            ds.to_netcdf(filepath, encoding=encoding)
+            saved_files.append(filepath)
+
+            print(f"  Saved {ssp_name.upper()} {var_base} data: {filename}")
+
+    print(f"Step 4 results saved to {len(saved_files)} separate NetCDF files")
+    return saved_files
+
+
+def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path: str, model_name: str) -> str:
     """
     Save Step 4 forward model results to NetCDF file.
     
@@ -2400,46 +2579,47 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
     first_ssp = forward_results[ssp_names[0]]
     nlat, nlon, n_response_func, n_target, ntime = first_ssp['gdp_climate'].shape
     
-    # Create arrays for all SSPs: [ssp, lat, lon, response_func, target, time]
+    # Create arrays for all SSPs: [ssp, response_func, target, time, lat, lon]
     n_ssps = len(ssp_names)
-    gdp_climate_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
-    gdp_weather_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
-    tfp_climate_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
-    tfp_weather_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
-    k_climate_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
-    k_weather_all = np.full((n_ssps, nlat, nlon, n_response_func, n_target, ntime), np.nan)
-    
-    # Stack results from all SSPs
+    gdp_climate_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
+    gdp_weather_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
+    tfp_climate_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
+    tfp_weather_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
+    k_climate_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
+    k_weather_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
+
+    # Stack results from all SSPs and transpose to put time,lat,lon last
     for i, ssp_name in enumerate(ssp_names):
         ssp_result = forward_results[ssp_name]
-        gdp_climate_all[i] = ssp_result['gdp_climate']
-        gdp_weather_all[i] = ssp_result['gdp_weather']
-        tfp_climate_all[i] = ssp_result['tfp_climate']
-        tfp_weather_all[i] = ssp_result['tfp_weather']
-        k_climate_all[i] = ssp_result['k_climate']
-        k_weather_all[i] = ssp_result['k_weather']
+        # Input shape: [lat, lon, response_func, target, time] -> [response_func, target, time, lat, lon]
+        gdp_climate_all[i] = ssp_result['gdp_climate'].transpose(2, 3, 4, 0, 1)
+        gdp_weather_all[i] = ssp_result['gdp_weather'].transpose(2, 3, 4, 0, 1)
+        tfp_climate_all[i] = ssp_result['tfp_climate'].transpose(2, 3, 4, 0, 1)
+        tfp_weather_all[i] = ssp_result['tfp_weather'].transpose(2, 3, 4, 0, 1)
+        k_climate_all[i] = ssp_result['k_climate'].transpose(2, 3, 4, 0, 1)
+        k_weather_all[i] = ssp_result['k_weather'].transpose(2, 3, 4, 0, 1)
     
     # Create time coordinate using actual data years
     time_coords = np.arange(ntime)
     
-    # Create xarray dataset
+    # Create xarray dataset with time,lat,lon as last dimensions
     ds = xr.Dataset(
         {
-            'gdp_climate': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], gdp_climate_all),
-            'gdp_weather': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], gdp_weather_all),
-            'tfp_climate': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], tfp_climate_all),
-            'tfp_weather': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], tfp_weather_all),
-            'k_climate': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], k_climate_all),
-            'k_weather': (['ssp', 'lat', 'lon', 'response_func', 'target', 'time'], k_weather_all),
+            'gdp_climate': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], gdp_climate_all),
+            'gdp_weather': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], gdp_weather_all),
+            'tfp_climate': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], tfp_climate_all),
+            'tfp_weather': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], tfp_weather_all),
+            'k_climate': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], k_climate_all),
+            'k_weather': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], k_weather_all),
             'valid_mask': (['lat', 'lon'], valid_mask)
         },
         coords={
             'ssp': ssp_names,
-            'lat': coordinates['lat'],
-            'lon': coordinates['lon'],
             'response_func': response_function_names,
             'target': target_names,
-            'time': time_coords
+            'time': time_coords,
+            'lat': coordinates['lat'],
+            'lon': coordinates['lon']
         }
     )
     
@@ -2735,16 +2915,24 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                     # Add calibration points from config
                     gdp_targets = config['gdp_reduction_targets']
                     quad_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                    if 'reference_temperature' in quad_config:
+
+                    # Handle new derivative-based specification
+                    if 'derivative_at_zero_reduction_temperature' in quad_config:
+                        zero_temp = quad_config['zero_reduction_temperature']
+                        derivative = quad_config['derivative_at_zero_reduction_temperature']
+                        ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
+                                label=f'Quad zero: {zero_temp}°C = 0 (slope={derivative:.3f})')
+                    # Handle legacy reference point specification
+                    elif 'reference_temperature' in quad_config:
                         ref_temp = quad_config['reference_temperature']
                         ref_value = quad_config['reduction_at_reference_temp']
                         ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
                                 label=f'Quad calib: {ref_temp}°C = {ref_value:.3f}')
 
-                    if 'zero_reduction_temperature' in quad_config:
-                        zero_temp = quad_config['zero_reduction_temperature']
-                        ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
-                                label=f'Quad zero: {zero_temp}°C = 0')
+                        if 'zero_reduction_temperature' in quad_config:
+                            zero_temp = quad_config['zero_reduction_temperature']
+                            ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
+                                    label=f'Quad zero: {zero_temp}°C = 0')
 
         # Add reference lines
         ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)

@@ -92,7 +92,7 @@ def process_data(input_data, config, optional_data=None):
 - **Mathematical Robustness**: Use `np.maximum(0, value)` to prevent negative values rather than conditional checks
 
 ### Processing Standards
-- **Time Series**: Use LOESS filtering for climate vs weather separation
+- **Time Series**: Use LOESS filtering for weather extraction (detrends relative to reference period mean)
 - **Interpolation**: Linear interpolation between known data points, preserve exact values at original points
 - **Memory Efficiency**: Process large grids with chunking, write outputs after each step completion
 - **Standard Loop Nesting Orders**: Two mandatory patterns for consistency
@@ -144,10 +144,10 @@ if not is_valid_economic_grid_cell(gdp_cell, pop_cell):
 Complete 5-step integrated processing pipeline with adaptive optimization and standardized visualization.
 
 ### 🔍 **Known Issues Under Investigation**
-1. **SSP Scenario Differentiation**: SSP245/SSP585 forward model results nearly identical
-2. **Combined Response Function**: Not achieving 10% target reduction under SSP245 quadratic scenario
+None currently under active investigation.
 
 ### Recent Key Enhancements
 - **Adaptive Bounds Expansion**: Step 3 optimization automatically expands search bounds by 10× when hitting limits
 - **Visualization Standardization**: All maps use `pcolormesh` with 3-per-page layouts
 - **Enhanced Analysis**: GDP-weighted statistics and objective function metrics in CSV outputs
+- **Simplified Weather Filtering**: Time series filtering now detrends relative to reference period mean for all years
