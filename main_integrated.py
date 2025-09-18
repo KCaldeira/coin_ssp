@@ -32,7 +32,8 @@ from coin_ssp_utils import (
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf,
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
     create_objective_function_visualization,
-    create_forward_model_visualization, create_forward_model_maps_visualization, load_step3_results_from_netcdf
+    create_forward_model_visualization, create_forward_model_maps_visualization,
+    create_forward_model_ratio_visualization, load_step3_results_from_netcdf
 )
 from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
 from model_params_factory import ModelParamsFactory
@@ -1005,13 +1006,13 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         successful_forward_runs = 0
         total_forward_runs = 0
         
-        # Standard loop structure: damage function → target → spatial
-        for damage_idx in range(n_response_functions):
-            damage_name = response_function_names[damage_idx]
-            print(f"    Response function: {damage_name} ({damage_idx+1}/{n_response_functions})")
-            
-            for target_idx in range(n_gdp_targets):
-                target_name = target_names[target_idx]
+        # Standard computational loop structure: target → damage → spatial
+        for target_idx in range(n_gdp_targets):
+            target_name = target_names[target_idx]
+            print(f"    GDP reduction target: {target_name} ({target_idx+1}/{n_gdp_targets})")
+
+            for damage_idx in range(n_response_functions):
+                damage_name = response_function_names[damage_idx]
                 
                 for lat_idx in range(nlat):
                     for lon_idx in range(nlon):
@@ -1124,9 +1125,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     pdf_path = create_forward_model_visualization(step4_results, config, output_dir, model_name, all_data)
     print(f"Step 4 line plots saved to: {pdf_path}")
 
-    # Maps visualization
-    maps_pdf_path = create_forward_model_maps_visualization(step4_results, config, output_dir, model_name, all_data)
-    print(f"Step 4 maps saved to: {maps_pdf_path}")
+    # Ratio plots visualization
+    ratio_pdf_path = create_forward_model_ratio_visualization(step4_results, config, output_dir, model_name, all_data)
+    print(f"Step 4 ratio plots saved to: {ratio_pdf_path}")
+
+    # Maps visualization (generates both linear and log10 scale PDFs)
+    linear_maps_path, log10_maps_path = create_forward_model_maps_visualization(step4_results, config, output_dir, model_name, all_data)
 
     print(f"\nStep 4 completed: Forward integration for {len(forward_results)} SSP scenarios")
     return step4_results

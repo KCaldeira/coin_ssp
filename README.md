@@ -88,32 +88,44 @@ Run forward case for all available SSPs for this model using the scaling results
 results = calculate_coin_ssp_forward_model(tfp_baseline, population_grid, gdp_grid, temperature_grid, params)
 ```
 
-### Standard Processing Loop Structure
+### Standard Loop Nesting Orders
 
-To maintain consistency and efficiency across all steps, the following loop hierarchy is used throughout the processing pipeline:
+The pipeline uses two standardized loop nesting orders for consistency and optimal visualization grouping:
+
+#### **1. Computational Loop Order**
+Used in Steps 3, 4, and 5 for calculations and optimization:
 
 ```python
-# STANDARD LOOP HIERARCHY (outermost to innermost):
-for ssp_scenario in ssp_scenarios:           # 1. SSP scenario (when multiple)
-    for target_reduction in target_reductions:   # 2. Target GDP reduction  
-        for damage_function in damage_functions:     # 3. Damage function
-            for lat_idx in range(nlat):                  # 4. Latitude
-                for lon_idx in range(nlon):                  # 5. Longitude  
-                    for time_idx in range(ntime):               # 6. Time (when needed)
-                        # Core computation here
+# COMPUTATIONAL HIERARCHY (outermost to innermost):
+for target_idx in range(n_targets):           # 1. GDP reduction target
+    for damage_idx in range(n_damage_funcs):      # 2. Damage function
+        for lat_idx in range(nlat):                    # 3. Latitude
+            for lon_idx in range(nlon):                    # 4. Longitude
+                for time_idx in range(ntime):                 # 5. Time (when needed)
+                    # Core computation here
+```
+
+#### **2. Visualization Loop Order**
+Used for PDF generation to group related comparisons (3-per-page):
+
+```python
+# VISUALIZATION HIERARCHY (outermost to innermost):
+for ssp in ssp_scenarios:                    # 1. SSP scenario
+    for damage_idx in range(n_damage_funcs):    # 2. Damage function
+        for target_idx in range(n_targets):         # 3. GDP target (INNERMOST)
+            # Create visualization (3 targets per page)
 ```
 
 **Design Rationale:**
-- **SSP Outermost**: Minimizes NetCDF file loading, enables processing one scenario at a time
-- **Target/Damage Functions**: Logical grouping of related parameter combinations
-- **Spatial Loops**: Grid cell independence enables parallelization
-- **Time Innermost**: Optimizes memory locality for time series operations
+- **Computational**: Target outermost enables parameter-specific optimization strategies
+- **Visualization**: Target innermost groups all 3 GDP reduction targets on same page for easy comparison
+- **Spatial Loops**: Grid cell independence enables parallelization in both patterns
+- **Memory Efficiency**: Both patterns optimize memory access patterns for their specific use cases
 
-**Step-Specific Adaptations:**
-- **Step 1**: `target_reduction` loop only (single reference SSP, no time loop)
-- **Step 2**: `ssp_scenario → spatial` loops (time handled within TFP calculation)
-- **Step 3**: `target_reduction → damage_function → spatial` loops (single reference SSP)
-- **Step 4**: Full hierarchy for complete scenario × parameter × spatial processing
+**Implementation:**
+- **Steps 3-4**: Use computational order for optimization and forward modeling
+- **All PDFs**: Use visualization order for consistent 3-per-page target grouping
+- **Step 1-2**: SSP-specific processing with simplified loop structures
 
 **Step 5: NetCDF Output Generation**
 ```python

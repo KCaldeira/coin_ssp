@@ -95,7 +95,23 @@ def process_data(input_data, config, optional_data=None):
 - **Time Series**: Use LOESS filtering for climate vs weather separation
 - **Interpolation**: Linear interpolation between known data points, preserve exact values at original points
 - **Memory Efficiency**: Process large grids with chunking, write outputs after each step completion
-- **Loop Hierarchy**: For visualizations, use target as innermost loop for 3-per-page grouping
+- **Standard Loop Nesting Orders**: Two mandatory patterns for consistency
+
+#### Computational Loop Order (Steps 3-4)
+```python
+for target_idx in range(n_targets):           # GDP reduction target (outermost)
+    for damage_idx in range(n_damage_funcs):      # Damage function
+        for lat_idx in range(nlat):                    # Latitude
+            for lon_idx in range(nlon):                    # Longitude
+```
+
+#### Visualization Loop Order (All PDFs)
+```python
+for ssp in ssp_scenarios:                    # SSP scenario (outermost)
+    for damage_idx in range(n_damage_funcs):    # Damage function
+        for target_idx in range(n_targets):         # GDP target (INNERMOST)
+```
+**Critical**: Target innermost in visualizations groups all 3 GDP reduction targets on same page
 
 ### Grid Cell Processing Pattern
 ```python

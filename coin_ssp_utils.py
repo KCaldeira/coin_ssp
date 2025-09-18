@@ -266,6 +266,147 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
     return pdf_path
 
 
+def create_forward_model_ratio_visualization(forward_results, config, output_dir, model_name, all_netcdf_data):
+    """
+    Create PDF visualization for Step 4 forward model results showing ratios relative to baseline.
+    Generates a multi-page PDF with one page per (target, response_function, SSP) combination.
+    Each page shows global mean time series with two lines:
+    - (GDP weather / baseline GDP) - 1: Weather effects only (dashed blue)
+    - (GDP climate / baseline GDP) - 1: Full climate effects (solid red)
+
+    Parameters
+    ----------
+    forward_results : dict
+        Results from Step 4 forward integration containing SSP-specific data
+    config : dict
+        Configuration dictionary with scenarios and damage functions
+    output_dir : str
+        Directory for output files
+    model_name : str
+        Climate model name for labeling
+    all_netcdf_data : dict
+        All loaded NetCDF data for baseline GDP access
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+    import os
+
+    # Generate output filename
+    pdf_filename = f"step4_forward_model_ratios_{model_name}.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract metadata
+    valid_mask = forward_results['valid_mask']
+    lat = forward_results['_coordinates']['lat']
+    lon = forward_results['_coordinates']['lon']
+    years = forward_results['_coordinates']['years']
+    response_function_names = forward_results['response_function_names']
+    target_names = forward_results['target_names']
+    forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
+
+    # Calculate total pages
+    total_pages = len(forward_ssps) * len(response_function_names)
+    print(f"Creating Step 4 ratio visualization: {total_pages} pages (3 targets per page)")
+
+    # Create PDF with multi-page layout
+    with PdfPages(pdf_path) as pdf:
+        page_num = 0
+
+        # Loop through combinations (target innermost for 3-per-page grouping)
+        for ssp in forward_ssps:
+            for damage_idx, damage_name in enumerate(response_function_names):
+                page_num += 1
+
+                # Create new page with 3 subplots (one per target)
+                fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
+                fig.suptitle(f'Step 4: GDP Ratios to Baseline - {model_name}\n'
+                           f'SSP: {ssp.upper()} | Response Function: {damage_name}',
+                           fontsize=16, fontweight='bold', y=0.98)
+
+                # Get SSP-specific data
+                ssp_results = forward_results['forward_results'][ssp]
+                gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
+                gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
+
+                # Get baseline GDP for this SSP
+                baseline_gdp = get_ssp_data(all_netcdf_data, ssp, 'gdp')  # [time, lat, lon]
+
+                # Calculate global means for baseline (area-weighted using valid cells only)
+                area_weights = calculate_area_weights(lat)
+                baseline_global = []
+                for t_idx in range(len(years)):
+                    baseline_slice = baseline_gdp[t_idx, :, :]  # [lat, lon]
+                    baseline_global.append(calculate_global_mean(baseline_slice, lat, valid_mask))
+                baseline_global = np.array(baseline_global)
+
+                # Plot each target on this page
+                for target_idx, target_name in enumerate(target_names):
+                    ax = plt.subplot(3, 1, target_idx + 1)  # 3 rows, 1 column
+
+                    # Extract data for this combination [lat, lon, time]
+                    gdp_climate_combo = gdp_climate[:, :, damage_idx, target_idx, :]
+                    gdp_weather_combo = gdp_weather[:, :, damage_idx, target_idx, :]
+
+                    # Calculate global means for this combination
+                    climate_global = []
+                    weather_global = []
+                    for t_idx in range(len(years)):
+                        climate_slice = gdp_climate_combo[:, :, t_idx]  # [lat, lon]
+                        weather_slice = gdp_weather_combo[:, :, t_idx]  # [lat, lon]
+
+                        climate_global.append(calculate_global_mean(climate_slice, lat, valid_mask))
+                        weather_global.append(calculate_global_mean(weather_slice, lat, valid_mask))
+
+                    climate_global = np.array(climate_global)
+                    weather_global = np.array(weather_global)
+
+                    # Calculate ratios minus 1 (fractional change from baseline)
+                    weather_ratio = weather_global / baseline_global - 1.0
+                    climate_ratio = climate_global / baseline_global - 1.0
+
+                    # Plot the ratio lines
+                    ax.plot(years, weather_ratio, 'b--', linewidth=2, label='Weather Effects Only', alpha=0.8)
+                    ax.plot(years, climate_ratio, 'r-', linewidth=2, label='Full Climate Effects', alpha=0.8)
+
+                    # Add horizontal line at zero for reference
+                    ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=1)
+
+                    # Formatting
+                    ax.set_xlabel('Year', fontsize=12)
+                    ax.set_ylabel('Fractional Change from Baseline', fontsize=12)
+                    ax.set_title(f'Target: {target_name}', fontsize=14, fontweight='bold')
+                    ax.grid(True, alpha=0.3)
+                    ax.legend(fontsize=10, loc='best')
+
+                    # Set reasonable y-axis limits using zero-biased range
+                    all_values = np.concatenate([weather_ratio, climate_ratio])
+                    valid_values = all_values[np.isfinite(all_values)]
+                    if len(valid_values) > 0:
+                        vmin, vmax = calculate_zero_biased_range(valid_values)
+                        ax.set_ylim(vmin, vmax)
+
+                    # Add info box with final values
+                    final_weather = weather_ratio[-1]
+                    final_climate = climate_ratio[-1]
+                    info_text = f'2100 Values:\nWeather: {final_weather:+.3f}\nClimate: {final_climate:+.3f}'
+                    ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=10,
+                           verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+                # Save this page
+                plt.tight_layout()
+                plt.subplots_adjust(top=0.93, bottom=0.05)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+
+    print(f"Forward model ratio visualization saved to {pdf_path} ({total_pages} pages)")
+    return pdf_path
+
+
 def calculate_zero_biased_range(data_values, percentile_low=2.5, percentile_high=97.5):
     """
     Calculate visualization range that includes zero when appropriate.
@@ -467,9 +608,12 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     """
     Create spatial maps visualization for Step 4 forward model results.
 
-    Generates a multi-page PDF with one map per (target, response_function, SSP) combination.
-    Each map shows the spatial pattern of climate impact: (y_climate/y_weather) - 1
-    averaged over the configured target period.
+    Generates two multi-page PDFs:
+    1. Linear scale: (y_climate/y_weather) - 1 (original maps)
+    2. Log10 scale: log10(y_climate/y_weather) showing extreme values and off-scale points
+
+    Each PDF has one map per (target, response_function, SSP) combination,
+    with data averaged over the configured target period.
 
     Parameters
     ----------
@@ -486,17 +630,19 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
     Returns
     -------
-    str
-        Path to generated PDF file
+    tuple
+        (linear_pdf_path, log10_pdf_path) - Paths to both generated PDF files
     """
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
-    pdf_filename = f"step4_forward_model_maps_{model_name}.pdf"
-    pdf_path = os.path.join(output_dir, pdf_filename)
+    # Generate output filenames
+    linear_pdf_filename = f"step4_forward_model_maps_{model_name}.pdf"
+    log10_pdf_filename = f"step4_forward_model_maps_log10_{model_name}.pdf"
+    linear_pdf_path = os.path.join(output_dir, linear_pdf_filename)
+    log10_pdf_path = os.path.join(output_dir, log10_pdf_filename)
 
     # Extract metadata
     valid_mask = forward_results['valid_mask']
@@ -520,39 +666,47 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
     print(f"Creating Step 4 maps: {total_maps} maps across {total_pages} pages (3 maps per page)")
     print(f"  {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+    print(f"  Generating both linear and log10 scale PDFs in parallel")
 
-    # Create PDF with multi-page layout
-    with PdfPages(pdf_path) as pdf:
+    # Create both PDFs with multi-page layout
+    with PdfPages(linear_pdf_path) as linear_pdf, PdfPages(log10_pdf_path) as log10_pdf:
         map_idx = 0
         page_num = 0
+        linear_fig = None
+        log10_fig = None
 
-        # Loop through all combinations (same order as line plots)
-        for target_idx, target_name in enumerate(target_names):
-            target_config = config['gdp_reduction_targets'][target_idx]
+        # Loop through all combinations (target innermost for 3-per-page grouping)
+        for ssp in forward_ssps:
 
             for damage_idx, damage_name in enumerate(response_function_names):
                 damage_config = config['response_function_scalings'][damage_idx]
 
-                for ssp in forward_ssps:
+                for target_idx, target_name in enumerate(target_names):
+                    target_config = config['gdp_reduction_targets'][target_idx]
 
                     # Start new page if needed (every 3 maps)
                     if map_idx % maps_per_page == 0:
                         if map_idx > 0:
-                            # Save previous page
-                            plt.tight_layout()
-                            plt.subplots_adjust(top=0.93, bottom=0.05)
-                            pdf.savefig(fig, bbox_inches='tight')
-                            plt.close(fig)
+                            # Save previous pages to both PDFs
+                            for fig, pdf in [(linear_fig, linear_pdf), (log10_fig, log10_pdf)]:
+                                plt.figure(fig.number)
+                                plt.tight_layout()
+                                plt.subplots_adjust(top=0.93, bottom=0.05)
+                                pdf.savefig(fig, bbox_inches='tight')
+                                plt.close(fig)
 
-                        # Create new page
+                        # Create new pages for both PDFs
                         page_num += 1
-                        fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
-                        fig.suptitle(f'Step 4: Forward Model Results - {model_name} - Page {page_num}/{total_pages}',
+                        linear_fig = plt.figure(figsize=(12, 16))
+                        linear_fig.suptitle(f'Step 4: Forward Model Results (Linear Scale) - {model_name} - Page {page_num}/{total_pages}',
+                                    fontsize=16, fontweight='bold', y=0.98)
+
+                        log10_fig = plt.figure(figsize=(12, 16))
+                        log10_fig.suptitle(f'Step 4: Forward Model Results (Log10 Scale) - {model_name} - Page {page_num}/{total_pages}',
                                     fontsize=16, fontweight='bold', y=0.98)
 
                     # Position on current page (1-3)
                     subplot_idx = (map_idx % maps_per_page) + 1
-                    ax = plt.subplot(maps_per_page, 1, subplot_idx)  # 3 rows, 1 column
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
@@ -564,13 +718,14 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     gdp_weather_combo = gdp_weather[:, :, damage_idx, target_idx, :]
 
                     # Calculate time indices for target period using actual time coordinates
-                    time_coords = forward_results['_coordinates']['time']
+                    time_coords = forward_results['_coordinates']['years']
                     target_start_idx = np.where(time_coords == target_start)[0][0]
                     target_end_idx = np.where(time_coords == target_end)[0][0] + 1
 
-                    # Calculate mean ratio over target period for each grid cell
+                    # Calculate mean ratios over target period for each grid cell
                     nlat, nlon = valid_mask.shape
-                    impact_ratio = np.full((nlat, nlon), np.nan)
+                    impact_ratio_linear = np.full((nlat, nlon), np.nan)  # (climate/weather) - 1
+                    impact_ratio_log10 = np.full((nlat, nlon), np.nan)   # log10(climate/weather)
 
                     for lat_idx in range(nlat):
                         for lon_idx in range(nlon):
@@ -579,74 +734,136 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                                 climate_target = gdp_climate_combo[lat_idx, lon_idx, target_start_idx:target_end_idx]
                                 weather_target = gdp_weather_combo[lat_idx, lon_idx, target_start_idx:target_end_idx]
 
-                                # Calculate mean ratio - 1
                                 if len(climate_target) > 0 and len(weather_target) > 0:
                                     # Add epsilon to prevent division by zero
                                     epsilon = 1e-20
                                     ratios = climate_target / (weather_target + epsilon)
                                     mean_ratio = np.nanmean(ratios)
-                                    impact_ratio[lat_idx, lon_idx] = mean_ratio - 1.0
 
-                    # Determine color scale using zero-biased range and get actual min/max
-                    valid_impacts = impact_ratio[valid_mask & np.isfinite(impact_ratio)]
-                    if len(valid_impacts) > 0:
-                        vmin, vmax = calculate_zero_biased_range(valid_impacts)
-                        actual_min = np.min(valid_impacts)
-                        actual_max = np.max(valid_impacts)
+                                    # Linear scale: (climate/weather) - 1
+                                    impact_ratio_linear[lat_idx, lon_idx] = mean_ratio - 1.0
+
+                                    # Log10 scale: log10(climate/weather)
+                                    if mean_ratio > 0:
+                                        impact_ratio_log10[lat_idx, lon_idx] = np.log10(mean_ratio)
+                                    # Zeros or negative values remain NaN (will be white)
+
+                    # Create linear scale map
+                    plt.figure(linear_fig.number)
+                    linear_ax = plt.subplot(maps_per_page, 1, subplot_idx)
+
+                    # Determine color scale for linear using zero-biased range
+                    valid_linear = impact_ratio_linear[valid_mask & np.isfinite(impact_ratio_linear)]
+                    if len(valid_linear) > 0:
+                        lin_vmin, lin_vmax = calculate_zero_biased_range(valid_linear)
+                        lin_actual_min = np.min(valid_linear)
+                        lin_actual_max = np.max(valid_linear)
                     else:
-                        vmin, vmax = -0.01, 0.01
-                        actual_min = actual_max = 0.0
+                        lin_vmin, lin_vmax = -0.01, 0.01
+                        lin_actual_min = lin_actual_max = 0.0
 
-                    # Create blue-red colormap (blue=positive, red=negative, white=zero)
-                    # RdBu_r gives blue-white-red (blue=positive, red=negative)
-                    cmap = plt.cm.RdBu_r  # Blue for positive, red for negative
-                    norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+                    # Linear map: blue-red colormap (blue=positive, red=negative, white=zero)
+                    lin_cmap = plt.cm.RdBu_r
+                    lin_norm = mcolors.TwoSlopeNorm(vmin=lin_vmin, vcenter=0.0, vmax=lin_vmax)
 
-                    # Plot the map
-                    masked_impact = np.where(valid_mask, impact_ratio, np.nan)
-                    im = ax.pcolormesh(lon_grid, lat_grid, masked_impact, cmap=cmap, norm=norm, shading='auto')
+                    masked_linear = np.where(valid_mask, impact_ratio_linear, np.nan)
+                    lin_im = linear_ax.pcolormesh(lon_grid, lat_grid, masked_linear, cmap=lin_cmap, norm=lin_norm, shading='auto')
 
-                    # Add coastlines (simplified using valid mask)
-                    ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
+                    # Add coastlines
+                    linear_ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
 
-                    # Formatting (larger fonts for better visibility)
-                    ax.set_xlabel('Longitude', fontsize=12)
-                    ax.set_ylabel('Latitude', fontsize=12)
-                    ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
+                    # Linear map formatting
+                    linear_ax.set_xlabel('Longitude', fontsize=12)
+                    linear_ax.set_ylabel('Latitude', fontsize=12)
+                    linear_ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
                                 f'Climate Impact: (GDP_climate/GDP_weather - 1)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
-                    # Add max/min value box in lower part of the map
-                    max_min_text = f'Max: {actual_max:.4f}\nMin: {actual_min:.4f}'
-                    ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
+                    # Linear max/min box
+                    lin_max_min_text = f'Max: {lin_actual_max:.4f}\nMin: {lin_actual_min:.4f}'
+                    linear_ax.text(0.02, 0.08, lin_max_min_text, transform=linear_ax.transAxes,
                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
                            fontsize=10, verticalalignment='bottom')
 
-                    # Add colorbar (larger for better visibility)
-                    cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=12)
-                    cbar.set_label('Climate Impact Ratio - 1', rotation=270, labelpad=15, fontsize=12)
-                    cbar.ax.tick_params(labelsize=10)
+                    # Linear colorbar
+                    lin_cbar = plt.colorbar(lin_im, ax=linear_ax, shrink=0.6, aspect=12)
+                    lin_cbar.set_label('Climate Impact Ratio - 1', rotation=270, labelpad=15, fontsize=12)
+                    lin_cbar.ax.tick_params(labelsize=10)
+                    if hasattr(lin_cbar, 'ax'):
+                        lin_cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
 
-                    # Set aspect ratio and limits
-                    ax.set_xlim(lon.min(), lon.max())
-                    ax.set_ylim(lat.min(), lat.max())
-                    ax.set_aspect('equal')
+                    # Set linear map aspect and limits
+                    linear_ax.set_xlim(lon.min(), lon.max())
+                    linear_ax.set_ylim(lat.min(), lat.max())
+                    linear_ax.set_aspect('equal')
+
+                    # Create log10 scale map
+                    plt.figure(log10_fig.number)
+                    log10_ax = plt.subplot(maps_per_page, 1, subplot_idx)
+
+                    # Determine color scale for log10
+                    valid_log10 = impact_ratio_log10[valid_mask & np.isfinite(impact_ratio_log10)]
+                    if len(valid_log10) > 0:
+                        log_actual_min = np.min(valid_log10)
+                        log_actual_max = np.max(valid_log10)
+                        # Symmetric log scale around 0 (log10(1) = 0)
+                        log_max_abs = max(abs(log_actual_min), abs(log_actual_max))
+                        log_vmin, log_vmax = -log_max_abs, log_max_abs
+                    else:
+                        log_vmin, log_vmax = -0.1, 0.1
+                        log_actual_min = log_actual_max = 0.0
+
+                    # Log10 map: blue-red colormap with symmetric range around 0
+                    log_cmap = plt.cm.RdBu_r
+                    log_norm = mcolors.TwoSlopeNorm(vmin=log_vmin, vcenter=0.0, vmax=log_vmax)
+
+                    masked_log10 = np.where(valid_mask, impact_ratio_log10, np.nan)
+                    log_im = log10_ax.pcolormesh(lon_grid, lat_grid, masked_log10, cmap=log_cmap, norm=log_norm, shading='auto')
+
+                    # Add coastlines
+                    log10_ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
+
+                    # Log10 map formatting
+                    log10_ax.set_xlabel('Longitude', fontsize=12)
+                    log10_ax.set_ylabel('Latitude', fontsize=12)
+                    log10_ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
+                                f'Climate Impact: log10(GDP_climate/GDP_weather)\nTarget Period Mean: {target_start}-{target_end}',
+                                fontsize=14, fontweight='bold')
+
+                    # Log10 max/min box
+                    log_max_min_text = f'Max: {log_actual_max:.2f}\nMin: {log_actual_min:.2f}'
+                    log10_ax.text(0.02, 0.08, log_max_min_text, transform=log10_ax.transAxes,
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
+                           fontsize=10, verticalalignment='bottom')
+
+                    # Log10 colorbar
+                    log_cbar = plt.colorbar(log_im, ax=log10_ax, shrink=0.6, aspect=12)
+                    log_cbar.set_label('log10(GDP_climate/GDP_weather)', rotation=270, labelpad=15, fontsize=12)
+                    log_cbar.ax.tick_params(labelsize=10)
+                    if hasattr(log_cbar, 'ax'):
+                        log_cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
+
+                    # Set log10 map aspect and limits
+                    log10_ax.set_xlim(lon.min(), lon.max())
+                    log10_ax.set_ylim(lat.min(), lat.max())
+                    log10_ax.set_aspect('equal')
 
                     map_idx += 1
 
-                    # Add reference line at zero on colorbar
-                    if hasattr(cbar, 'ax'):
-                        cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
-
-        # Save the final page
+        # Save the final pages
         if map_idx > 0:
-            plt.tight_layout()
-            plt.subplots_adjust(top=0.93, bottom=0.05)
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close(fig)
+            for fig, pdf in [(linear_fig, linear_pdf), (log10_fig, log10_pdf)]:
+                plt.figure(fig.number)
+                plt.tight_layout()
+                plt.subplots_adjust(top=0.93, bottom=0.05)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
 
-    print(f"Forward model maps saved to: {pdf_path} ({total_pages} pages, 3 maps per page)")
-    return pdf_path
+    print(f"Forward model maps saved to:")
+    print(f"  Linear scale: {linear_pdf_path}")
+    print(f"  Log10 scale: {log10_pdf_path}")
+    print(f"  ({total_pages} pages each, 3 maps per page)")
+    return (linear_pdf_path, log10_pdf_path)
 
 
 def create_country_pdf_books(all_results, params, output_dir, run_name, timestamp):
