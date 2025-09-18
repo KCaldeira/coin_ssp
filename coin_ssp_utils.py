@@ -11,6 +11,69 @@ from datetime import datetime
 from typing import Dict, Any, List
 from coin_ssp_core import ScalingParams
 
+def create_serializable_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a JSON-serializable version of the configuration by filtering out non-serializable objects.
+
+    Parameters
+    ----------
+    config : Dict[str, Any]
+        Original configuration dictionary
+
+    Returns
+    -------
+    Dict[str, Any]
+        Filtered configuration dictionary safe for JSON serialization
+    """
+    import json
+    import copy
+
+    # Make a deep copy to avoid modifying the original
+    filtered_config = copy.deepcopy(config)
+
+    # Remove known non-serializable objects
+    non_serializable_keys = ['model_params_factory']
+
+    def remove_non_serializable(obj, path=""):
+        if isinstance(obj, dict):
+            keys_to_remove = []
+            for key, value in obj.items():
+                current_path = f"{path}.{key}" if path else key
+                if key in non_serializable_keys:
+                    keys_to_remove.append(key)
+                else:
+                    try:
+                        # Test if the value is JSON serializable
+                        json.dumps(value)
+                    except (TypeError, ValueError):
+                        # If not serializable, try to recurse or remove
+                        if isinstance(value, dict):
+                            remove_non_serializable(value, current_path)
+                        elif isinstance(value, list):
+                            remove_non_serializable(value, current_path)
+                        else:
+                            keys_to_remove.append(key)
+
+            for key in keys_to_remove:
+                obj.pop(key)
+
+        elif isinstance(obj, list):
+            items_to_remove = []
+            for i, item in enumerate(obj):
+                try:
+                    json.dumps(item)
+                except (TypeError, ValueError):
+                    if isinstance(item, (dict, list)):
+                        remove_non_serializable(item, f"{path}[{i}]")
+                    else:
+                        items_to_remove.append(i)
+
+            for i in reversed(items_to_remove):
+                obj.pop(i)
+
+    remove_non_serializable(filtered_config)
+    return filtered_config
+
 def apply_time_series_filter(time_series, filter_width, ref_start_idx, ref_end_idx):
     """
     Apply LOESS filter to time series and remove trend relative to reference period mean.
@@ -239,7 +302,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
                         # Use 1-99 percentiles to exclude extreme outliers
                         percentile_values = valid_values[(valid_values >= np.percentile(valid_values, 1)) &
                                                         (valid_values <= np.percentile(valid_values, 99))]
-                        y_min, y_max = calculate_zero_biased_axis_range(percentile_values)
+                        y_min, y_max = calculate_zero_biased_axis_range(percentile_values, padding_factor=0.15)
                         ax.set_ylim(y_min, y_max)
 
                     # Add target reduction info as text
@@ -810,11 +873,21 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
                         # Report extreme ratios for diagnostic purposes
                         if log_actual_max > 5:  # log10(ratio) > 5 means ratio > 100,000
+                            # Find indices of maximum ratio
+                            max_indices = np.where((valid_mask & np.isfinite(impact_ratio_log10)) &
+                                                 (impact_ratio_log10 == log_actual_max))
+                            max_lat_idx, max_lon_idx = max_indices[0][0], max_indices[1][0]
                             print(f"    WARNING: Extreme high ratios detected for {ssp.upper()} × {target_name} × {damage_name}")
                             print(f"             log10(max_ratio) = {log_actual_max:.2f} (ratio = {10**log_actual_max:.2e})")
+                            print(f"             at grid cell indices: lat_idx={max_lat_idx}, lon_idx={max_lon_idx}")
                         if log_actual_min < -5:  # log10(ratio) < -5 means ratio < 0.00001
+                            # Find indices of minimum ratio
+                            min_indices = np.where((valid_mask & np.isfinite(impact_ratio_log10)) &
+                                                 (impact_ratio_log10 == log_actual_min))
+                            min_lat_idx, min_lon_idx = min_indices[0][0], min_indices[1][0]
                             print(f"    WARNING: Extreme low ratios detected for {ssp.upper()} × {target_name} × {damage_name}")
                             print(f"             log10(min_ratio) = {log_actual_min:.2f} (ratio = {10**log_actual_min:.2e})")
+                            print(f"             at grid cell indices: lat_idx={min_lat_idx}, lon_idx={min_lon_idx}")
                     else:
                         log_vmin, log_vmax = -0.1, 0.1
                         log_actual_min = log_actual_max = 0.0
@@ -2110,17 +2183,19 @@ def calculate_tfp_coin_ssp(pop, gdp, params):
 # Output Writing Functions
 # =============================================================================
 
-def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str) -> str:
+def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, config: Dict[str, Any]) -> str:
     """
     Save Step 1 target GDP reduction results to NetCDF file.
-    
+
     Parameters
     ----------
     target_results : Dict[str, Any]
         Results from step1_calculate_target_gdp_changes()
     output_path : str
         Complete output file path
-        
+    config : Dict[str, Any]
+        Full configuration dictionary to embed in NetCDF file
+
     Returns
     -------
     str
@@ -2179,6 +2254,8 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str) 
     }
     
     # Add global attributes
+    import json
+    serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'COIN-SSP Target GDP Reductions - Step 1 Results',
         'reference_ssp': metadata['reference_ssp'],
@@ -2186,7 +2263,8 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str) 
         'target_period': f"{metadata['time_periods']['target_period']['start_year']}-{metadata['time_periods']['target_period']['end_year']}",
         'global_temp_ref': metadata['global_temp_ref'],
         'global_gdp_target': metadata['global_gdp_target'],
-        'creation_date': datetime.now().isoformat()
+        'creation_date': datetime.now().isoformat(),
+        'configuration_json': json.dumps(serializable_config, indent=2)
     }
     
     # Save to file
@@ -2195,7 +2273,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str) 
     return output_path
 
 
-def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, model_name: str) -> str:
+def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, model_name: str, config: Dict[str, Any]) -> str:
     """
     Save Step 2 baseline TFP results to NetCDF file.
     
@@ -2204,9 +2282,11 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     tfp_results : Dict[str, Any]
         Results from step2_calculate_baseline_tfp()
     output_path : str
-        Complete output file path  
+        Complete output file path
     model_name : str
         Climate model name
+    config : Dict[str, Any]
+        Full configuration dictionary to embed in NetCDF file
         
     Returns
     -------
@@ -2276,6 +2356,8 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     }
     
     # Add global attributes
+    import json
+    serializable_config = create_serializable_config(config)
     total_processed = sum(result['grid_cells_processed'] for ssp_name, result in tfp_results.items()
                          if ssp_name not in ['_coordinates', '_metadata'])
     ds.attrs = {
@@ -2284,7 +2366,8 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
         'total_grid_cells_processed': total_processed,
         'ssp_scenarios': ', '.join(ssp_names),
         'description': 'Baseline Total Factor Productivity calculated for each SSP scenario without climate effects',
-        'creation_date': datetime.now().isoformat()
+        'creation_date': datetime.now().isoformat(),
+        'configuration_json': json.dumps(serializable_config, indent=2)
     }
     
     # Save to file
@@ -2293,7 +2376,7 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     return output_path
 
 
-def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str, model_name: str) -> str:
+def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str, model_name: str, config: Dict[str, Any]) -> str:
     """
     Save Step 3 scaling factor results to NetCDF file.
     
@@ -2305,6 +2388,8 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         Complete output file path
     model_name : str
         Climate model name
+    config : Dict[str, Any]
+        Full configuration dictionary to embed in NetCDF file
         
     Returns
     -------
@@ -2391,6 +2476,8 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     }
     
     # Add global attributes
+    import json
+    serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'COIN-SSP Scaling Factors - Step 3 Results',
         'model_name': model_name,
@@ -2401,7 +2488,8 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         'response_functions': ', '.join(response_function_names),
         'target_patterns': ', '.join(target_names),
         'description': 'Per-grid-cell scaling factors optimized using reference SSP scenario',
-        'creation_date': datetime.now().isoformat()
+        'creation_date': datetime.now().isoformat(),
+        'configuration_json': json.dumps(serializable_config, indent=2)
     }
     
     # Save to file
@@ -2410,7 +2498,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     return output_path
 
 
-def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, model_name: str) -> List[str]:
+def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, model_name: str, config: Dict[str, Any]) -> List[str]:
     """
     Save Step 4 forward model results to separate NetCDF files per SSP/variable combination.
 
@@ -2425,6 +2513,8 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
         Output directory path
     model_name : str
         Climate model name
+    config : Dict[str, Any]
+        Full configuration dictionary to embed in NetCDF file
 
     Returns
     -------
@@ -2485,6 +2575,8 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
             )
 
             # Add comprehensive attributes
+            import json
+            serializable_config = create_serializable_config(config)
             ds.attrs.update({
                 'title': f'COIN-SSP Step 4 Forward Model Results - {ssp_name.upper()} - {var_base.upper()}',
                 'description': f'Forward economic modeling results for {ssp_name.upper()} scenario, {var_base} variables',
@@ -2494,7 +2586,8 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
                 'coordinate_order': 'target, response_func, time, lat, lon',
                 'variables_included': f'{var_base}_climate, {var_base}_weather, valid_mask',
                 'creation_date': pd.Timestamp.now().isoformat(),
-                'contact': 'Generated by COIN-SSP pipeline'
+                'contact': 'Generated by COIN-SSP pipeline',
+                'configuration_json': json.dumps(serializable_config, indent=2)
             })
 
             # Variable-specific attributes
@@ -2543,7 +2636,7 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
     return saved_files
 
 
-def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path: str, model_name: str) -> str:
+def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path: str, model_name: str, config: Dict[str, Any]) -> str:
     """
     Save Step 4 forward model results to NetCDF file.
     
@@ -2555,6 +2648,8 @@ def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path:
         Complete output file path
     model_name : str
         Climate model name
+    config : Dict[str, Any]
+        Full configuration dictionary to embed in NetCDF file
         
     Returns
     -------
@@ -2670,18 +2765,21 @@ def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path:
     total_successful = sum(forward_results[ssp]['successful_forward_runs'] for ssp in ssp_names)
     total_runs = sum(forward_results[ssp]['total_forward_runs'] for ssp in ssp_names)
     
+    import json
+    serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'COIN-SSP Forward Model Results - Step 4 Results',
         'model_name': model_name,
         'total_ssps_processed': step4_results['total_ssps_processed'],
         'ssp_scenarios': ', '.join(ssp_names),
         'response_functions': ', '.join(response_function_names),
-        'target_patterns': ', '.join(target_names), 
+        'target_patterns': ', '.join(target_names),
         'total_forward_runs': total_runs,
         'successful_forward_runs': total_successful,
         'overall_success_rate_percent': 100 * total_successful / max(1, total_runs),
         'description': 'Climate-integrated economic projections using per-grid-cell scaling factors for all SSP scenarios',
-        'creation_date': datetime.now().isoformat()
+        'creation_date': datetime.now().isoformat(),
+        'configuration_json': json.dumps(serializable_config, indent=2)
     }
     
     # Save to file

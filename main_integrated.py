@@ -303,7 +303,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     output_path = get_step_output_path(output_dir, 1, model_name, reference_ssp, "nc")
-    save_step1_results_netcdf(target_results, output_path)
+    save_step1_results_netcdf(target_results, output_path, config)
 
     # Create visualization
     print("Generating target GDP visualization...")
@@ -463,7 +463,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
         'lon': metadata['lon']
     }
     
-    save_step2_results_netcdf(tfp_results, output_path, model_name)
+    save_step2_results_netcdf(tfp_results, output_path, model_name, config)
 
     # Generate TFP visualization
     print("Generating baseline TFP visualization...")
@@ -565,10 +565,6 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     ref_start_idx = np.where(years == ref_start_year)[0][0]
     ref_end_idx = np.where(years == ref_end_year)[0][0]
-
-    # Calculate year diverge location for weather filtering (reference period end + 1)
-    year_diverge = ref_end_year + 1
-    year_diverge_loc = np.where(years == year_diverge)[0][0]
     
     # Initialize counters
     total_grid_cells = 0
@@ -694,7 +690,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     # Write results to NetCDF file
     model_name = config['climate_model']['model_name']
     output_path = get_step_output_path(output_dir, 3, model_name, reference_ssp, "nc")
-    save_step3_results_netcdf(scaling_results, output_path, model_name)
+    save_step3_results_netcdf(scaling_results, output_path, model_name, config)
 
     # Generate scaling factors visualization
     print("Generating scaling factors visualization...")
@@ -1115,7 +1111,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     
     # Write results to separate NetCDF files per SSP/variable
     model_name = config['climate_model']['model_name']
-    saved_files = save_step4_results_netcdf_split(step4_results, output_dir, model_name)
+    saved_files = save_step4_results_netcdf_split(step4_results, output_dir, model_name, config)
     print(f"Step 4 NetCDF files saved: {len(saved_files)} files")
 
     # Create PDF visualizations
