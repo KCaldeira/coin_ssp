@@ -469,7 +469,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
     Generates a multi-page PDF with one map per (target, response_function, SSP) combination.
     Each map shows the spatial pattern of climate impact: (y_climate/y_weather) - 1
-    averaged over the target period (2080-2100).
+    averaged over the configured target period.
 
     Parameters
     ----------
@@ -509,9 +509,9 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     # Create coordinate grids for plotting
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
-    # Define target period (2080-2100) - same as other visualizations
-    target_start = 2080
-    target_end = 2100
+    # Get target period from config
+    target_start = config['time_periods']['target_period']['start_year']
+    target_end = config['time_periods']['target_period']['end_year']
 
     # Calculate total maps and pages
     total_maps = len(target_names) * len(response_function_names) * len(forward_ssps)
@@ -563,11 +563,10 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     gdp_climate_combo = gdp_climate[:, :, damage_idx, target_idx, :]
                     gdp_weather_combo = gdp_weather[:, :, damage_idx, target_idx, :]
 
-                    # Calculate time indices for target period
-                    # Assuming time starts at 2015 (index 0) and goes to 2100 (index 85)
-                    start_year = 2015
-                    target_start_idx = target_start - start_year  # 2080 - 2015 = 65
-                    target_end_idx = target_end - start_year + 1   # 2100 - 2015 + 1 = 86
+                    # Calculate time indices for target period using actual time coordinates
+                    time_coords = forward_results['_coordinates']['time']
+                    target_start_idx = np.where(time_coords == target_start)[0][0]
+                    target_end_idx = np.where(time_coords == target_end)[0][0] + 1
 
                     # Calculate mean ratio over target period for each grid cell
                     nlat, nlon = valid_mask.shape
@@ -2193,7 +2192,7 @@ def save_step4_results_netcdf(step4_results: Dict[str, Any], output_path: str, m
         k_climate_all[i] = ssp_result['k_climate']
         k_weather_all[i] = ssp_result['k_weather']
     
-    # Create time coordinate (assuming annual steps starting from 2015)
+    # Create time coordinate using actual data years
     time_coords = np.arange(ntime)
     
     # Create xarray dataset
@@ -2890,8 +2889,8 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     Create comprehensive PDF visualization for Step 2 baseline TFP results.
 
     Generates one page per forward simulation SSP, each with 3-panel visualization:
-    1. Map of mean TFP for reference period (2015-2025)
-    2. Map of mean TFP for target period (2080-2100)
+    1. Map of mean TFP for reference period
+    2. Map of mean TFP for target period
     3. Time series percentile plot (min, 10%, 25%, 50%, 75%, 90%, max)
 
     Parameters
@@ -2998,7 +2997,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
             print(f"    tfp_percentiles shape: {tfp_percentiles.shape}")
             print(f"    tfp_percentiles range: {np.nanmin(tfp_percentiles):.6e} to {np.nanmax(tfp_percentiles):.6e}")
             print(f"    tfp_percentiles NaN count: {np.sum(np.isnan(tfp_percentiles))}")
-            print(f"    Sample percentiles for year 0 (1964): {tfp_percentiles[:, 0]}")
+            print(f"    Sample percentiles for year 0: {tfp_percentiles[:, 0]}")
             print(f"    Sample percentiles for year 50: {tfp_percentiles[:, 50] if tfp_percentiles.shape[1] > 50 else 'N/A'}")
 
             # Check if all percentiles are identical (explaining overlapping lines)
