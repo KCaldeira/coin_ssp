@@ -46,6 +46,10 @@
       "start_year": 2080,
       "end_year": 2100,
       "description": "Target period for constraint satisfaction and impact assessment"
+    },
+    "prediction_period": {
+      "start_year": 2015,
+      "description": "Year before which population and GDP is assumed to grow exponentially"
     }
   },
 

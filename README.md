@@ -55,7 +55,21 @@ All damage functions support both temperature and precipitation sensitivities.
 - **Temporal Alignment**: Synchronizes annual time series across all data sources
 - **Quality Assurance**: Validates grid cell completeness and data continuity
 
-### 3. Grid Cell Processing
+### 3. Historical Data Modification for Climate-Independence
+To ensure that baseline economic projections are not contaminated by historical climate effects, the model applies exponential growth interpolation to GDP and population data before the prediction year (2015):
+
+- **Motivation**: Historical GDP and population records may contain embedded responses to past climate variability and change. To isolate purely socioeconomic growth trends from climate influences, we replace historical data with smooth exponential trajectories.
+
+- **Implementation**: For each grid cell, GDP and population values between the first available data year and 2015 are replaced using:
+  ```
+  value[year] = value[first_year] × (value[2015] / value[first_year])^((year - first_year) / (2015 - first_year))
+  ```
+
+- **Rationale**: This approach preserves the observed values at the boundary years (first available year and prediction year) while ensuring that intermediate years follow a pure exponential growth path uncontaminated by historical climate effects. The resulting time series represent counterfactual socioeconomic development trajectories that would have occurred under constant climate conditions.
+
+- **Scope**: Applied during data loading (`load_gridded_data()`) to both GDP and population arrays for all SSP scenarios, ensuring consistent baseline conditions across all subsequent economic modeling steps.
+
+### 4. Grid Cell Processing
 
 The following pipeline will be done for each climate model under consideration
 

@@ -211,10 +211,13 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     model_name = config['climate_model']['model_name']
     gdp_targets = config['gdp_reduction_targets']
     time_periods = config['time_periods']
-    
+
     print(f"Using reference SSP: {reference_ssp}")
     print(f"Climate model: {model_name}")
     print(f"Processing {len(gdp_targets)} GDP reduction targets")
+
+    prediction_start = time_periods['prediction_period']['start_year']
+    print(f"Prediction period start year: {prediction_start}")
     
     # Convert from all_netcdf_data format to Step 1's expected format
     print(f"Using pre-loaded NetCDF data for {reference_ssp}...")

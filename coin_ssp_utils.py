@@ -1246,7 +1246,7 @@ def load_and_concatenate_population_data(config, model_name, ssp_name):
     return concatenated_data, concatenated_years, lat, lon
 
 
-def load_gridded_data(config, model_name, case_name):
+def load_gridded_data(config, model_name, case_name, prediction_year):
     """
     Load all four NetCDF files and return as a temporally-aligned dataset.
 
@@ -1261,6 +1261,8 @@ def load_gridded_data(config, model_name, case_name):
         Climate model name
     case_name : str
         SSP scenario name
+    prediction_year : int
+        Year before which GDP and population are modified to follow exponential growth
 
     Returns
     -------
@@ -1268,8 +1270,8 @@ def load_gridded_data(config, model_name, case_name):
         Dictionary containing temporally-aligned data:
         - 'tas': temperature data (time, lat, lon) - annual, common years
         - 'pr': precipitation data (time, lat, lon) - annual, common years
-        - 'gdp': GDP data (time, lat, lon) - annual, common years (interpolated)
-        - 'pop': population data (time, lat, lon) - annual, common years
+        - 'gdp': GDP data (time, lat, lon) - annual, common years (interpolated, exponential growth applied before prediction year)
+        - 'pop': population data (time, lat, lon) - annual, common years (exponential growth applied before prediction year)
         - 'lat': latitude coordinates
         - 'lon': longitude coordinates
         - 'tas_years': temperature time axis (annual years)
@@ -1362,6 +1364,32 @@ def load_gridded_data(config, model_name, case_name):
     assert np.array_equal(pop_years_aligned, common_years), "Population years not aligned"
 
     print(f"  ✅ All variables aligned to {len(common_years)} common years")
+
+    # Apply exponential growth modification for GDP and population before prediction year
+    if prediction_year in common_years:
+        idx_prediction_year = np.where(common_years == prediction_year)[0][0]
+
+        if idx_prediction_year > 0:
+            print(f"  Applying exponential growth modification for years {common_years[0]}-{prediction_year}")
+
+            # For each grid cell, modify GDP and population using exponential interpolation
+            for lat_idx in range(gdp_aligned.shape[1]):
+                for lon_idx in range(gdp_aligned.shape[2]):
+                    # GDP exponential growth
+                    gdp_first = gdp_aligned[0, lat_idx, lon_idx]
+                    gdp_prediction = gdp_aligned[idx_prediction_year, lat_idx, lon_idx]
+
+                    if gdp_first > 0 and gdp_prediction > 0:
+                        for idx in range(1, idx_prediction_year):
+                            gdp_aligned[idx, lat_idx, lon_idx] = gdp_first * (gdp_prediction / gdp_first) ** (idx / idx_prediction_year)
+
+                    # Population exponential growth
+                    pop_first = pop_aligned[0, lat_idx, lon_idx]
+                    pop_prediction = pop_aligned[idx_prediction_year, lat_idx, lon_idx]
+
+                    if pop_first > 0 and pop_prediction > 0:
+                        for idx in range(1, idx_prediction_year):
+                            pop_aligned[idx, lat_idx, lon_idx] = pop_first * (pop_prediction / pop_first) ** (idx / idx_prediction_year)
 
     # Note: Individual datasets are closed within their respective loading functions
 
@@ -1849,15 +1877,19 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
     time_periods = config['time_periods']
-    
+
     # Create comprehensive SSP list (reference + forward, deduplicated)
     all_ssps = list(set([reference_ssp] + forward_ssps))
     all_ssps.sort()  # Consistent ordering
-    
+
     print(f"Climate model: {model_name}")
     print(f"Reference SSP: {reference_ssp}")
     print(f"All SSPs to load: {all_ssps}")
     print(f"Total SSP scenarios: {len(all_ssps)}")
+
+    # Log prediction period for exponential growth assumption
+    prediction_start = time_periods['prediction_period']['start_year']
+    print(f"Exponential growth assumption before year: {prediction_start}")
     
     # Initialize data structure
     all_data = {
@@ -1885,7 +1917,8 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
             print(f"  Population: {os.path.basename(pop_file)}")
             
             # Load gridded data for this SSP using existing function
-            ssp_data = load_gridded_data(config, model_name, ssp_name)
+            prediction_year = time_periods['prediction_period']['start_year']
+            ssp_data = load_gridded_data(config, model_name, ssp_name, prediction_year)
             
             # Store in organized structure
             all_data[ssp_name] = {
@@ -1951,63 +1984,21 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Diagnostic counters
     total_cells = nlat_actual * nlon_actual
-    cells_with_positive_values = 0
-    cells_with_extreme_gdp_changes = 0
-    cells_with_extreme_pop_changes = 0
     final_valid_count = 0
-
-    # Get time coordinates for 5-year change detection
-    years = all_data[reference_ssp]['gdp_years']
-
-    def detect_extreme_changes(time_series, years, factor_threshold=10):
-        """Detect if any 5-year period has changes exceeding factor_threshold."""
-        for i in range(len(years)):
-            # Find all points exactly 5 years later
-            target_year = years[i] + 5
-            j_indices = np.where(years == target_year)[0]
-
-            if len(j_indices) > 0:
-                j = j_indices[0]  # Take first match
-
-                # Calculate ratio (handle zero/negative values)
-                if time_series[i] > 0 and time_series[j] > 0:
-                    ratio = time_series[j] / time_series[i]
-
-                    # Check if change exceeds threshold in either direction
-                    if ratio > factor_threshold or ratio < (1.0 / factor_threshold):
-                        return True  # Mark as invalid
-
-        return False  # No extreme changes detected
 
     for lat_idx in range(nlat_actual):
         for lon_idx in range(nlon_actual):
             gdp_timeseries = ref_gdp[:, lat_idx, lon_idx]  # [time] - extract all time points for this location
             pop_timeseries = ref_pop[:, lat_idx, lon_idx]  # [time]
 
-            # Step 1: Check if GDP and population are positive at ALL time points
+            # Check if GDP and population are positive at ALL time points
             if np.all(gdp_timeseries > 0) and np.all(pop_timeseries > 0):
-                cells_with_positive_values += 1
-
-                # Step 2: Check for extreme changes over any 5-year period
-                has_extreme_gdp = detect_extreme_changes(gdp_timeseries, years)
-                has_extreme_pop = detect_extreme_changes(pop_timeseries, years)
-
-                if has_extreme_gdp:
-                    cells_with_extreme_gdp_changes += 1
-                if has_extreme_pop:
-                    cells_with_extreme_pop_changes += 1
-
-                # Cell is valid only if it passes all tests
-                if not has_extreme_gdp and not has_extreme_pop:
-                    valid_mask[lat_idx, lon_idx] = True
-                    final_valid_count += 1
+                valid_mask[lat_idx, lon_idx] = True
+                final_valid_count += 1
 
     print(f"  Grid cell validation results:")
     print(f"    Total cells: {total_cells}")
-    print(f"    Cells with positive GDP/population: {cells_with_positive_values} ({100*cells_with_positive_values/total_cells:.1f}%)")
-    print(f"    Cells eliminated by extreme GDP changes (>10× in 5 years): {cells_with_extreme_gdp_changes}")
-    print(f"    Cells eliminated by extreme population changes (>10× in 5 years): {cells_with_extreme_pop_changes}")
-    print(f"    Final valid economic grid cells: {final_valid_count} / {total_cells} ({100*final_valid_count/total_cells:.1f}%)")
+    print(f"    Valid economic grid cells (non-zero GDP and population for all years): {final_valid_count} / {total_cells} ({100*final_valid_count/total_cells:.1f}%)")
 
     # Update metadata with correct dimensions
     all_data['_metadata']['grid_shape'] = (nlat_actual, nlon_actual)
@@ -2605,8 +2596,8 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
 
             ds.valid_mask.attrs = {
                 'long_name': 'Valid economic grid cell mask',
-                'description': 'Boolean mask indicating grid cells with valid economic data (positive GDP/population, no extreme changes)',
-                'note': 'Cells with extreme changes (>10× in 5 years) or non-positive values excluded'
+                'description': 'Boolean mask indicating grid cells with valid economic data (positive GDP and population for all years)',
+                'note': 'Cells with non-positive GDP or population values in any year excluded'
             }
 
             # Coordinate attributes
