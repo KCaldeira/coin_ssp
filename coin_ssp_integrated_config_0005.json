@@ -46,11 +46,6 @@
       "start_year": 2080,
       "end_year": 2100,
       "description": "Target period for constraint satisfaction and impact assessment"
-    },
-    "projection_period": {
-      "start_year": 2015,
-      "end_year": 2100,
-      "description": "Period for forward model projections"
     }
   },
 
@@ -66,7 +61,7 @@
         "target_type": "linear",
         "global_mean_reduction": -0.10,
         "reference_temperature": 30.0,
-        "reduction_at_reference_temp": -0.20,
+        "reduction_at_reference_temp": -0.15,
         "description": "Linear temperature-dependent reduction, -20% at 30°C, -10% GDP-weighted global mean"
       },
       {
@@ -137,12 +132,12 @@
       {
         "scaling_name": "combined_balanced_quadratic-based",
         "description": "1/6 by each pathway based on single factor quadratic target scaled to average 1/6 each",
-        "y_tas1": 0.375592,
-        "y_tas2": 0.187745,
-        "k_tas1": 0.281885,
-        "k_tas2": 0.129026,
-        "tfp_tas1": 0.0163124,
-        "tfp_tas2": 0.00943036
+        "y_tas1": 0.586689,
+        "y_tas2": 0.121051,
+        "k_tas1": 0.232216,
+        "k_tas2": 0.048469,
+        "tfp_tas1": 0.008922,
+        "tfp_tas2": 0.005653
       }
   ],
 
