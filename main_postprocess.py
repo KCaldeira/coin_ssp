@@ -173,10 +173,11 @@ def obtain_configuration_information(output_files, analysis_output_dir):
 
 def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, config):
     """
-    Analyze correlations between LOESS-smoothed temperature and GDP variables.
+    Analyze correlations between temperature and GDP variability (detrended residuals).
 
     For each SSP/target/response function combination, computes correlations between
-    30-year LOESS smoothed temp_ssp and GDP variables (gdp_weather, gdp_climate).
+    temperature variability and GDP variability after removing 30-year LOESS trends.
+    This shows how short-term climate fluctuations relate to short-term economic fluctuations.
     Reports correlation coefficient, linear regression slope, and ratio of standard deviations.
 
     Parameters
@@ -199,10 +200,10 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from coin_ssp_utils import apply_time_series_filter
 
-    print("📊 Analysis: Temperature-GDP Correlations with LOESS Smoothing")
+    print("📊 Analysis: Temperature-GDP Variability Correlations (Detrended)")
 
     # Create analysis output directory
-    analysis_dir = os.path.join(analysis_output_dir, "temperature_gdp_correlations")
+    analysis_dir = os.path.join(analysis_output_dir, "temperature_gdp_variability_correlations")
     os.makedirs(analysis_dir, exist_ok=True)
     print(f"    Output directory: {analysis_dir}")
 
@@ -239,7 +240,7 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
     full_start_idx = 0
     full_end_idx = len(temp_coords['time']) - 1
 
-    print(f"    🎯 LOESS filtering over full time series: {temp_coords['time'][0]}-{temp_coords['time'][-1]} (indices {full_start_idx}-{full_end_idx})")
+    print(f"    🎯 LOESS detrending over full time series: {temp_coords['time'][0]}-{temp_coords['time'][-1]} (indices {full_start_idx}-{full_end_idx})")
 
     # Initialize results storage
     correlation_results = []
@@ -312,23 +313,22 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
                             continue
 
                         # Apply 30-year LOESS smoothing over entire time series
-                        try:
-                            temp_smoothed = apply_time_series_filter(temp_series, 30, full_start_idx, full_end_idx)
-                            gdp_climate_smoothed = apply_time_series_filter(gdp_climate_series, 30, full_start_idx, full_end_idx)
-                            gdp_weather_smoothed = apply_time_series_filter(gdp_weather_series, 30, full_start_idx, full_end_idx)
-                        except Exception as e:
-                            continue
+
+                        temp_variability= temp_series - apply_time_series_filter(temp_series, 30, full_start_idx, full_end_idx)
+                        gdp_climate_variability= gdp_climate_series - apply_time_series_filter(gdp_climate_series, 30, full_start_idx, full_end_idx)
+                        gdp_weather_variability= gdp_weather_series -apply_time_series_filter(gdp_weather_series, 30, full_start_idx, full_end_idx)
+
 
                         # Calculate correlations and regression statistics
                         # Climate scenario (temp_ssp vs gdp_climate)
-                        corr_climate, _ = stats.pearsonr(temp_smoothed, gdp_climate_smoothed)
-                        slope_climate, _, _, _, _ = stats.linregress(temp_smoothed, gdp_climate_smoothed)
-                        std_ratio_climate = np.std(gdp_climate_smoothed) / np.std(temp_smoothed)
+                        corr_climate, _ = stats.pearsonr(temp_variability, gdp_climate_variability)
+                        slope_climate, _, _, _, _ = stats.linregress(temp_variability, gdp_climate_variability)
+                        std_ratio_climate = np.std(gdp_climate_variability) / np.std(temp_variability)
 
                         # Weather scenario (temp_ssp vs gdp_weather)
-                        corr_weather, _ = stats.pearsonr(temp_smoothed, gdp_weather_smoothed)
-                        slope_weather, _, _, _, _ = stats.linregress(temp_smoothed, gdp_weather_smoothed)
-                        std_ratio_weather = np.std(gdp_weather_smoothed) / np.std(temp_smoothed)
+                        corr_weather, _ = stats.pearsonr(temp_variability, gdp_weather_variability)
+                        slope_weather, _, _, _, _ = stats.linregress(temp_variability, gdp_weather_variability)
+                        std_ratio_weather = np.std(gdp_weather_variability) / np.std(temp_variability)
 
                         # Store results
                         correlations_climate.append(corr_climate)
@@ -370,9 +370,13 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
 
                     correlation_results.append(result)
 
-                    print(f"        ✓ {target_name} × {resp_func_name}: {valid_cell_count} cells, "
-                          f"r_climate={result['corr_climate_mean']:.3f} (med={result['corr_climate_median']:.3f}), "
-                          f"r_weather={result['corr_weather_mean']:.3f} (med={result['corr_weather_median']:.3f})")
+                    print(f"        ✓ {target_name} × {resp_func_name}: {valid_cell_count} cells")
+                    print(f"          r_climate: {result['corr_climate_mean']:.3f} (med={result['corr_climate_median']:.3f}, std={result['corr_climate_std']:.3f})")
+                    print(f"          r_weather: {result['corr_weather_mean']:.3f} (med={result['corr_weather_median']:.3f}, std={result['corr_weather_std']:.3f})")
+                    print(f"          slope_climate: {result['slope_climate_mean']:.3f} (med={result['slope_climate_median']:.3f}, std={result['slope_climate_std']:.3f})")
+                    print(f"          slope_weather: {result['slope_weather_mean']:.3f} (med={result['slope_weather_median']:.3f}, std={result['slope_weather_std']:.3f})")
+                    print(f"          stdratio_climate: {result['std_ratio_climate_mean']:.3f} (med={result['std_ratio_climate_median']:.3f}, std={result['std_ratio_climate_std']:.3f})")
+                    print(f"          stdratio_weather: {result['std_ratio_weather_mean']:.3f} (med={result['std_ratio_weather_median']:.3f}, std={result['std_ratio_weather_std']:.3f})")
 
     # Create results DataFrame and save to CSV
     if correlation_results:
@@ -476,7 +480,7 @@ def run_all_analyses(output_files, analysis_output_dir):
 
     # Define subsequent analyses (config is now available)
     analyses = [
-        ("Temperature-GDP Correlations", analysis_temperature_gdp_correlations),
+        ("Temperature-GDP Variability Correlations", analysis_temperature_gdp_correlations),
         ("Analysis 3", analysis_3_placeholder)
     ]
 

@@ -548,7 +548,7 @@ python main_postprocess.py data/output/output_integrated_CanESM5_20250919_123456
 - **Future Extensibility**: Ready for selective analysis flags and additional analyses
 
 **Available Analyses**:
-- **Temperature-GDP Correlations**: Computes correlations between 30-year LOESS smoothed temp_ssp and GDP variables (gdp_weather, gdp_climate) for all SSP/target/response function combinations. Reports correlation coefficients, linear regression slopes, and standard deviation ratios.
+- **Temperature-GDP Variability Correlations**: Computes correlations between temperature and GDP variability (detrended residuals) after removing 30-year LOESS trends. This shows how short-term climate fluctuations relate to short-term economic fluctuations for all SSP/target/response function combinations. Reports correlation coefficients, linear regression slopes, and standard deviation ratios.
 
 #### Country-Level Analysis (Legacy)
 Traditional country-by-country processing using JSON configuration:
