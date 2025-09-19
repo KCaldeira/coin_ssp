@@ -1255,7 +1255,7 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
         # Load all NetCDF data once for efficiency (major optimization)
         data_start = time.time()
         print("Loading all NetCDF data for entire pipeline...")
-        all_netcdf_data = load_all_netcdf_data(config)
+        all_netcdf_data = load_all_netcdf_data(config, output_dir)
         print("✅ All NetCDF data loaded - will be reused across all processing steps")
         step_times['Data Loading'] = time.time() - data_start
 

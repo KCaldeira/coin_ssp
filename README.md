@@ -69,7 +69,25 @@ To ensure that baseline economic projections are not contaminated by historical 
 
 - **Scope**: Applied during data loading (`load_gridded_data()`) to both GDP and population arrays for all SSP scenarios, ensuring consistent baseline conditions across all subsequent economic modeling steps.
 
-### 4. Grid Cell Processing
+### 4. Complete Dataset Archive Generation
+After data loading and harmonization, the pipeline automatically creates a comprehensive NetCDF archive file containing all processed input data:
+
+- **Filename**: `all_loaded_data_{model_name}_{timestamp}.nc`
+- **Purpose**: Complete reference dataset for validation, analysis, and reproducibility
+- **Contents**:
+  - All SSP scenarios with harmonized temporal alignment
+  - Temperature and precipitation data (converted to standard units)
+  - GDP and population data (with exponential growth modifications applied)
+  - Valid grid cell mask identifying economically active regions
+  - Complete processing metadata and configuration embedded as global attributes
+
+- **Data Structure**: 4D arrays organized as `[ssp, time, lat, lon]` with comprehensive coordinate metadata
+- **Quality Assurance**: Includes statistics on grid coverage, valid cells, temporal span, and processing parameters
+- **Traceability**: Full JSON configuration embedded to ensure complete reproducibility of results
+
+This archive serves as the definitive input dataset for all subsequent processing steps and provides a complete snapshot of the harmonized, climate-independent baseline data used throughout the economic modeling pipeline.
+
+### 5. Grid Cell Processing
 
 The following pipeline will be done for each climate model under consideration
 
@@ -706,6 +724,7 @@ coin_ssp/
 │       │   ├── [country]_results_20250903_143052.csv
 │       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
 │       ├── output_integrated_CanESM5_20250915_140000/  # Integrated pipeline results
+│       │   ├── all_loaded_data_CanESM5_20250919_123456.nc  # Complete input dataset (all SSPs + valid mask)
 │       │   ├── step1_target_gdp_CanESM5_ssp245.nc      # Target GDP reductions
 │       │   ├── step2_baseline_tfp_CanESM5.nc           # Baseline TFP calculations
 │       │   ├── step3_scaling_factors_CanESM5_ssp245.nc # Response function scaling factors

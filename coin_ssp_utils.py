@@ -1825,7 +1825,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
 # For efficient loading of all SSP scenario data upfront
 # =============================================================================
 
-def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
+def load_all_netcdf_data(config: Dict[str, Any], output_dir: str = None) -> Dict[str, Any]:
     """
     Load all NetCDF files for all SSP scenarios at start of processing.
     
@@ -1840,6 +1840,8 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
         - climate_model: model name and file patterns
         - ssp_scenarios: reference_ssp and forward_simulation_ssps
         - time_periods: reference and target period specifications
+    output_dir : str, optional
+        Output directory path. If provided, writes NetCDF file with all loaded data
     
     Returns
     -------
@@ -2008,7 +2010,147 @@ def load_all_netcdf_data(config: Dict[str, Any]) -> Dict[str, Any]:
     all_data['_metadata']['valid_mask'] = valid_mask
     all_data['_metadata']['valid_count'] = final_valid_count
 
+    # Write NetCDF file with all loaded data if output directory is provided
+    if output_dir is not None:
+        write_all_loaded_data_netcdf(all_data, config, output_dir)
+
     return all_data
+
+
+def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any], output_dir: str) -> str:
+    """
+    Write all loaded NetCDF data to a single output file for reference and validation.
+
+    Parameters
+    ----------
+    all_data : Dict[str, Any]
+        All loaded NetCDF data from load_all_netcdf_data()
+    config : Dict[str, Any]
+        Configuration dictionary
+    output_dir : str
+        Output directory path
+
+    Returns
+    -------
+    str
+        Path to written NetCDF file
+    """
+    import xarray as xr
+    import numpy as np
+    import os
+    from datetime import datetime
+
+    # Extract metadata
+    metadata = all_data['_metadata']
+    lat = metadata['lat']
+    lon = metadata['lon']
+    years = metadata['years']
+    valid_mask = metadata['valid_mask']
+    model_name = config['climate_model']['model_name']
+
+    # Get SSP list (excluding metadata)
+    ssp_names = [key for key in all_data.keys() if key != '_metadata']
+
+    print(f"Writing all loaded data to NetCDF file...")
+
+    # Create filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    netcdf_filename = f"all_loaded_data_{model_name}_{timestamp}.nc"
+    netcdf_path = os.path.join(output_dir, netcdf_filename)
+
+    # Prepare data arrays for xarray (all SSPs combined)
+    n_ssp = len(ssp_names)
+    n_time, n_lat, n_lon = len(years), len(lat), len(lon)
+
+    # Initialize arrays [ssp, time, lat, lon]
+    temperature_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+    precipitation_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+    gdp_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+    population_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+
+    # Fill arrays
+    for i, ssp_name in enumerate(ssp_names):
+        ssp_data = all_data[ssp_name]
+        temperature_all[i] = ssp_data['temperature']      # [time, lat, lon]
+        precipitation_all[i] = ssp_data['precipitation']  # [time, lat, lon]
+        gdp_all[i] = ssp_data['gdp']                      # [time, lat, lon]
+        population_all[i] = ssp_data['population']        # [time, lat, lon]
+
+    # Create xarray Dataset
+    ds = xr.Dataset(
+        {
+            'temperature': (['ssp', 'time', 'lat', 'lon'], temperature_all),
+            'precipitation': (['ssp', 'time', 'lat', 'lon'], precipitation_all),
+            'gdp': (['ssp', 'time', 'lat', 'lon'], gdp_all),
+            'population': (['ssp', 'time', 'lat', 'lon'], population_all),
+            'valid_mask': (['lat', 'lon'], valid_mask)
+        },
+        coords={
+            'ssp': ssp_names,
+            'time': years,
+            'lat': lat,
+            'lon': lon
+        }
+    )
+
+    # Add variable attributes
+    ds.temperature.attrs = {
+        'long_name': 'Surface Air Temperature',
+        'units': 'degrees_celsius',
+        'description': 'Annual surface air temperature, converted from Kelvin'
+    }
+
+    ds.precipitation.attrs = {
+        'long_name': 'Precipitation Rate',
+        'units': 'mm/day',
+        'description': 'Annual precipitation rate'
+    }
+
+    ds.gdp.attrs = {
+        'long_name': 'GDP Density',
+        'units': 'economic_units',
+        'description': 'GDP density with exponential growth applied before prediction year'
+    }
+
+    ds.population.attrs = {
+        'long_name': 'Population Density',
+        'units': 'people',
+        'description': 'Population density with exponential growth applied before prediction year'
+    }
+
+    ds.valid_mask.attrs = {
+        'long_name': 'Valid Economic Grid Cells',
+        'units': 'boolean',
+        'description': 'True for grid cells with positive GDP and population for all years'
+    }
+
+    # Add global attributes
+    ds.attrs = {
+        'title': 'All Loaded NetCDF Data for COIN-SSP Processing',
+        'description': f'Combined dataset from {model_name} containing all SSP scenarios with harmonized temporal alignment and exponential growth applied',
+        'climate_model': model_name,
+        'creation_date': datetime.now().isoformat(),
+        'institution': 'COIN-SSP Climate Economics Model',
+        'ssp_scenarios': ', '.join(ssp_names),
+        'time_range': f'{years[0]}-{years[-1]}',
+        'grid_shape': f'{n_lat}x{n_lon}',
+        'valid_grid_cells': f'{metadata["valid_count"]}/{n_lat*n_lon} ({100*metadata["valid_count"]/(n_lat*n_lon):.1f}%)',
+        'prediction_year': config['time_periods']['prediction_period']['start_year'],
+        'exponential_growth_applied': 'GDP and population modified to exponential growth before prediction year',
+        'processing_config': create_serializable_config(config)
+    }
+
+    # Write to NetCDF
+    ds.to_netcdf(netcdf_path)
+
+    print(f"  ✅ All loaded data written to: {os.path.basename(netcdf_path)}")
+    print(f"     File size: {os.path.getsize(netcdf_path) / (1024*1024):.1f} MB")
+    print(f"     SSP scenarios: {len(ssp_names)}")
+    print(f"     Grid cells: {n_lat} × {n_lon} = {n_lat*n_lon}")
+    print(f"     Valid cells: {metadata['valid_count']} ({100*metadata['valid_count']/(n_lat*n_lon):.1f}%)")
+    print(f"     Time span: {years[0]}-{years[-1]} ({len(years)} years)")
+
+    return netcdf_path
 
 
 def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: str) -> str:
