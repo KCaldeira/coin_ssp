@@ -89,6 +89,7 @@ def process_data(input_data, config, optional_data=None):
 - **Grid Cell Validation**: Skip ocean/ice cells where `gdp_value <= 0` or `population_value <= 0`
 - **Configuration Management**: Use `resolve_netcdf_filepath()` - NEVER hardcode file prefixes like `gridRaw_`
 - **Mathematical Robustness**: Use `np.maximum(0, value)` to prevent negative values rather than conditional checks
+- **Post-Processing Data Consistency**: All data objects in post-processing code must use the same format as main processing code to facilitate function reusability
 
 ### Processing Standards
 - **Time Series**: Use LOESS filtering for weather extraction (detrends relative to reference period mean)

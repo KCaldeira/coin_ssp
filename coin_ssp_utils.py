@@ -2053,9 +2053,8 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
 
     print(f"Writing all loaded data to NetCDF file...")
 
-    # Create filename with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    netcdf_filename = f"all_loaded_data_{model_name}_{timestamp}.nc"
+    # Create filename without timestamp (consistent with other pipeline files)
+    netcdf_filename = f"all_loaded_data_{model_name}.nc"
     netcdf_path = os.path.join(output_dir, netcdf_filename)
 
     # Prepare data arrays for xarray (all SSPs combined)
@@ -2125,6 +2124,8 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     }
 
     # Add global attributes
+    import json
+    serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'All Loaded NetCDF Data for COIN-SSP Processing',
         'description': f'Combined dataset from {model_name} containing all SSP scenarios with harmonized temporal alignment and exponential growth applied',
@@ -2137,7 +2138,7 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
         'valid_grid_cells': f'{metadata["valid_count"]}/{n_lat*n_lon} ({100*metadata["valid_count"]/(n_lat*n_lon):.1f}%)',
         'prediction_year': config['time_periods']['prediction_period']['start_year'],
         'exponential_growth_applied': 'GDP and population modified to exponential growth before prediction year',
-        'processing_config': create_serializable_config(config)
+        'configuration_json': json.dumps(serializable_config, indent=2)
     }
 
     # Write to NetCDF

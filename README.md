@@ -523,7 +523,34 @@ python main.py coin_ssp_integrated_config_0004.json --step3-file data/output/run
 - Total pipeline execution time
 - Partial timing report even on failures
 
-#### Country-Level Analysis
+#### Post-Processing Analysis Framework
+Comprehensive analysis of pipeline results using the dedicated post-processing framework:
+
+```bash
+# Analyze results from a completed pipeline run
+python main_postprocess.py data/output/output_integrated_CanESM5_20250919_123456/
+
+# The framework automatically:
+# - Validates pipeline output files (steps 1-5 NetCDF files, PDFs, etc.)
+# - Creates timestamped analysis output directory
+# - Runs all implemented post-processing analyses
+# - Provides comprehensive timing and success/failure reporting
+
+# Results saved to: ./data/output/postprocess_{pipeline_run}_{timestamp}/
+# Analysis-specific subdirectories: analysis_1/, analysis_2/, etc.
+```
+
+**Framework Features**:
+- **Modular Design**: Each analysis is self-contained and independently runnable
+- **Automatic Validation**: Verifies all required pipeline output files are present
+- **Organized Output**: Creates dedicated analysis directories with timestamps
+- **Error Handling**: Robust error reporting with detailed failure diagnostics
+- **Future Extensibility**: Ready for selective analysis flags and additional analyses
+
+**Available Analyses**:
+- **Temperature-GDP Correlations**: Computes correlations between 30-year LOESS smoothed temp_ssp and GDP variables (gdp_weather, gdp_climate) for all SSP/target/response function combinations. Reports correlation coefficients, linear regression slopes, and standard deviation ratios.
+
+#### Country-Level Analysis (Legacy)
 Traditional country-by-country processing using JSON configuration:
 
 ```bash
@@ -703,6 +730,7 @@ coin_ssp/
 ├── coin_ssp_utils.py                   # Consolidated utilities (LOESS filtering + NetCDF processing + visualization)
 ├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations
 ├── main.py                             # Integrated grid-cell processing pipeline (5-step workflow)
+├── main_postprocess.py                 # Post-processing analysis framework for pipeline results
 ├── coin_ssp_integrated_config_0002.json    # Current unified configuration for complete workflow
 ├── target_gdp_config_0000.json         # Configuration for target GDP reduction calculations
 ├── create_ratio_maps.py                # Standalone tool for creating climate/weather GDP ratio maps
@@ -720,7 +748,7 @@ coin_ssp/
 │       │   ├── [country]_results_20250903_143052.csv
 │       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
 │       ├── output_integrated_CanESM5_20250915_140000/  # Integrated pipeline results
-│       │   ├── all_loaded_data_CanESM5_20250919_123456.nc  # Complete input dataset (all SSPs + valid mask)
+│       │   ├── all_loaded_data_CanESM5.nc  # Complete input dataset (all SSPs + valid mask)
 │       │   ├── step1_target_gdp_CanESM5_ssp245.nc      # Target GDP reductions
 │       │   ├── step2_baseline_tfp_CanESM5.nc           # Baseline TFP calculations
 │       │   ├── step3_scaling_factors_CanESM5_ssp245.nc # Response function scaling factors
