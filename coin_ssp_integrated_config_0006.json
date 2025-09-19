@@ -6,7 +6,7 @@
     "reorganized_from": "coin_ssp_integrated_config_0001.json"
   },
 
-  "_comment_processing_order": "Configuration sections organized by processing step order in main_integrated.py",
+  "_comment_processing_order": "Configuration sections organized by processing step order in main.py",
 
   "climate_model": {
     "_processing_step": "Data Loading (All Steps)",

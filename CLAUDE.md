@@ -80,10 +80,9 @@ def process_data(input_data, config, optional_data=None):
 ### Module Organization
 - **`coin_ssp_core.py`**: Core economic model functions and parameter classes
 - **`coin_ssp_utils.py`**: Consolidated utility functions for mathematical operations, visualization, NetCDF processing
-- **`main_integrated.py`**: Complete 5-step processing pipeline
+- **`main.py`**: Complete 5-step processing pipeline
 
 <!-- CRITICAL-PRESERVE-END -->`
-- **`main.py`**: Country-level workflow orchestration
 
 ### Key Technical Requirements
 - **NetCDF Convention**: Arrays follow `[time, lat, lon]` dimension order - always use `data[time_idx, lat_idx, lon_idx]`

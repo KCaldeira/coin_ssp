@@ -170,7 +170,7 @@ save_gridded_results(results, output_path, grid_metadata)
 ### ✅ Completed Components
 
 #### ✅ **Production-Ready Integrated Pipeline**
-- **Complete 5-Step Workflow** (`main_integrated.py`): **FULLY FUNCTIONAL** integrated processing pipeline following README Section 3
+- **Complete 5-Step Workflow** (`main.py`): **FULLY FUNCTIONAL** integrated processing pipeline following README Section 3
 - **Timing & Performance Monitoring**: Comprehensive step-by-step timing with terminal performance reports
 - **Data Loading Optimization**: Single NetCDF load with reuse across all processing steps (3x performance improvement)
 - **Fail-Fast Architecture**: Clean error handling with no optional arguments or backward compatibility
@@ -210,7 +210,7 @@ save_gridded_results(results, output_path, grid_metadata)
   - **Processing Control**: Grid processing options, validation settings, output formats
 
 #### ✅ Complete Integrated Processing Pipeline Implementation
-- **Main Integrated Pipeline** (`main_integrated.py`): **COMPLETE** 5-step processing workflow following README Section 3
+- **Main Integrated Pipeline** (`main.py`): **COMPLETE** 5-step processing workflow following README Section 3
   - **Step 1**: ✅ **Calculate target GDP changes** using reference SSP (global constraint satisfaction)
   - **Step 2**: ✅ **Generate baseline TFP** for all SSPs (per grid cell, no climate effects)
   - **Step 3**: ✅ **Per-grid-cell scaling factor optimization** - runs `optimize_climate_response_scaling` for each grid cell
@@ -506,10 +506,10 @@ The complete 5-step integrated workflow for gridded climate-economic modeling:
 
 ```bash
 # Complete integrated pipeline (Steps 1-5) with timing report
-python main_integrated.py coin_ssp_integrated_config_0004.json
+python main.py coin_ssp_integrated_config_0004.json
 
 # Skip Step 3 optimization by loading previous results (faster development)
-python main_integrated.py coin_ssp_integrated_config_0004.json --step3-file data/output/run_20250917_160000/step3_scaling_factors_CanESM5_ssp245.nc
+python main.py coin_ssp_integrated_config_0004.json --step3-file data/output/run_20250917_160000/step3_scaling_factors_CanESM5_ssp245.nc
 
 # Results saved to: ./data/output/output_integrated_{model}_{timestamp}/
 # Step outputs: step1_target_gdp_*.nc, step2_baseline_tfp_*.nc, etc.
@@ -702,14 +702,10 @@ coin_ssp/
 ├── coin_ssp_core.py                    # Main economic model functions
 ├── coin_ssp_utils.py                   # Consolidated utilities (LOESS filtering + NetCDF processing + visualization)
 ├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations
-├── test_target_gdp.py                  # Test script for target GDP reductions
-├── main.py                             # Country-level processing pipeline
-├── main_integrated.py                  # Integrated grid-cell processing pipeline (5-step workflow)
+├── main.py                             # Integrated grid-cell processing pipeline (5-step workflow)
 ├── coin_ssp_integrated_config_0002.json    # Current unified configuration for complete workflow
 ├── target_gdp_config_0000.json         # Configuration for target GDP reduction calculations
 ├── create_ratio_maps.py                # Standalone tool for creating climate/weather GDP ratio maps
-├── test_step4_visualization.py         # Test visualization using Step 4 NetCDF output data
-├── debug_archive/                      # Archived debug scripts and test files
 ├── data/
 │   ├── input/                          # NetCDF gridded climate/economic data + country datasets
 │   │   ├── gridRawAlt_tas_CanESM5_ssp245.nc    # Gridded temperature data (updated file patterns)

@@ -1340,8 +1340,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main_integrated.py coin_ssp_integrated_config_0002.json
-  python main_integrated.py config.json --step3-file data/output/previous_run/step3_scaling_factors_CanESM5.nc
+  python main.py coin_ssp_integrated_config_0002.json
+  python main.py config.json --step3-file data/output/previous_run/step3_scaling_factors_CanESM5.nc
 
 This pipeline implements README.md Section 3: Grid Cell Processing
 Key feature: Per-grid-cell scaling factor optimization using optimize_climate_response_scaling
