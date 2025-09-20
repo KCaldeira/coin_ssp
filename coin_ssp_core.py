@@ -289,7 +289,7 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
 def optimize_climate_response_scaling(
         gridcell_data, params: ModelParams, scaling: ScalingParams,
-        target_period, target_type, prediction_start_year):
+        config, gdp_target):
     """
     Optimize the scaling factor with adaptive bounds expansion.
 
@@ -308,13 +308,10 @@ def optimize_climate_response_scaling(
         Model parameters
     scaling : ScalingParams
         Scaling parameters
-    target_period : dict
-        Dictionary with 'start_year' and 'end_year' for target period
-    target_type : str
-        Type of optimization target: "damage" for GDP damage amount (default),
-        "variability" for variability targets (to be implemented)
-    prediction_start_year : int
-        Year when prediction period starts (e.g., 2015)
+    config : dict
+        Configuration dictionary containing time_periods and other optimization settings
+    gdp_target : dict
+        Current GDP target configuration containing target_type and other target-specific settings
 
     Notes
     -----
@@ -332,6 +329,11 @@ def optimize_climate_response_scaling(
     # Ensure starting guess is inside bounds
     lo, hi = bounds
     x0 = float(np.clip(x0, lo, hi))
+
+    # Extract configuration parameters
+    target_period = config['time_periods']['target_period']
+    target_type = gdp_target['target_type']
+    prediction_start_year = config['time_periods']['prediction_period']['start_year']
 
     # Precompute target period indices
     start_year = target_period['start_year']

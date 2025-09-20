@@ -1079,7 +1079,7 @@ def interpolate_to_annual_grid(original_years, data_array, target_years):
 # Target GDP Utilities (moved from coin_ssp_target_gdp.py)
 # =============================================================================
 
-def load_and_concatenate_climate_data(config, model_name, ssp_name, data_type):
+def load_and_concatenate_climate_data(config, ssp_name, data_type):
     """
     Load and concatenate historical and SSP-specific climate data files.
 
@@ -1091,9 +1091,7 @@ def load_and_concatenate_climate_data(config, model_name, ssp_name, data_type):
     Parameters
     ----------
     config : Dict[str, Any]
-        Configuration dictionary
-    model_name : str
-        Climate model name
+        Configuration dictionary containing climate_model.model_name and file patterns
     ssp_name : str
         SSP scenario name
     data_type : str
@@ -1108,6 +1106,7 @@ def load_and_concatenate_climate_data(config, model_name, ssp_name, data_type):
 
     climate_model = config['climate_model']
     input_dir = climate_model['input_directory']
+    model_name = climate_model['model_name']
 
     # Get file prefix and variable name from new configuration structure
     if data_type == 'temperature':
@@ -1169,7 +1168,7 @@ def load_and_concatenate_climate_data(config, model_name, ssp_name, data_type):
     return concatenated_data, concatenated_years, lat, lon
 
 
-def load_and_concatenate_population_data(config, model_name, ssp_name):
+def load_and_concatenate_population_data(config, ssp_name):
     """
     Load and concatenate historical and SSP-specific population data files.
 
@@ -1181,9 +1180,7 @@ def load_and_concatenate_population_data(config, model_name, ssp_name):
     Parameters
     ----------
     config : Dict[str, Any]
-        Configuration dictionary
-    model_name : str
-        Climate model name
+        Configuration dictionary containing climate_model.model_name and file patterns
     ssp_name : str
         SSP scenario name (e.g., 'ssp245')
 
@@ -1196,6 +1193,7 @@ def load_and_concatenate_population_data(config, model_name, ssp_name):
 
     climate_model = config['climate_model']
     input_dir = climate_model['input_directory']
+    model_name = climate_model['model_name']
     prefix = climate_model['file_prefixes']['pop_file_prefix']
     var_name = climate_model['variable_names']['pop_var_name']
 
@@ -1246,7 +1244,7 @@ def load_and_concatenate_population_data(config, model_name, ssp_name):
     return concatenated_data, concatenated_years, lat, lon
 
 
-def load_gridded_data(config, model_name, case_name, prediction_year):
+def load_gridded_data(config, case_name):
     """
     Load all four NetCDF files and return as a temporally-aligned dataset.
 
@@ -1256,13 +1254,9 @@ def load_gridded_data(config, model_name, case_name, prediction_year):
     Parameters
     ----------
     config : Dict[str, Any]
-        Configuration dictionary containing file patterns
-    model_name : str
-        Climate model name
+        Configuration dictionary containing climate_model.model_name, file patterns, and time_periods.prediction_period.start_year
     case_name : str
         SSP scenario name
-    prediction_year : int
-        Year before which GDP and population are modified to follow exponential growth
 
     Returns
     -------
@@ -1281,15 +1275,20 @@ def load_gridded_data(config, model_name, case_name, prediction_year):
         - 'common_years': final common year range for all variables
     """
     import os
+
+    # Extract configuration values
+    model_name = config['climate_model']['model_name']
+    prediction_year = config['time_periods']['prediction_period']['start_year']
+
     print(f"Loading and aligning NetCDF data for {model_name} {case_name}...")
 
     # Load temperature data (concatenate historical + SSP)
     print("  Loading temperature data...")
-    tas_raw, tas_years_raw, lat, lon = load_and_concatenate_climate_data(config, model_name, case_name, 'temperature')
+    tas_raw, tas_years_raw, lat, lon = load_and_concatenate_climate_data(config, case_name, 'temperature')
 
     # Load precipitation data (concatenate historical + SSP)
     print("  Loading precipitation data...")
-    pr_raw, pr_years_raw, _, _ = load_and_concatenate_climate_data(config, model_name, case_name, 'precipitation')
+    pr_raw, pr_years_raw, _, _ = load_and_concatenate_climate_data(config, case_name, 'precipitation')
 
     # Load GDP data (single file with short SSP name, no concatenation)
     print("  Loading GDP data...")
@@ -1316,7 +1315,7 @@ def load_gridded_data(config, model_name, case_name, prediction_year):
 
     # Load population data (concatenate historical + SSP)
     print("  Loading population data...")
-    pop_raw, pop_years_raw, _, _ = load_and_concatenate_population_data(config, model_name, case_name)
+    pop_raw, pop_years_raw, _, _ = load_and_concatenate_population_data(config, case_name)
 
     print(f"  Original time ranges:")
     print(f"    Temperature: {tas_years_raw.min()}-{tas_years_raw.max()} ({len(tas_years_raw)} points)")
@@ -1919,8 +1918,7 @@ def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, A
             print(f"  Population: {os.path.basename(pop_file)}")
             
             # Load gridded data for this SSP using existing function
-            prediction_year = time_periods['prediction_period']['start_year']
-            ssp_data = load_gridded_data(config, model_name, ssp_name, prediction_year)
+            ssp_data = load_gridded_data(config, ssp_name)
             
             # Store in organized structure
             all_data[ssp_name] = {
@@ -2053,8 +2051,12 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
 
     print(f"Writing all loaded data to NetCDF file...")
 
-    # Create filename without timestamp (consistent with other pipeline files)
-    netcdf_filename = f"all_loaded_data_{model_name}.nc"
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+
+    # Create filename using standardized pattern
+    netcdf_filename = f"all_loaded_data_{json_id}_{model_name}.nc"
     netcdf_path = os.path.join(output_dir, netcdf_filename)
 
     # Prepare data arrays for xarray (all SSPs combined)
@@ -2923,7 +2925,7 @@ def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path:
 
 
 def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict[str, Any],
-                                   output_dir: str, model_name: str, reference_ssp: str, valid_mask: np.ndarray) -> str:
+                                   output_dir: str, reference_ssp: str, valid_mask: np.ndarray) -> str:
     """
     Create comprehensive visualization of target GDP reduction results.
 
@@ -2936,11 +2938,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     target_results : Dict[str, Any]
         Results from step1_calculate_target_gdp_changes()
     config : Dict[str, Any]
-        Integrated configuration dictionary
+        Integrated configuration dictionary containing climate_model.model_name and run_metadata.json_id
     output_dir : str
         Output directory path
-    model_name : str
-        Climate model name
     reference_ssp : str
         Reference SSP scenario name
 
@@ -2954,8 +2954,12 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
-    pdf_filename = f"step1_target_gdp_visualization_{model_name}_{reference_ssp}.pdf"
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+
+    # Generate output filename using standardized pattern
+    pdf_filename = f"step1_{json_id}_{model_name}_{reference_ssp}_target_gdp_visualization.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata and coordinates
@@ -3531,7 +3535,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
     return pdf_path
 
 
-def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name, all_netcdf_data):
+def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_netcdf_data):
     """
     Create comprehensive PDF visualization for Step 2 baseline TFP results.
 
@@ -3547,11 +3551,9 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
         - '_metadata': Coordinate and data information
         - SSP scenarios with TFP time series data
     config : dict
-        Configuration dictionary with time periods and SSP information
+        Configuration dictionary containing time periods, SSP information, climate_model.model_name, and run_metadata.json_id
     output_dir : str
         Directory for output files
-    model_name : str
-        Climate model name for labeling
 
     Returns
     -------
@@ -3563,9 +3565,13 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename (now includes all forward SSPs)
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
-    pdf_filename = f"step2_baseline_tfp_visualization_{model_name}_multi_ssp.pdf"
+
+    # Generate output filename using standardized pattern
+    pdf_filename = f"step2_{json_id}_{model_name}_baseline_tfp_visualization.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata and coordinates
@@ -3761,7 +3767,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, model_nam
                             fontsize=9)
 
                     # Create CSV file with time series for min and max grid points (per SSP)
-                    csv_filename = f"step2_baseline_tfp_extremes_{model_name}_{viz_ssp}.csv"
+                    csv_filename = f"step2_{json_id}_{model_name}_{viz_ssp}_baseline_tfp_extremes.csv"
                     csv_path = os.path.join(output_dir, csv_filename)
 
                     # Extract time series for min and max grid cells

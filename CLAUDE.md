@@ -39,6 +39,29 @@ These markers ensure critical institutional knowledge is never lost during refac
 - **All function arguments must be explicitly provided** - no default values (=None) or conditional logic
 - **Clean fail-fast approach** - if required arguments are not supplied, the code should fail immediately with a clear error
 
+### Configuration Parameter Pattern
+**For non-primitive functions requiring configuration data, pass the `config` object directly rather than extracting individual parameters at call sites.**
+
+#### When to Use Config Parameter Pattern
+✅ **Use `config` parameter for:**
+- Functions that need 2+ configuration values
+- Functions that might need additional config in future iterations
+- Non-primitive functions (business logic, processing pipelines, optimization)
+- Functions called from multiple locations with the same config
+
+❌ **Keep explicit parameters for:**
+- Primitive mathematical functions (`calculate_growth_rate(values)`)
+- Pure utility functions that don't depend on business configuration
+- Functions where config dependency would be artificial/forced
+- When only 1 simple parameter is needed and unlikely to grow
+
+#### Benefits
+- **Future-proof**: No signature changes when adding config requirements
+- **Fail-fast**: Missing config keys cause immediate, clear errors
+- **Single source of truth**: Configuration comes directly from authoritative source
+- **Cleaner call sites**: No parameter extraction boilerplate
+- **Easier testing**: Mock/modify entire config rather than tracking individual parameters
+
 ## Examples
 
 ### Preferred Style

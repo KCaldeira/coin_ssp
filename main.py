@@ -103,11 +103,11 @@ def setup_output_directory(config: Dict[str, Any]) -> str:
     return str(output_dir)
 
 
-def get_step_output_path(output_dir: str, step_num: int, config: Dict[str, Any], model_name: str, ssp_name: str = None,
+def get_step_output_path(output_dir: str, step_num: int, config: Dict[str, Any], ssp_name: str = None,
                         var_name: str = None, file_type: str = "nc") -> str:
     """
     Generate standardized output file path for processing steps.
-    
+
     Parameters
     ----------
     output_dir : str
@@ -116,22 +116,21 @@ def get_step_output_path(output_dir: str, step_num: int, config: Dict[str, Any],
         Processing step number (1-5)
     config : Dict[str, Any]
         Configuration dictionary containing run_metadata.json_id and climate_model.model_name
-    model_name : str
-        Climate model name
     ssp_name : str, optional
         SSP scenario name (if step-specific)
     var_name : str, optional
         Variable name (if step-specific)
     file_type : str
         File extension type (default: "nc")
-        
+
     Returns
     -------
     str
         Complete output file path
     """
-    # Extract json_id from config
+    # Extract configuration values
     json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
 
     # Create step-specific prefix
     prefix = f"step{step_num}"
@@ -340,13 +339,13 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     # Write results to NetCDF file
     model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    output_path = get_step_output_path(output_dir, 1, config, model_name, reference_ssp, "target_gdp", "nc")
+    output_path = get_step_output_path(output_dir, 1, config, reference_ssp, "target_gdp", "nc")
     save_step1_results_netcdf(target_results, output_path, config)
 
     # Create visualization
     print("Generating target GDP visualization...")
     visualization_path = create_target_gdp_visualization(target_results, config, output_dir,
-                                                        model_name, reference_ssp, valid_mask)
+                                                        reference_ssp, valid_mask)
     print(f"✅ Visualization saved: {visualization_path}")
 
     print(f"\nStep 1 completed: {len(gdp_targets)} target GDP change patterns calculated")
@@ -478,7 +477,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
     # Write results to NetCDF file with coordinate information
     model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    output_path = get_step_output_path(output_dir, 2, config, model_name, reference_ssp, "baseline_tfp", "nc")
+    output_path = get_step_output_path(output_dir, 2, config, reference_ssp, "baseline_tfp", "nc")
     
     # Add metadata for visualization (coordinates, years, and reference data for valid cell identification)
     metadata = all_data['_metadata']
@@ -505,7 +504,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
 
     # Generate TFP visualization
     print("Generating baseline TFP visualization...")
-    visualization_path = create_baseline_tfp_visualization(tfp_results, config, output_dir, model_name, all_data)
+    visualization_path = create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
     print(f"✅ Visualization saved: {visualization_path}")
 
     print(f"\nStep 2 completed: Baseline TFP calculated for {len(tfp_results)} SSP scenarios")
@@ -675,11 +674,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     }
                     
                     # Run per-grid-cell optimization
-                    target_period = config['time_periods']['target_period']
-                    target_type = gdp_target['target_type']
-                    prediction_start_year = config['time_periods']['prediction_period']['start_year']
                     optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
-                        cell_data, params_cell, scaling_params, target_period, target_type, prediction_start_year
+                        cell_data, params_cell, scaling_params, config, gdp_target
                     )
 
                     # Store results
@@ -729,7 +725,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     # Write results to NetCDF file
     model_name = config['climate_model']['model_name']
-    output_path = get_step_output_path(output_dir, 3, config, model_name, reference_ssp, "scaling_factors", "nc")
+    output_path = get_step_output_path(output_dir, 3, config, reference_ssp, "scaling_factors", "nc")
     save_step3_results_netcdf(scaling_results, output_path, model_name, config)
 
     # Generate scaling factors visualization
