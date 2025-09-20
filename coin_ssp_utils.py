@@ -234,7 +234,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
             for ssp in forward_ssps:
 
                 for target_idx, target_name in enumerate(target_names):
-                    target_config = config['gdp_reduction_targets'][target_idx]
+                    target_config = config['gdp_targets'][target_idx]
 
                     # Start new page if needed (every 3 charts)
                     if chart_idx % charts_per_page == 0:
@@ -744,7 +744,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                 damage_config = config['response_function_scalings'][damage_idx]
 
                 for target_idx, target_name in enumerate(target_names):
-                    target_config = config['gdp_reduction_targets'][target_idx]
+                    target_config = config['gdp_targets'][target_idx]
 
                     # Start new page if needed (every 3 maps)
                     if map_idx % maps_per_page == 0:
@@ -1541,16 +1541,16 @@ def calculate_global_median(data, lat, valid_mask):
 
 # =============================================================================
 # Target GDP Reduction Calculation Functions
-# Extracted from calculate_target_gdp_reductions.py for reuse in integrated workflow
+# Extracted from calculate_target_gdp_amounts.py for reuse in integrated workflow
 # =============================================================================
 
-def calculate_constant_target_reduction(gdp_reduction_value, temp_ref_shape):
+def calculate_constant_target_reduction(gdp_amount_value, temp_ref_shape):
     """
     Calculate constant GDP reduction across all grid cells.
     
     Parameters
     ----------
-    gdp_reduction_value : float
+    gdp_amount_value : float
         Constant reduction value (e.g., -0.10 for 10% reduction)
     temp_ref_shape : tuple
         Shape of temperature reference array for output sizing
@@ -1560,7 +1560,7 @@ def calculate_constant_target_reduction(gdp_reduction_value, temp_ref_shape):
     np.ndarray
         Constant reduction array with shape temp_ref_shape
     """
-    return np.full(temp_ref_shape, gdp_reduction_value, dtype=np.float64)
+    return np.full(temp_ref_shape, gdp_amount_value, dtype=np.float64)
 
 
 def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, valid_mask):
@@ -1578,9 +1578,9 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
     ----------
     linear_config : dict
         Configuration containing:
-        - 'global_mean_reduction': Target GDP-weighted global mean (e.g., -0.10)
+        - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
         - 'reference_temperature': Reference temperature point (e.g., 30.0)
-        - 'reduction_at_reference_temp': Reduction at reference temperature (e.g., -0.25)
+        - 'amount_at_reference_temp': Reduction at reference temperature (e.g., -0.25)
     temp_ref : np.ndarray
         Reference period temperature array [lat, lon]
     gdp_target : np.ndarray
@@ -1597,9 +1597,9 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
         - 'constraint_verification': Verification of constraint satisfaction
     """
     # Extract configuration parameters
-    global_mean_linear = linear_config['global_mean_reduction']
+    global_mean_linear = linear_config['global_mean_amount']
     T_ref_linear = linear_config['reference_temperature'] 
-    value_at_ref_linear = linear_config['reduction_at_reference_temp']
+    value_at_ref_linear = linear_config['amount_at_reference_temp']
     
     # Calculate GDP-weighted global means
     global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
@@ -1655,16 +1655,16 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
 
     Subject to three constraints:
     1. Zero point: reduction(T₀) = 0
-    2. Derivative at zero: reduction'(T₀) = derivative_at_zero_reduction_temperature
+    2. Derivative at zero: reduction'(T₀) = derivative_at_zero_amount_temperature
     3. GDP-weighted global mean: ∑[w_i * gdp_i * (1 + reduction(T_i))] / ∑[w_i * gdp_i] = target_mean
 
     Parameters
     ----------
     quadratic_config : dict
         Configuration containing:
-        - 'global_mean_reduction': Target GDP-weighted global mean (e.g., -0.10)
-        - 'zero_reduction_temperature': Temperature with zero reduction (e.g., 13.5)
-        - 'derivative_at_zero_reduction_temperature': Slope at T₀ (e.g., -0.01)
+        - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
+        - 'zero_amount_temperature': Temperature with zero reduction (e.g., 13.5)
+        - 'derivative_at_zero_amount_temperature': Slope at T₀ (e.g., -0.01)
     temp_ref : np.ndarray
         Reference period temperature array [lat, lon]
     gdp_target : np.ndarray
@@ -1681,9 +1681,9 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
         - 'constraint_verification': Verification of constraint satisfaction
     """
     # Extract configuration parameters
-    global_mean_quad = quadratic_config['global_mean_reduction']
-    T0 = quadratic_config['zero_reduction_temperature']
-    derivative_at_T0 = quadratic_config['derivative_at_zero_reduction_temperature']
+    global_mean_quad = quadratic_config['global_mean_amount']
+    T0 = quadratic_config['zero_amount_temperature']
+    derivative_at_T0 = quadratic_config['derivative_at_zero_amount_temperature']
 
     # Calculate GDP-weighted global means
     global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
@@ -1697,7 +1697,7 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
     # 3. GDP-weighted global mean = global_mean_quad
 
     # From constraint derivation:
-    # c = (global_mean_reduction - derivative_at_T0*(GDP_weighted_temp_mean - T0)) /
+    # c = (global_mean_amount - derivative_at_T0*(GDP_weighted_temp_mean - T0)) /
     #     (T0² - 2*T0*GDP_weighted_temp_mean + GDP_weighted_temp2_mean)
     # b = derivative_at_T0 - 2*c*T0
     # a = -derivative_at_T0*T0 + c*T0²
@@ -1738,7 +1738,7 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
         'gdp_weighted_temp_mean': float(gdp_weighted_temp_mean),
         'gdp_weighted_temp2_mean': float(gdp_weighted_temp2_mean),
         'derivative_at_zero_temp': float(derivative_at_T0),
-        'zero_reduction_temperature': float(T0)
+        'zero_amount_temperature': float(T0)
     }
 
 
@@ -1755,9 +1755,9 @@ def calculate_all_target_reductions(target_configs, gridded_data):
         List of target configuration dictionaries, each containing:
         - 'target_name': Unique identifier
         - Type-specific parameters (determines calculation method):
-          * Constant: 'gdp_reduction'
-          * Linear: 'global_mean_reduction' (without zero point)
-          * Quadratic: 'zero_reduction_temperature'
+          * Constant: 'gdp_amount'
+          * Linear: 'global_mean_amount' (without zero point)
+          * Quadratic: 'zero_amount_temperature'
     gridded_data : dict
         Dictionary containing gridded data arrays:
         - 'temp_ref': Reference period temperature [lat, lon]
@@ -1783,36 +1783,36 @@ def calculate_all_target_reductions(target_configs, gridded_data):
     for target_config in target_configs:
         target_name = target_config['target_name']
 
-        # Use explicit target_type from configuration
-        target_type = target_config['target_type']
+        # Use explicit target_shape from configuration
+        target_shape = target_config['target_shape']
 
-        if target_type == 'constant':
+        if target_shape == 'constant':
             # Constant reduction
             reduction_array = calculate_constant_target_reduction(
-                target_config['gdp_reduction'], temp_ref.shape
+                target_config['gdp_amount'], temp_ref.shape
             )
             result = {
-                'target_type': target_type,
+                'target_shape': target_shape,
                 'reduction_array': reduction_array,
                 'coefficients': None,
                 'constraint_verification': None,
                 'global_statistics': {
-                    'gdp_weighted_mean': target_config['gdp_reduction']
+                    'gdp_weighted_mean': target_config['gdp_amount']
                 }
             }
 
-        elif target_type == 'quadratic':
+        elif target_shape == 'quadratic':
             # Quadratic reduction (has zero point)
             result = calculate_quadratic_target_reduction(target_config, temp_ref, gdp_target, lat, valid_mask)
-            result['target_type'] = target_type
+            result['target_shape'] = target_shape
 
-        elif target_type == 'linear':
+        elif target_shape == 'linear':
             # Linear reduction (has global mean constraint)
             result = calculate_linear_target_reduction(target_config, temp_ref, gdp_target, lat, valid_mask)
-            result['target_type'] = target_type
+            result['target_shape'] = target_shape
 
         else:
-            raise ValueError(f"Unknown target_type '{target_type}' for target '{target_name}'. "
+            raise ValueError(f"Unknown target_shape '{target_shape}' for target '{target_name}'. "
                            f"Must be 'constant', 'linear', or 'quadratic'.")
 
         results[target_name] = result
@@ -1825,7 +1825,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
 # For efficient loading of all SSP scenario data upfront
 # =============================================================================
 
-def load_all_netcdf_data(config: Dict[str, Any], output_dir: str = None) -> Dict[str, Any]:
+def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
     """
     Load all NetCDF files for all SSP scenarios at start of processing.
     
@@ -2359,7 +2359,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     # Create xarray dataset
     ds = xr.Dataset(
         {
-            'target_gdp_reductions': (['target_name', 'lat', 'lon'], target_reductions),
+            'target_gdp_amounts': (['target_name', 'lat', 'lon'], target_reductions),
             'temperature_ref': (['lat', 'lon'], metadata['temp_ref']),
             'gdp_target': (['lat', 'lon'], metadata['gdp_target'])
         },
@@ -2371,7 +2371,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     )
     
     # Add attributes
-    ds.target_gdp_reductions.attrs = {
+    ds.target_gdp_amounts.attrs = {
         'long_name': 'Target GDP reductions',
         'units': 'fractional reduction',
         'description': f'Target reduction patterns for {len(target_names)} cases'
@@ -3057,17 +3057,17 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             display_name = target_name.replace('_', ' ').title()
 
             # Infer target type from configuration
-            target_config = next(t for t in config['gdp_reduction_targets'] if t['target_name'] == target_name)
-            if 'gdp_reduction' in target_config:
-                target_type = 'constant'
-            elif 'zero_reduction_temperature' in target_config:
-                target_type = 'quadratic'
-            elif 'global_mean_reduction' in target_config:
-                target_type = 'linear'
+            target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+            if 'gdp_amount' in target_config:
+                target_shape = 'constant'
+            elif 'zero_amount_temperature' in target_config:
+                target_shape = 'quadratic'
+            elif 'global_mean_amount' in target_config:
+                target_shape = 'linear'
             else:
-                target_type = 'unknown'
+                target_shape = 'unknown'
 
-            ax.set_title(f'{display_name} ({target_type})\n'
+            ax.set_title(f'{display_name} ({target_shape})\n'
                         f'Range: {data_range["min"]:.4f} to {data_range["max"]:.4f}\n'
                         f'GDP-weighted: {gdp_weighted_mean:.6f}',
                         fontsize=12, fontweight='bold')
@@ -3093,21 +3093,21 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             color = colors[i % len(colors)]
 
             # Infer target type from configuration
-            target_config = next(t for t in config['gdp_reduction_targets'] if t['target_name'] == target_name)
-            if 'gdp_reduction' in target_config:
-                target_type = 'constant'
-            elif 'zero_reduction_temperature' in target_config:
-                target_type = 'quadratic'
-            elif 'global_mean_reduction' in target_config:
-                target_type = 'linear'
+            target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+            if 'gdp_amount' in target_config:
+                target_shape = 'constant'
+            elif 'zero_amount_temperature' in target_config:
+                target_shape = 'quadratic'
+            elif 'global_mean_amount' in target_config:
+                target_shape = 'linear'
             else:
-                target_type = 'unknown'
+                target_shape = 'unknown'
 
-            if target_type == 'constant':
+            if target_shape == 'constant':
                 # Constant function
-                gdp_targets = config['gdp_reduction_targets']
+                gdp_targets = config['gdp_targets']
                 const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                constant_value = const_config['gdp_reduction']
+                constant_value = const_config['gdp_amount']
                 function_values = np.full_like(temp_range, constant_value)
                 label = f'Constant: {constant_value:.3f}'
 
@@ -3115,7 +3115,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 ax4.plot(temp_range, function_values, color=color, linewidth=2,
                         label=label, alpha=0.8)
 
-            elif target_type == 'linear':
+            elif target_shape == 'linear':
                 coefficients = target_info['coefficients']
                 if coefficients:
                     # Linear function: reduction = a0 + a1 * T
@@ -3126,15 +3126,15 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                             label=f'Linear: {a0:.4f} + {a1:.4f}×T', alpha=0.8)
 
                     # Add calibration point from config
-                    gdp_targets = config['gdp_reduction_targets']
+                    gdp_targets = config['gdp_targets']
                     linear_config = next(t for t in gdp_targets if t['target_name'] == target_name)
                     if 'reference_temperature' in linear_config:
                         ref_temp = linear_config['reference_temperature']
-                        ref_value = linear_config['reduction_at_reference_temp']
+                        ref_value = linear_config['amount_at_reference_temp']
                         ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
                                 label=f'Linear calib: {ref_temp}°C = {ref_value:.3f}')
 
-            elif target_type == 'quadratic':
+            elif target_shape == 'quadratic':
                 coefficients = target_info['coefficients']
                 if coefficients:
                     # Quadratic function: reduction = a + b*T + c*T²
@@ -3145,24 +3145,24 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                             label=f'Quadratic: {a:.4f} + {b:.4f}×T + {c:.6f}×T²', alpha=0.8)
 
                     # Add calibration points from config
-                    gdp_targets = config['gdp_reduction_targets']
+                    gdp_targets = config['gdp_targets']
                     quad_config = next(t for t in gdp_targets if t['target_name'] == target_name)
 
                     # Handle new derivative-based specification
-                    if 'derivative_at_zero_reduction_temperature' in quad_config:
-                        zero_temp = quad_config['zero_reduction_temperature']
-                        derivative = quad_config['derivative_at_zero_reduction_temperature']
+                    if 'derivative_at_zero_amount_temperature' in quad_config:
+                        zero_temp = quad_config['zero_amount_temperature']
+                        derivative = quad_config['derivative_at_zero_amount_temperature']
                         ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
                                 label=f'Quad zero: {zero_temp}°C = 0 (slope={derivative:.3f})')
                     # Handle legacy reference point specification
                     elif 'reference_temperature' in quad_config:
                         ref_temp = quad_config['reference_temperature']
-                        ref_value = quad_config['reduction_at_reference_temp']
+                        ref_value = quad_config['amount_at_reference_temp']
                         ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
                                 label=f'Quad calib: {ref_temp}°C = {ref_value:.3f}')
 
-                        if 'zero_reduction_temperature' in quad_config:
-                            zero_temp = quad_config['zero_reduction_temperature']
+                        if 'zero_amount_temperature' in quad_config:
+                            zero_temp = quad_config['zero_amount_temperature']
                             ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
                                     label=f'Quad zero: {zero_temp}°C = 0')
 
@@ -3185,28 +3185,28 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             target_info = target_results[target_name]
 
             # Infer target type from configuration
-            target_config = next(t for t in config['gdp_reduction_targets'] if t['target_name'] == target_name)
-            if 'gdp_reduction' in target_config:
-                target_type = 'constant'
-            elif 'zero_reduction_temperature' in target_config:
-                target_type = 'quadratic'
-            elif 'global_mean_reduction' in target_config:
-                target_type = 'linear'
+            target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+            if 'gdp_amount' in target_config:
+                target_shape = 'constant'
+            elif 'zero_amount_temperature' in target_config:
+                target_shape = 'quadratic'
+            elif 'global_mean_amount' in target_config:
+                target_shape = 'linear'
             else:
-                target_type = 'unknown'
+                target_shape = 'unknown'
 
-            if target_type == 'constant':
-                gdp_targets = config['gdp_reduction_targets']
+            if target_shape == 'constant':
+                gdp_targets = config['gdp_targets']
                 const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                constant_value = const_config['gdp_reduction']
+                constant_value = const_config['gdp_amount']
                 all_y_values.extend([constant_value])
 
-            elif target_type in ['linear', 'quadratic'] and target_info['coefficients']:
+            elif target_shape in ['linear', 'quadratic'] and target_info['coefficients']:
                 coefficients = target_info['coefficients']
-                if target_type == 'linear':
+                if target_shape == 'linear':
                     a0, a1 = coefficients['a0'], coefficients['a1']
                     values = a0 + a1 * temp_range
-                elif target_type == 'quadratic':
+                elif target_shape == 'quadratic':
                     a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
                     values = a + b * temp_range + c * temp_range**2
                 all_y_values.extend(values)

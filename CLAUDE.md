@@ -82,14 +82,14 @@ def process_data(input_data, config, optional_data=None):
 - **`coin_ssp_utils.py`**: Consolidated utility functions for mathematical operations, visualization, NetCDF processing
 - **`main.py`**: Complete 5-step processing pipeline
 
-<!-- CRITICAL-PRESERVE-END -->`
-
 ### Key Technical Requirements
 - **NetCDF Convention**: Arrays follow `[time, lat, lon]` dimension order - always use `data[time_idx, lat_idx, lon_idx]`
 - **Grid Cell Validation**: Skip ocean/ice cells where `gdp_value <= 0` or `population_value <= 0`
 - **Configuration Management**: Use `resolve_netcdf_filepath()` - NEVER hardcode file prefixes like `gridRaw_`
 - **Mathematical Robustness**: Use `np.maximum(0, value)` to prevent negative values rather than conditional checks
 - **Post-Processing Data Consistency**: All data objects in post-processing code must use the same format as main processing code to facilitate function reusability
+- **File Naming Convention**: All output files follow standardized pattern `{prefix}_{json_id}_{model_name}_{ssp_name}_{var_name}.{ext}` with missing fields omitted
+- **Configuration Identity**: Each JSON config must include `json_id` in `run_metadata` section for file naming consistency
 
 ### Processing Standards
 - **Time Series**: Use LOESS filtering for weather extraction (detrends relative to reference period mean)
@@ -137,6 +137,8 @@ if not is_valid_economic_grid_cell(gdp_cell, pop_cell):
 - **Viridis**: For non-zero-centered data and outlier detection (TFP, objective functions, log ratios)
   - Use full data range to highlight outliers and extreme values
   - Use with `Normalize()` for min-to-max scaling
+
+<!-- CRITICAL-PRESERVE-END -->`
 
 ## Current Status (December 2025)
 

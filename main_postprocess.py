@@ -22,9 +22,47 @@ import glob
 import time
 from datetime import datetime
 from pathlib import Path
+import numpy as np
+import pandas as pd
+import xarray as xr
+import statsmodels.api as sm
+from scipy import stats
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+def format_number(value):
+    """
+    Format number with appropriate precision:
+    - Show 1.23e-03 for very small numbers (< 0.01)
+    - Show 0.1234 for numbers between 0.01 and 1
+    - Show 1.234 for numbers ≥ 1
+
+    Parameters
+    ----------
+    value : float
+        Number to format
+
+    Returns
+    -------
+    str
+        Formatted number string
+    """
+    if np.isnan(value) or np.isinf(value):
+        return str(value)
+
+    abs_value = abs(value)
+    if abs_value == 0:
+        return "0.0000"
+    elif abs_value < 0.01:
+        # Use scientific notation for small numbers (1.23e-03)
+        return f"{value:.2e}"
+    elif abs_value < 1:
+        # Show 4 decimal places for numbers between 0.01 and 1 (0.1234)
+        return f"{value:.4f}"
+    else:
+        # Show 3 decimal places for numbers ≥ 1 (1.234)
+        return f"{value:.3f}"
 
 def validate_output_directory(output_dir):
     """
@@ -171,7 +209,7 @@ def obtain_configuration_information(output_files, analysis_output_dir):
     return config_data
 
 
-def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, config):
+def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, config, ssp_filter=None):
     """
     Analyze correlations between temperature and GDP variability (detrended residuals).
 
@@ -189,16 +227,8 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
     config : dict
         Configuration dictionary in main processing format
     """
-    import xarray as xr
-    import numpy as np
-    import pandas as pd
-    import glob
-    import os
-    from scipy import stats
-
-    # Import LOESS function from main processing code
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from coin_ssp_utils import apply_time_series_filter
+    # Import LOESS function from main processing code (no longer needed since we use statsmodels directly)
+    # from coin_ssp_utils import apply_time_series_filter
 
     print("📊 Analysis: Temperature-GDP Variability Correlations (Detrended)")
 
@@ -231,7 +261,24 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
     if not step4_files:
         raise FileNotFoundError("No step4 GDP files found")
 
-    print(f"    📁 Found {len(step4_files)} step4 GDP files")
+    # Filter step4 files by SSP if specified
+    if ssp_filter:
+        filtered_files = []
+        for filepath in step4_files:
+            filename = os.path.basename(filepath)
+            # Extract SSP from filename pattern: step4_forward_ssp126_gdp_CanESM5.nc
+            if any(ssp in filename for ssp in ssp_filter):
+                filtered_files.append(filepath)
+        step4_files = filtered_files
+        print(f"    🔍 Filtered to {len(step4_files)} step4 GDP files for SSPs: {', '.join(ssp_filter)}")
+    else:
+        print(f"    📁 Found {len(step4_files)} step4 GDP files")
+
+    if not step4_files:
+        if ssp_filter:
+            raise FileNotFoundError(f"No step4 GDP files found for SSPs: {', '.join(ssp_filter)}")
+        else:
+            raise FileNotFoundError("No step4 GDP files found")
 
     # Use LOESS filtering over the entire simulation period
     time_periods = config['time_periods']
@@ -280,6 +327,7 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
         print(f"      📋 Targets: {len(target_names)}, Response functions: {len(response_func_names)}")
 
         # Process each target/response_func combination
+        # TODO: Add command line arguments to limit which SSP cases and climate damage targets are processed
         for target_idx, target_name in enumerate(target_names):
             for resp_idx, resp_func_name in enumerate(response_func_names):
 
@@ -313,10 +361,22 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
                             continue
 
                         # Apply 30-year LOESS smoothing over entire time series
+                        # Note: apply_time_series_filter returns detrended data, we need the trend itself
 
-                        temp_variability= temp_series - apply_time_series_filter(temp_series, 30, full_start_idx, full_end_idx)
-                        gdp_climate_variability= gdp_climate_series - apply_time_series_filter(gdp_climate_series, 30, full_start_idx, full_end_idx)
-                        gdp_weather_variability= gdp_weather_series -apply_time_series_filter(gdp_weather_series, 30, full_start_idx, full_end_idx)
+                        # Get LOESS trends directly using lowess
+                        t = np.arange(len(temp_series), dtype=float)
+                        frac = min(1.0, 30 / len(temp_series))
+
+                        temp_trend = sm.nonparametric.lowess(temp_series, t, frac=frac, it=1, return_sorted=False)
+                        gdp_climate_trend = sm.nonparametric.lowess(gdp_climate_series, t, frac=frac, it=1, return_sorted=False)
+                        gdp_weather_trend = sm.nonparametric.lowess(gdp_weather_series, t, frac=frac, it=1, return_sorted=False)
+
+                        # Calculate variability
+                        # for temperature: subtract smoothed trend (absolute deviations)
+                        temp_variability = temp_series - temp_trend
+                        # for GDP: divide by smoothed trend to get relative variability (fractional changes)
+                        gdp_climate_variability = gdp_climate_series / gdp_climate_trend
+                        gdp_weather_variability = gdp_weather_series / gdp_weather_trend
 
 
                         # Calculate correlations and regression statistics
@@ -371,12 +431,12 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
                     correlation_results.append(result)
 
                     print(f"        ✓ {target_name} × {resp_func_name}: {valid_cell_count} cells")
-                    print(f"          r_climate: {result['corr_climate_mean']:.3f} (med={result['corr_climate_median']:.3f}, std={result['corr_climate_std']:.3f})")
-                    print(f"          r_weather: {result['corr_weather_mean']:.3f} (med={result['corr_weather_median']:.3f}, std={result['corr_weather_std']:.3f})")
-                    print(f"          slope_climate: {result['slope_climate_mean']:.3f} (med={result['slope_climate_median']:.3f}, std={result['slope_climate_std']:.3f})")
-                    print(f"          slope_weather: {result['slope_weather_mean']:.3f} (med={result['slope_weather_median']:.3f}, std={result['slope_weather_std']:.3f})")
-                    print(f"          stdratio_climate: {result['std_ratio_climate_mean']:.3f} (med={result['std_ratio_climate_median']:.3f}, std={result['std_ratio_climate_std']:.3f})")
-                    print(f"          stdratio_weather: {result['std_ratio_weather_mean']:.3f} (med={result['std_ratio_weather_median']:.3f}, std={result['std_ratio_weather_std']:.3f})")
+                    print(f"          r_climate: {format_number(result['corr_climate_mean'])} (med={format_number(result['corr_climate_median'])}, std={format_number(result['corr_climate_std'])})")
+                    print(f"          r_weather: {format_number(result['corr_weather_mean'])} (med={format_number(result['corr_weather_median'])}, std={format_number(result['corr_weather_std'])})")
+                    print(f"          slope_climate: {format_number(result['slope_climate_mean'])} (med={format_number(result['slope_climate_median'])}, std={format_number(result['slope_climate_std'])})")
+                    print(f"          slope_weather: {format_number(result['slope_weather_mean'])} (med={format_number(result['slope_weather_median'])}, std={format_number(result['slope_weather_std'])})")
+                    print(f"          stdratio_climate: {format_number(result['std_ratio_climate_mean'])} (med={format_number(result['std_ratio_climate_median'])}, std={format_number(result['std_ratio_climate_std'])})")
+                    print(f"          stdratio_weather: {format_number(result['std_ratio_weather_mean'])} (med={format_number(result['std_ratio_weather_median'])}, std={format_number(result['std_ratio_weather_std'])})")
 
     # Create results DataFrame and save to CSV
     if correlation_results:
@@ -426,7 +486,7 @@ def analysis_3_placeholder(output_files, analysis_output_dir, config):
     print(f"    Configuration available: {config['climate_model']['model_name']} model")
 
 
-def run_all_analyses(output_files, analysis_output_dir):
+def run_all_analyses(output_files, analysis_output_dir, ssp_filter=None):
     """
     Execute all post-processing analyses in sequence.
 
@@ -439,6 +499,8 @@ def run_all_analyses(output_files, analysis_output_dir):
         Dictionary containing paths to pipeline output files
     analysis_output_dir : str
         Directory where analysis results should be saved
+    ssp_filter : list of str, optional
+        List of SSP scenarios to include in analysis. If None, all SSPs are processed.
 
     Returns
     -------
@@ -492,8 +554,11 @@ def run_all_analyses(output_files, analysis_output_dir):
         analysis_start = time.time()
 
         try:
-            # Pass both output_files and config to analyses
-            analysis_func(output_files, analysis_output_dir, config)
+            # Pass output_files, config, and SSP filter to analyses
+            if analysis_func == analysis_temperature_gdp_correlations:
+                analysis_func(output_files, analysis_output_dir, config, ssp_filter)
+            else:
+                analysis_func(output_files, analysis_output_dir, config)
             analysis_time = time.time() - analysis_start
             analysis_results[analysis_name] = {
                 'status': 'completed',
@@ -567,15 +632,23 @@ def main():
 Examples:
   python main_postprocess.py data/output/output_integrated_CanESM5_20250919_123456/
   python main_postprocess.py /path/to/pipeline/output/directory/
+  python main_postprocess.py /path/to/output/ --ssps ssp126 ssp245
+  python main_postprocess.py /path/to/output/ --ssps ssp585
 
 This framework analyzes results from the main.py COIN-SSP processing pipeline.
-All analyses are run by default. Future versions may include selective analysis flags.
+All analyses are run by default. Use --ssps to limit analysis to specific scenarios.
         """
     )
 
     parser.add_argument(
         'output_directory',
         help='Path to the output directory created by main.py pipeline'
+    )
+
+    parser.add_argument(
+        '--ssps',
+        nargs='+',
+        help='Limit analysis to specific SSP scenarios (e.g., --ssps ssp126 ssp245). If not specified, all SSPs are processed.'
     )
 
     args = parser.parse_args()
@@ -594,7 +667,7 @@ All analyses are run by default. Future versions may include selective analysis 
         analysis_output_dir = setup_analysis_output_directory(args.output_directory)
 
         # Run all post-processing analyses
-        analysis_results = run_all_analyses(output_files, analysis_output_dir)
+        analysis_results = run_all_analyses(output_files, analysis_output_dir, ssp_filter=args.ssps)
 
         print(f"\n🎉 Post-processing analysis completed!")
         print(f"📁 Results saved to: {analysis_output_dir}")

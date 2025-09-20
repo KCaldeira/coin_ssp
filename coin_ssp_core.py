@@ -289,10 +289,7 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
 def optimize_climate_response_scaling(
         gridcell_data, params: ModelParams, scaling: ScalingParams,
-        target_period, x0: float = -0.001,  # starting guess for the scale
-        bounds: tuple = (-0.1, 0.1),  # keeping current bounds as default
-        maxiter: int = 500,
-        tol: float = 1e-8):
+        target_period, target_type, prediction_start_year):
     """
     Optimize the scaling factor with adaptive bounds expansion.
 
@@ -313,14 +310,11 @@ def optimize_climate_response_scaling(
         Scaling parameters
     target_period : dict
         Dictionary with 'start_year' and 'end_year' for target period
-    x0 : float
-        Starting guess for optimization
-    bounds : tuple
-        Initial bounds for optimization (will be expanded if needed)
-    maxiter : int
-        Maximum iterations per optimization attempt
-    tol : float
-        Tolerance for optimization
+    target_type : str
+        Type of optimization target: "damage" for GDP damage amount (default),
+        "variability" for variability targets (to be implemented)
+    prediction_start_year : int
+        Year when prediction period starts (e.g., 2015)
 
     Notes
     -----
@@ -329,6 +323,12 @@ def optimize_climate_response_scaling(
     - Hit upper bound: new search region is [old_upper, 10×upper]
     This avoids re-searching the original bounds while expanding in the promising direction.
     """
+    # Define optimization parameters
+    x0 = -0.001  # starting guess for the scale
+    bounds = (-0.1, 0.1)  # initial bounds for optimization (will be expanded if needed)
+    maxiter = 500  # maximum iterations per optimization attempt
+    tol = 1e-8  # tolerance for optimization
+
     # Ensure starting guess is inside bounds
     lo, hi = bounds
     x0 = float(np.clip(x0, lo, hi))
@@ -338,6 +338,8 @@ def optimize_climate_response_scaling(
     end_year = target_period['end_year']
     years = gridcell_data['years']
 
+    # Find index of prediction_start_year
+    prediction_start_idx = np.where(years >= prediction_start_year)[0][0]
     target_mask = (years >= start_year) & (years <= end_year)
     target_indices = np.where(target_mask)[0]
 
@@ -345,7 +347,7 @@ def optimize_climate_response_scaling(
         raise ValueError(f"No years found in target period {start_year}-{end_year}")
 
 
-    def objective(xarr):
+    def objective_damage(xarr):
         # xarr is a length-1 array because we're using scipy.optimize.minimize
         scale = float(xarr[0])
 
@@ -368,50 +370,41 @@ def optimize_climate_response_scaling(
         ratios = y_climate[target_indices] / (y_weather[target_indices] + RATIO_EPSILON)
         mean_ratio = np.mean(ratios)
 
-        if np.isnan(mean_ratio) or np.isinf(mean_ratio):
-            print(f"\n{'='*80}")
-            print(f"NaN/Inf MEAN RATIO DETECTED - STOPPING FOR DIAGNOSIS")
-            print(f"{'='*80}")
-            print(f"Problem: scale={scale:.6f}, mean_ratio is {mean_ratio} (NaN or Inf)")
-            print(f"Target period: {start_year}-{end_year} ({len(target_indices)} years)")
-            print(f"Climate GDP in target period: {y_climate[target_indices]}")
-            print(f"Weather GDP in target period: {y_weather[target_indices]}")
-            print(f"Individual ratios: {ratios}")
-            print(f"Target mean ratio: {1.0 + params.amount_scale}")
-
-            print(f"\nComplete gridcell_data contents:")
-            for key, value in gridcell_data.items():
-                if isinstance(value, np.ndarray):
-                    print(f"  {key}: shape={value.shape}, dtype={value.dtype}")
-                    print(f"    range: {np.min(value):.6e} to {np.max(value):.6e}")
-                    print(f"    zeros: {np.sum(value == 0)} / {len(value)} ({100*np.sum(value == 0)/len(value):.1f}%)")
-                    if key in ['tfp_baseline', 'population', 'gdp']:
-                        print(f"    values in target period: {value[target_indices]}")
-                else:
-                    print(f"  {key}: {value}")
-
-            print(f"\nModel Parameters:")
-            print(f"  ModelParams: s={params.s}, alpha={params.alpha}, delta={params.delta}")
-            print(f"  ScalingParams: amount_scale={params.amount_scale}")
-            print(f"  Climate baseline: tas0={params.tas0:.2f}, pr0={params.pr0:.2f}")
-
-            print(f"\nScaled Climate Parameters:")
-            print(f"  Capital damage: k_tas1={pc.k_tas1}, k_tas2={pc.k_tas2}")
-            print(f"  TFP damage: tfp_tas1={pc.tfp_tas1}, tfp_tas2={pc.tfp_tas2}")
-            print(f"  GDP damage: y_tas1={pc.y_tas1}, y_tas2={pc.y_tas2}")
-            print(f"  Precip damage: k_pr1={pc.k_pr1}, k_pr2={pc.k_pr2}, tfp_pr1={pc.tfp_pr1}, tfp_pr2={pc.tfp_pr2}, y_pr1={pc.y_pr1}, y_pr2={pc.y_pr2}")
-
-            print(f"{'='*80}")
-            raise RuntimeError(f"NaN/Inf mean ratio detected at scale={scale:.6f}. See debug output above for full diagnosis.")
-
         target = 1.0 + params.amount_scale
         objective_value = (mean_ratio - target) ** 2
-        # print(f"        Objective: scale={scale:.6f}, ratio={ratio:.6f}, target={target:.6f}, obj={objective_value:.6f}")  # Commented out to reduce verbose output
         return objective_value
+
+    def objective_variability(xarr):
+        # xarr is a length-1 array because we're using scipy.optimize.minimize
+        scale = float(xarr[0])
+
+        # Create scaled parameters using helper function
+        pc = create_scaled_params(params, scaling, scale)
+
+        # Weather (baseline) run
+        y_weather, *_ = calculate_coin_ssp_forward_model(
+            gridcell_data['tfp_baseline'], gridcell_data['population'],
+            gridcell_data['tas_weather'], gridcell_data['pr_weather'], pc
+        )
+
+        # Split time series into historical and prediction periods using pre-computed index
+        # Calculate historical period variability (before prediction period)
+        stddev_y_weather = np.std(y_weather[:prediction_start_idx])
+
+        objective_value = (hist_var_ratio - pred_var_ratio) ** 2
+        return objective_value
+
+    # Choose objective function based on target type
+    if target_type == "damage":
+        objective_func = objective_damage
+    elif target_type == "variability":
+        objective_func = objective_variability
+    else:
+        raise ValueError(f"Unknown target_type '{target_type}'. Must be 'damage' or 'variability'.")
 
     # Initial optimization with original bounds
     res = minimize(
-        objective,
+        objective_func,
         x0=[x0],
         bounds=[bounds],                # keeps search inside [lo, hi]
         method="L-BFGS-B",              # supports bounds + numeric gradient
@@ -446,7 +439,7 @@ def optimize_climate_response_scaling(
 
         # Retry optimization with expanded bounds
         res_expanded = minimize(
-            objective,
+            objective_func,
             x0=[optimal_scale],  # Start from previous result
             bounds=[expanded_bounds],
             method="L-BFGS-B",

@@ -72,7 +72,7 @@ To ensure that baseline economic projections are not contaminated by historical 
 ### 4. Complete Dataset Archive Generation
 After data loading and harmonization, the pipeline automatically creates a comprehensive NetCDF archive file containing all processed input data:
 
-- **Filename**: `all_loaded_data_{model_name}_{timestamp}.nc`
+- **Filename**: `all_loaded_data_{json_id}_{model_name}_{timestamp}.nc`
 - **Purpose**: Complete reference dataset for validation, analysis, and reproducibility
 - **Contents**:
   - All SSP scenarios with harmonized temporal alignment
@@ -509,10 +509,10 @@ The complete 5-step integrated workflow for gridded climate-economic modeling:
 python main.py coin_ssp_integrated_config_0004.json
 
 # Skip Step 3 optimization by loading previous results (faster development)
-python main.py coin_ssp_integrated_config_0004.json --step3-file data/output/run_20250917_160000/step3_scaling_factors_CanESM5_ssp245.nc
+python main.py coin_ssp_integrated_config_0007.json --step3-file data/output/output_0007_CanESM5_20250917_160000/step3_scaling_factors_0007_CanESM5_ssp245.nc
 
-# Results saved to: ./data/output/output_integrated_{model}_{timestamp}/
-# Step outputs: step1_target_gdp_*.nc, step2_baseline_tfp_*.nc, etc.
+# Results saved to: ./data/output/output_{json_id}_{model}_{timestamp}/
+# Step outputs: step1_target_gdp_{json_id}_{model}_{ssp}.nc, step2_baseline_tfp_{json_id}_{model}.nc, etc.
 # PDF visualizations: step1_target_maps_*.pdf, step3_scaling_maps_*.pdf, etc.
 # Timing report: Shows duration for each step and total pipeline time
 ```
@@ -528,7 +528,7 @@ Comprehensive analysis of pipeline results using the dedicated post-processing f
 
 ```bash
 # Analyze results from a completed pipeline run
-python main_postprocess.py data/output/output_integrated_CanESM5_20250919_123456/
+python main_postprocess.py data/output/output_0007_CanESM5_20250919_123456/
 
 # The framework automatically:
 # - Validates pipeline output files (steps 1-5 NetCDF files, PDFs, etc.)
@@ -567,35 +567,62 @@ python main.py coin_ssp_experiment1.json --max-countries 5
 
 ### JSON Configuration Structure
 
-The model uses JSON files named `coin_ssp_*.json` containing two main sections:
+The integrated pipeline uses JSON configuration files with the following structure:
 
 ```json
 {
+  "run_metadata": {
+    "json_id": "0007",
+    "run_name": "CanESM5_ssp245_reference_experiment_v2",
+    "description": "Experiment description",
+    "created_date": "2025-09-15"
+  },
+  "climate_model": {
+    "model_name": "CanESM5",
+    "input_directory": "data/input",
+    "file_prefixes": {
+      "tas_file_prefix": "CLIMATE",
+      "pr_file_prefix": "CLIMATE",
+      "gdp_file_prefix": "GDP",
+      "pop_file_prefix": "POP"
+    }
+  },
+  "ssp_scenarios": {
+    "reference_ssp": "ssp245",
+    "forward_simulation_ssps": ["ssp126", "ssp245", "ssp460", "ssp370", "ssp585"]
+  },
+  "gdp_targets": [
+    {
+      "target_name": "const_10%",
+      "target_shape": "constant",
+      "target_type": "damage",
+      "gdp_amount": -0.016666666666667
+    }
+  ],
   "model_params": {
     "year_diverge": 2025,
-    "year_scale": 2100,
-    "amount_scale": -0.05,
+    "amount_scale": -0.10,
     "s": 0.3,
     "alpha": 0.3,
     "delta": 0.1
   },
-  "scaling_params": [
+  "response_function_scalings": [
     {
-      "scaling_name": "capital_optimized",
-      "k_tas2": 1.0
-    },
-    {
-      "scaling_name": "tfp_direct", 
-      "tfp_tas2": 1.0,
-      "scale_factor": -0.005
-    },
-    {
-      "scaling_name": "output_optimized",
-      "y_tas2": 1.0
+      "scaling_name": "output_linear",
+      "y_tas1": 1.0
     }
   ]
 }
 ```
+
+**Key Configuration Sections:**
+
+- **`run_metadata`**: Contains `json_id` used for standardized file naming across all pipeline outputs
+- **`climate_model`**: Defines NetCDF file prefixes and model information
+- **`ssp_scenarios`**: Specifies reference SSP for calibration and forward simulation scenarios
+- **`gdp_targets`**: Target GDP reduction patterns (constant, linear, quadratic)
+- **`model_params`**: Core Solow-Swan economic parameters
+- **`response_function_scalings`**: Climate damage function configurations
 
 **Model Parameters** (optional - uses defaults if not specified):
 - `year_diverge`: Year when climate effects begin (used to define reference period end, default: 2025)
@@ -731,7 +758,7 @@ coin_ssp/
 ├── calculate_target_gdp_reductions.py  # Standalone tool for gridded target reduction calculations
 ├── main.py                             # Integrated grid-cell processing pipeline (5-step workflow)
 ├── main_postprocess.py                 # Post-processing analysis framework for pipeline results
-├── coin_ssp_integrated_config_0002.json    # Current unified configuration for complete workflow
+├── coin_ssp_integrated_config_0007.json    # Current unified configuration for complete workflow
 ├── target_gdp_config_0000.json         # Configuration for target GDP reduction calculations
 ├── create_ratio_maps.py                # Standalone tool for creating climate/weather GDP ratio maps
 ├── data/
@@ -747,12 +774,12 @@ coin_ssp/
 │       ├── run_20250903_143052/        # Country-level results
 │       │   ├── [country]_results_20250903_143052.csv
 │       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
-│       ├── output_integrated_CanESM5_20250915_140000/  # Integrated pipeline results
-│       │   ├── all_loaded_data_CanESM5.nc  # Complete input dataset (all SSPs + valid mask)
-│       │   ├── step1_target_gdp_CanESM5_ssp245.nc      # Target GDP reductions
-│       │   ├── step2_baseline_tfp_CanESM5.nc           # Baseline TFP calculations
-│       │   ├── step3_scaling_factors_CanESM5_ssp245.nc # Response function scaling factors
-│       │   ├── step4_forward_results_CanESM5.nc        # Forward economic projections
+│       ├── output_0007_CanESM5_20250915_140000/  # Integrated pipeline results
+│       │   ├── all_loaded_data_0007_CanESM5.nc  # Complete input dataset (all SSPs + valid mask)
+│       │   ├── step1_target_gdp_0007_CanESM5_ssp245.nc      # Target GDP reductions
+│       │   ├── step2_baseline_tfp_0007_CanESM5.nc           # Baseline TFP calculations
+│       │   ├── step3_scaling_factors_0007_CanESM5_ssp245.nc # Response function scaling factors
+│       │   ├── step4_forward_results_0007_CanESM5.nc        # Forward economic projections
 │       │   ├── step1_target_maps_*.pdf                  # Target reduction visualizations
 │       │   ├── step3_scaling_maps_*.pdf                # Scaling factor visualizations
 │       │   ├── step4_forward_plots_*.pdf               # Forward model time series

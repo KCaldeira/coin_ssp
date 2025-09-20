@@ -39,6 +39,42 @@ from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_
 from model_params_factory import ModelParamsFactory
 
 
+def build_filename(prefix: str, json_id: str, model_name: str, ext: str, ssp_name: str = None, var_name: str = None) -> str:
+    """
+    Build standardized filename with format: {prefix}_{json_id}_{model_name}_{ssp_name}_{var_name}.{ext}
+    Missing fields (None) are omitted along with their preceding underscore.
+
+    Parameters
+    ----------
+    prefix : str
+        File prefix (e.g., "step1", "step2")
+    json_id : str
+        JSON configuration ID (e.g., "0007")
+    model_name : str, optional
+        Climate model name (e.g., "CanESM5")
+    ssp_name : str, optional
+        SSP scenario name (e.g., "ssp245")
+    var_name : str, optional
+        Variable name (e.g., "target_gdp", "baseline_tfp")
+    ext : str
+        File extension (default: "nc")
+
+    Returns
+    -------
+    str
+        Standardized filename
+    """
+    parts = [prefix, json_id]
+    if model_name:
+        parts.append(model_name)
+    if ssp_name:
+        parts.append(ssp_name)
+    if var_name:
+        parts.append(var_name)
+
+    return "_".join(parts) + f".{ext}"
+
+
 def setup_output_directory(config: Dict[str, Any]) -> str:
     """
     Create output directory structure for integrated processing results.
@@ -46,26 +82,29 @@ def setup_output_directory(config: Dict[str, Any]) -> str:
     Parameters
     ----------
     config : Dict[str, Any]
-        Integrated configuration dictionary
-        
+        Integrated configuration dictionary (must contain run_metadata.json_id)
+
     Returns
     -------
     str
         Path to the created output directory
     """
+    # Get json_id from run_metadata
+    json_id = config['run_metadata']['json_id']
+
     model_name = config['climate_model']['model_name']
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_output_dir = Path("./data/output")
-    output_dir = base_output_dir / f"output_integrated_{model_name}_{timestamp}"
-    
+    output_dir = base_output_dir / f"output_{json_id}_{model_name}_{timestamp}"
+
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created output directory: {output_dir}")
-    
+
     return str(output_dir)
 
 
-def get_step_output_path(output_dir: str, step_num: int, model_name: str, ssp_name: str = None, 
-                        file_type: str = "json") -> str:
+def get_step_output_path(output_dir: str, step_num: int, config: Dict[str, Any], model_name: str, ssp_name: str = None,
+                        var_name: str = None, file_type: str = "nc") -> str:
     """
     Generate standardized output file path for processing steps.
     
@@ -75,33 +114,29 @@ def get_step_output_path(output_dir: str, step_num: int, model_name: str, ssp_na
         Base output directory path
     step_num : int
         Processing step number (1-5)
+    config : Dict[str, Any]
+        Configuration dictionary containing run_metadata.json_id and climate_model.model_name
     model_name : str
         Climate model name
     ssp_name : str, optional
         SSP scenario name (if step-specific)
+    var_name : str, optional
+        Variable name (if step-specific)
     file_type : str
-        File extension type ("json" or "nc")
+        File extension type (default: "nc")
         
     Returns
     -------
     str
         Complete output file path
     """
-    step_names = {
-        1: "target_gdp",
-        2: "baseline_tfp", 
-        3: "scaling_factors",
-        4: "forward_results",
-        5: "final_output"
-    }
-    
-    step_name = step_names[step_num]
-    
-    if ssp_name:
-        filename = f"step{step_num}_{step_name}_{model_name}_{ssp_name}.{file_type}"
-    else:
-        filename = f"step{step_num}_{step_name}_{model_name}.{file_type}"
-        
+    # Extract json_id from config
+    json_id = config['run_metadata']['json_id']
+
+    # Create step-specific prefix
+    prefix = f"step{step_num}"
+    filename = build_filename(prefix, json_id, model_name, file_type, ssp_name, var_name)
+
     return os.path.join(output_dir, filename)
 
 
@@ -132,14 +167,14 @@ def load_integrated_config(config_path: str) -> Dict[str, Any]:
 
     # Basic validation
     required_sections = ['climate_model', 'ssp_scenarios', 'time_periods',
-                        'model_params', 'response_function_scalings', 'gdp_reduction_targets']
+                        'model_params', 'response_function_scalings', 'gdp_targets']
     
     for section in required_sections:
         if section not in config:
             raise ValueError(f"Required configuration section missing: {section}")
     
     n_response_functions = len(config['response_function_scalings'])
-    n_gdp_targets = len(config['gdp_reduction_targets'])
+    n_gdp_targets = len(config['gdp_targets'])
     n_combinations = n_response_functions * n_gdp_targets
     
     print(f"Configuration loaded successfully:")
@@ -182,7 +217,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     return filepath
 
 
-def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, all_netcdf_data: Dict[str, Any]) -> Dict[str, Any]:
+def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, json_id: str, all_netcdf_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 1: Develop target GDP changes using reference SSP scenario (global calculation).
     
@@ -209,7 +244,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     model_name = config['climate_model']['model_name']
-    gdp_targets = config['gdp_reduction_targets']
+    gdp_targets = config['gdp_targets']
     time_periods = config['time_periods']
 
     print(f"Using reference SSP: {reference_ssp}")
@@ -266,7 +301,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     target_results = {}
     
     for target_name, calc_result in calculation_results.items():
-        target_type = calc_result['target_type']
+        target_shape = calc_result['target_shape']
         reduction_array = calc_result['reduction_array']
         
         # Calculate achieved GDP-weighted global mean
@@ -279,7 +314,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
             global_mean_achieved = calculate_global_mean(gdp_target * (1 + reduction_array), data['lat'], valid_mask) / global_gdp_target - 1
         
         target_results[target_name] = {
-            'target_type': target_type,
+            'target_shape': target_shape,
             'reduction_array': reduction_array,
             'global_mean_achieved': float(global_mean_achieved),
             'constraint_satisfied': True,
@@ -288,7 +323,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
             'constraint_verification': calc_result['constraint_verification']
         }
         
-        print(f"  {target_name} ({target_type}): GDP-weighted mean = {global_mean_achieved:.6f}")
+        print(f"  {target_name} ({target_shape}): GDP-weighted mean = {global_mean_achieved:.6f}")
     
     # Store coordinate and metadata information
     target_results['_metadata'] = {
@@ -305,7 +340,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     # Write results to NetCDF file
     model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    output_path = get_step_output_path(output_dir, 1, model_name, reference_ssp, "nc")
+    output_path = get_step_output_path(output_dir, 1, config, model_name, reference_ssp, "target_gdp", "nc")
     save_step1_results_netcdf(target_results, output_path, config)
 
     # Create visualization
@@ -443,7 +478,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
     # Write results to NetCDF file with coordinate information
     model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    output_path = get_step_output_path(output_dir, 2, model_name, reference_ssp, "nc")
+    output_path = get_step_output_path(output_dir, 2, config, model_name, reference_ssp, "baseline_tfp", "nc")
     
     # Add metadata for visualization (coordinates, years, and reference data for valid cell identification)
     metadata = all_data['_metadata']
@@ -511,7 +546,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     damage_scalings = config['response_function_scalings']
-    gdp_targets = config['gdp_reduction_targets']
+    gdp_targets = config['gdp_targets']
     
     n_response_functions = len(damage_scalings)
     n_gdp_targets = len(gdp_targets)
@@ -641,8 +676,10 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     
                     # Run per-grid-cell optimization
                     target_period = config['time_periods']['target_period']
+                    target_type = gdp_target['target_type']
+                    prediction_start_year = config['time_periods']['prediction_period']['start_year']
                     optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
-                        cell_data, params_cell, scaling_params, target_period
+                        cell_data, params_cell, scaling_params, target_period, target_type, prediction_start_year
                     )
 
                     # Store results
@@ -692,7 +729,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     # Write results to NetCDF file
     model_name = config['climate_model']['model_name']
-    output_path = get_step_output_path(output_dir, 3, model_name, reference_ssp, "nc")
+    output_path = get_step_output_path(output_dir, 3, config, model_name, reference_ssp, "scaling_factors", "nc")
     save_step3_results_netcdf(scaling_results, output_path, model_name, config)
 
     # Generate scaling factors visualization
@@ -713,7 +750,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     return scaling_results
 
 
-def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: Dict[str, Any], all_netcdf_data: Dict[str, Any], output_dir: str = None) -> None:
+def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: Dict[str, Any], all_netcdf_data: Dict[str, Any], output_dir: str) -> None:
     """
     Generate GDP-weighted summary of scaling factors and write to CSV file.
 
@@ -937,7 +974,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
     n_response_functions = len(config['response_function_scalings'])
-    n_gdp_targets = len(config['gdp_reduction_targets'])
+    n_gdp_targets = len(config['gdp_targets'])
     total_combinations = n_response_functions * n_gdp_targets
     
     print(f"Processing {len(forward_ssps)} SSP scenarios")
@@ -1166,7 +1203,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
     response_functions = config['response_function_scalings']
-    gdp_targets = config['gdp_reduction_targets']
+    gdp_targets = config['gdp_targets']
     
     print(f"Climate Model: {model_name}")
     print(f"Reference SSP: {reference_ssp}")
@@ -1249,6 +1286,9 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
         # Load configuration
         config = load_integrated_config(config_path)
 
+        # Extract json_id from configuration
+        json_id = config['run_metadata']['json_id']
+
         # Setup output directory
         output_dir = setup_output_directory(config)
 
@@ -1261,7 +1301,7 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
 
         # Execute 5-step processing flow
         step1_start = time.time()
-        target_results = step1_calculate_target_gdp_changes(config, output_dir, all_netcdf_data)
+        target_results = step1_calculate_target_gdp_changes(config, output_dir, json_id, all_netcdf_data)
         step_times['Step 1 - Target GDP'] = time.time() - step1_start
 
         step2_start = time.time()

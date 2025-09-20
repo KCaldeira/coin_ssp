@@ -106,23 +106,23 @@ def calculate_target_reductions(config_file):
     target_configs = [
         {
             'target_name': 'constant',
-            'target_type': 'constant',
-            'gdp_reduction': config['constant_target']['gdp_reduction']
+            'target_shape': 'constant',
+            'gdp_amount': config['constant_target']['gdp_amount']
         },
         {
             'target_name': 'linear', 
-            'target_type': 'linear',
-            'global_mean_reduction': config['linear_target']['global_mean_reduction'],
+            'target_shape': 'linear',
+            'global_mean_amount': config['linear_target']['global_mean_amount'],
             'reference_temperature': config['linear_target']['reference_temperature'],
-            'reduction_at_reference_temp': config['linear_target']['reduction_at_reference_temp']
+            'amount_at_reference_temp': config['linear_target']['amount_at_reference_temp']
         },
         {
             'target_name': 'quadratic',
-            'target_type': 'quadratic', 
-            'global_mean_reduction': config['quadratic_target']['global_mean_reduction'],
+            'target_shape': 'quadratic', 
+            'global_mean_amount': config['quadratic_target']['global_mean_amount'],
             'reference_temperature': config['quadratic_target']['reference_temperature'],
-            'reduction_at_reference_temp': config['quadratic_target']['reduction_at_reference_temp'],
-            'zero_reduction_temperature': config['quadratic_target']['zero_reduction_temperature']
+            'amount_at_reference_temp': config['quadratic_target']['amount_at_reference_temp'],
+            'zero_amount_temperature': config['quadratic_target']['zero_amount_temperature']
         }
     ]
     
@@ -140,8 +140,8 @@ def calculate_target_reductions(config_file):
     print(f"Linear algorithm check:")
     print(f"  T_ref_linear: {target_configs[1]['reference_temperature']}°C")
     print(f"  GDP-weighted temp mean: {linear_result['gdp_weighted_temp_mean']:.6f}°C")
-    print(f"  value_at_ref_linear: {target_configs[1]['reduction_at_reference_temp']}")
-    print(f"  global_mean_linear: {target_configs[1]['global_mean_reduction']}")
+    print(f"  value_at_ref_linear: {target_configs[1]['amount_at_reference_temp']}")
+    print(f"  global_mean_linear: {target_configs[1]['global_mean_amount']}")
     print(f"  OLS solution verification:")
     print(f"    At T_ref: {linear_verification['point_constraint']['achieved']:.10f} (target: {linear_verification['point_constraint']['target']})")
     print(f"    Global mean: {linear_verification['global_mean_constraint']['achieved']:.10f} (target: {linear_verification['global_mean_constraint']['target']:.10f})")
@@ -153,12 +153,12 @@ def calculate_target_reductions(config_file):
     quadratic_verification = quadratic_result['constraint_verification']
     
     print(f"Quadratic algorithm check:")
-    print(f"  T0 (zero point): {target_configs[2]['zero_reduction_temperature']}°C")
+    print(f"  T0 (zero point): {target_configs[2]['zero_amount_temperature']}°C")
     print(f"  T_ref_quad: {target_configs[2]['reference_temperature']}°C")
     print(f"  GDP-weighted temp mean: {quadratic_result['gdp_weighted_temp_mean']:.6f}°C")
     print(f"  GDP-weighted temp² mean: {quadratic_result['gdp_weighted_temp2_mean']:.6f}°C²")
-    print(f"  value_at_ref_quad: {target_configs[2]['reduction_at_reference_temp']}")
-    print(f"  global_mean_quad: {target_configs[2]['global_mean_reduction']}")
+    print(f"  value_at_ref_quad: {target_configs[2]['amount_at_reference_temp']}")
+    print(f"  global_mean_quad: {target_configs[2]['global_mean_amount']}")
     print(f"  Constraint verification:")
     print(f"    At T0=0: {quadratic_verification['zero_point_constraint']['achieved']:.10f} (target: {quadratic_verification['zero_point_constraint']['target']})")
     print(f"    At T_ref: {quadratic_verification['reference_point_constraint']['achieved']:.10f} (target: {quadratic_verification['reference_point_constraint']['target']})")
@@ -217,7 +217,7 @@ def save_results_netcdf(results, output_filename):
     # Create xarray dataset
     ds = xr.Dataset(
         {
-            'target_gdp_reductions': (['reduction_type', 'lat', 'lon'], target_reductions),
+            'target_gdp_amounts': (['reduction_type', 'lat', 'lon'], target_reductions),
             'temperature_ref': (['lat', 'lon'], results['temperature_ref']),
             'gdp_target': (['lat', 'lon'], results['gdp_target'])
         },
@@ -229,7 +229,7 @@ def save_results_netcdf(results, output_filename):
     )
     
     # Add attributes
-    ds.target_gdp_reductions.attrs = {
+    ds.target_gdp_amounts.attrs = {
         'long_name': 'Target GDP reductions',
         'units': 'fractional reduction',
         'description': 'Layer 0: constant, Layer 1: linear in temperature, Layer 2: quadratic in temperature'
@@ -363,7 +363,7 @@ def create_global_maps(results, config, pdf_filename):
         a_quad, b_quad, c_quad = global_stats['quadratic_coeffs']['a'], global_stats['quadratic_coeffs']['b'], global_stats['quadratic_coeffs']['c']
         
         # Get constant value from config
-        constant_value = config['constant_target']['gdp_reduction']
+        constant_value = config['constant_target']['gdp_amount']
         
         # Calculate function values
         constant_values = np.full_like(temp_range, constant_value)
@@ -382,10 +382,10 @@ def create_global_maps(results, config, pdf_filename):
         
         # Mark key points from config
         linear_ref_temp = config['linear_target']['reference_temperature']
-        linear_ref_value = config['linear_target']['reduction_at_reference_temp']
+        linear_ref_value = config['linear_target']['amount_at_reference_temp']
         quad_ref_temp = config['quadratic_target']['reference_temperature']
-        quad_ref_value = config['quadratic_target']['reduction_at_reference_temp']
-        quad_zero_temp = config['quadratic_target']['zero_reduction_temperature']
+        quad_ref_value = config['quadratic_target']['amount_at_reference_temp']
+        quad_zero_temp = config['quadratic_target']['zero_amount_temperature']
         
         ax.plot(linear_ref_temp, linear_ref_value, 'ro', markersize=8, 
                 label=f'Linear: {linear_ref_temp}°C = {linear_ref_value}')
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) != 2:
-        print("Usage: python calculate_target_gdp_reductions.py config.json")
+        print("Usage: python calculate_target_gdp_amounts.py config.json")
         sys.exit(1)
         
     config_file = sys.argv[1]
@@ -455,11 +455,11 @@ if __name__ == "__main__":
     case_name = config.get('case_name', 'ssp585')
     
     # Save results to NetCDF with model_name, case_name, and wildcard in filename
-    netcdf_filename = f"target_gdp_reductions_{model_name}_{case_name}_{wildcard}.nc"
+    netcdf_filename = f"target_gdp_amounts_{model_name}_{case_name}_{wildcard}.nc"
     save_results_netcdf(results, netcdf_filename)
     
     # Create global maps and save to PDF with model_name, case_name, and wildcard in filename
-    pdf_filename = f"target_gdp_reductions_maps_{model_name}_{case_name}_{wildcard}.pdf"
+    pdf_filename = f"target_gdp_amounts_maps_{model_name}_{case_name}_{wildcard}.pdf"
     create_global_maps(results, config, pdf_filename)
     
     # Print summary statistics
