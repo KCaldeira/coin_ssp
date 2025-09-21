@@ -731,12 +731,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Generate scaling factors visualization
     print("Generating scaling factors visualization...")
-    visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
+    visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir)
     print(f"✅ Scaling factors visualization saved: {visualization_path}")
 
     # Generate objective function visualization
     print("Generating objective function visualization...")
-    obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, model_name)
+    obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir)
     print(f"✅ Objective function visualization saved: {obj_func_path}")
 
     # Display GDP-weighted scaling factor summary
@@ -896,9 +896,10 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
         import pandas as pd
         import os
 
+        json_id = config['run_metadata']['json_id']
         model_name = config['climate_model']['model_name']
         reference_ssp = config['ssp_scenarios']['reference_ssp']
-        csv_filename = f"step3_scaling_factors_summary_{model_name}_{reference_ssp}.csv"
+        csv_filename = f"step3_{json_id}_{model_name}_{reference_ssp}_scaling_factors_summary.csv"
         csv_path = os.path.join(output_dir, csv_filename)
 
         # Create DataFrame and write to CSV
@@ -1148,14 +1149,14 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     
     # Write results to separate NetCDF files per SSP/variable
     model_name = config['climate_model']['model_name']
-    saved_files = save_step4_results_netcdf_split(step4_results, output_dir, model_name, config)
+    saved_files = save_step4_results_netcdf_split(step4_results, output_dir, config)
     print(f"Step 4 NetCDF files saved: {len(saved_files)} files")
 
     # Create PDF visualizations
     print("Creating Step 4 PDF visualizations...")
 
     # Line plots visualization
-    pdf_path = create_forward_model_visualization(step4_results, config, output_dir, model_name, all_data)
+    pdf_path = create_forward_model_visualization(step4_results, config, output_dir, all_data)
     print(f"Step 4 line plots saved to: {pdf_path}")
 
     # Ratio plots visualization
@@ -1163,7 +1164,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     print(f"Step 4 ratio plots saved to: {ratio_pdf_path}")
 
     # Maps visualization (generates both linear and log10 scale PDFs)
-    linear_maps_path, log10_maps_path = create_forward_model_maps_visualization(step4_results, config, output_dir, model_name, all_data)
+    linear_maps_path, log10_maps_path = create_forward_model_maps_visualization(step4_results, config, output_dir, all_data)
 
     print(f"\nStep 4 completed: Forward integration for {len(forward_results)} SSP scenarios")
     return step4_results
@@ -1322,11 +1323,11 @@ def run_pipeline(config_path: str, step3_file: str = None) -> None:
             model_name = config['climate_model']['model_name']
 
             # Scaling factors visualization
-            pdf_path = create_scaling_factors_visualization(scaling_results, config, output_dir, model_name)
+            pdf_path = create_scaling_factors_visualization(scaling_results, config, output_dir)
             print(f"✅ Scaling factors visualization saved to: {pdf_path}")
 
             # Objective function visualization
-            obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, model_name)
+            obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir)
             print(f"✅ Objective function visualization saved to: {obj_func_path}")
             step_times['Step 3 - Scaling Factors (Loaded)'] = time.time() - step3_start
         else:

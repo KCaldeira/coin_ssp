@@ -171,7 +171,7 @@ def filter_scaling_params(scaling_config):
     allowed_keys = set(ScalingParams.__dataclass_fields__.keys())
     return {k: v for k, v in scaling_config.items() if k in allowed_keys}
 
-def create_forward_model_visualization(forward_results, config, output_dir, model_name, all_netcdf_data):
+def create_forward_model_visualization(forward_results, config, output_dir, all_netcdf_data):
     """
     Create comprehensive PDF visualization for Step 4 forward model results.
 
@@ -203,8 +203,12 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
-    pdf_filename = f"step4_forward_model_visualization_{model_name}.pdf"
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+
+    # Generate output filename using standardized pattern
+    pdf_filename = f"step4_{json_id}_{model_name}_forward_model_visualization.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata
@@ -669,7 +673,7 @@ def load_step3_results_from_netcdf(netcdf_path: str) -> Dict[str, Any]:
     return scaling_results
 
 
-def create_forward_model_maps_visualization(forward_results, config, output_dir, model_name, all_netcdf_data):
+def create_forward_model_maps_visualization(forward_results, config, output_dir, all_netcdf_data):
     """
     Create spatial maps visualization for Step 4 forward model results.
 
@@ -703,9 +707,13 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filenames
-    linear_pdf_filename = f"step4_forward_model_maps_{model_name}.pdf"
-    log10_pdf_filename = f"step4_forward_model_maps_log10_{model_name}.pdf"
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+
+    # Generate output filenames using standardized pattern
+    linear_pdf_filename = f"step4_{json_id}_{model_name}_forward_model_maps.pdf"
+    log10_pdf_filename = f"step4_{json_id}_{model_name}_forward_model_maps_log10.pdf"
     linear_pdf_path = os.path.join(output_dir, linear_pdf_filename)
     log10_pdf_path = os.path.join(output_dir, log10_pdf_filename)
 
@@ -2637,7 +2645,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     return output_path
 
 
-def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, model_name: str, config: Dict[str, Any]) -> List[str]:
+def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, config: Dict[str, Any]) -> List[str]:
     """
     Save Step 4 forward model results to separate NetCDF files per SSP/variable combination.
 
@@ -2755,8 +2763,12 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
             ds.lat.attrs = {'long_name': 'Latitude', 'units': 'degrees_north'}
             ds.lon.attrs = {'long_name': 'Longitude', 'units': 'degrees_east'}
 
-            # Generate filename and save
-            filename = f"step4_forward_{ssp_name}_{var_base}_{model_name}.nc"
+            # Extract configuration values for standardized naming
+            json_id = config['run_metadata']['json_id']
+            model_name = config['climate_model']['model_name']
+
+            # Generate filename using standardized pattern
+            filename = f"step4_{json_id}_{model_name}_{ssp_name}_forward_{var_base}.nc"
             filepath = os.path.join(output_dir, filename)
 
             # Save with compression
@@ -3232,7 +3244,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     return pdf_path
 
 
-def create_scaling_factors_visualization(scaling_results, config, output_dir, model_name):
+def create_scaling_factors_visualization(scaling_results, config, output_dir):
     """
     Create comprehensive PDF visualization for Step 3 scaling factor results.
 
@@ -3260,9 +3272,13 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    pdf_filename = f"step3_scaling_factors_visualization_{model_name}_{reference_ssp}.pdf"
+
+    # Generate output filename using standardized pattern
+    pdf_filename = f"step3_{json_id}_{model_name}_{reference_ssp}_scaling_factors_visualization.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract data arrays and metadata
@@ -3377,7 +3393,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, mo
     return pdf_path
 
 
-def create_objective_function_visualization(scaling_results, config, output_dir, model_name):
+def create_objective_function_visualization(scaling_results, config, output_dir):
     """
     Create comprehensive PDF visualization for Step 3 objective function values.
 
@@ -3406,9 +3422,13 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    pdf_filename = f"step3_objective_function_visualization_{model_name}_{reference_ssp}.pdf"
+
+    # Generate output filename using standardized pattern
+    pdf_filename = f"step3_{json_id}_{model_name}_{reference_ssp}_objective_function_visualization.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract data arrays and metadata
