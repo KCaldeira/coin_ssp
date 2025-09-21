@@ -17,6 +17,7 @@ Processing Flow (per README.md Section 3):
 import copy
 import json
 import os
+import shutil
 import sys
 import time
 import numpy as np
@@ -139,21 +140,21 @@ def get_step_output_path(output_dir: str, step_num: int, config: Dict[str, Any],
     return os.path.join(output_dir, filename)
 
 
-def load_integrated_config(config_path: str) -> Dict[str, Any]:
+def load_config(config_path: str) -> Dict[str, Any]:
     """
-    Load and validate integrated JSON configuration file.
+    Load and validate JSON configuration file.
     
     Parameters
     ----------
     config_path : str
-        Path to the integrated JSON configuration file
+        Path to the JSON configuration file
         
     Returns
     -------
     Dict[str, Any]
         Parsed and validated configuration dictionary
     """
-    print(f"Loading integrated configuration from: {config_path}")
+    print(f"Loading configuration from: {config_path}")
     
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -1254,7 +1255,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"  • Step 4: step4_forward_results_{model_name}.nc")
 
 
-def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
+def run_pipeline(config_path: str, step3_file: str = None) -> None:
     """
     Execute the complete integrated processing pipeline following README Section 3.
     
@@ -1268,7 +1269,7 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
     Parameters
     ---------- 
     config_path : str
-        Path to integrated JSON configuration file
+        Path to JSON configuration file
     """
     print("Starting COIN-SSP Integrated Processing Pipeline")
     print("Following README.md Section 3: Grid Cell Processing")
@@ -1280,13 +1281,19 @@ def run_integrated_pipeline(config_path: str, step3_file: str = None) -> None:
 
     try:
         # Load configuration
-        config = load_integrated_config(config_path)
+        config = load_config(config_path)
 
         # Extract json_id from configuration
         json_id = config['run_metadata']['json_id']
 
         # Setup output directory
         output_dir = setup_output_directory(config)
+
+        # Copy config file to output directory for reproducibility
+        config_filename = os.path.basename(config_path)
+        config_copy_path = os.path.join(output_dir, config_filename)
+        shutil.copy2(config_path, config_copy_path)
+        print(f"Configuration file copied to: {config_copy_path}")
 
         # Load all NetCDF data once for efficiency (major optimization)
         data_start = time.time()
@@ -1376,7 +1383,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py coin_ssp_integrated_config_0002.json
+  python main.py coin_ssp_config_0007.json
   python main.py config.json --step3-file data/output/previous_run/step3_scaling_factors_CanESM5.nc
 
 This pipeline implements README.md Section 3: Grid Cell Processing
@@ -1384,12 +1391,12 @@ Key feature: Per-grid-cell scaling factor optimization using optimize_climate_re
         """
     )
 
-    parser.add_argument('config', help='Path to integrated configuration JSON file')
+    parser.add_argument('config', help='Path to configuration JSON file')
     parser.add_argument('--step3-file', help='Path to existing Step 3 NetCDF file to load instead of running optimization')
 
     args = parser.parse_args()
 
-    run_integrated_pipeline(args.config, step3_file=args.step3_file)
+    run_pipeline(args.config, step3_file=args.step3_file)
 
 
 if __name__ == "__main__":
