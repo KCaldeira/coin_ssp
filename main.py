@@ -27,7 +27,7 @@ from typing import Dict, List, Any, Tuple
 from coin_ssp_utils import filter_scaling_params
 
 from coin_ssp_utils import (
-    load_gridded_data, calculate_time_means, calculate_global_mean, calculate_global_median,
+    calculate_time_means, calculate_global_mean,
     calculate_all_target_reductions, load_all_netcdf_data, get_ssp_data, get_grid_metadata,
     calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
     apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf_split,
@@ -501,7 +501,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_ne
         'lon': metadata['lon']
     }
     
-    save_step2_results_netcdf(tfp_results, output_path, model_name, config)
+    save_step2_results_netcdf(tfp_results, output_path, config)
 
     # Generate TFP visualization
     print("Generating baseline TFP visualization...")
@@ -658,8 +658,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
                     params_cell = config['model_params_factory'].create_for_step(
                         "grid_cell_optimization",
                         tas0=np.mean(cell_temp[ref_start_idx:ref_end_idx+1]),
-                        pr0=np.mean(cell_precip[ref_start_idx:ref_end_idx+1]),
-                        amount_scale=target_reduction
+                        pr0=np.mean(cell_precip[ref_start_idx:ref_end_idx+1])
                     )
                     
                     # Create cell data dictionary matching gridcell_data structure
@@ -725,9 +724,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     }
     
     # Write results to NetCDF file
-    model_name = config['climate_model']['model_name']
     output_path = get_step_output_path(output_dir, 3, config, reference_ssp, "scaling_factors", "nc")
-    save_step3_results_netcdf(scaling_results, output_path, model_name, config)
+    save_step3_results_netcdf(scaling_results, output_path, config)
 
     # Generate scaling factors visualization
     print("Generating scaling factors visualization...")
@@ -994,10 +992,8 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     # Get grid dimensions
     nlat, nlon = valid_mask.shape
     
-    # Calculate year diverge location for weather filtering (reference period end + 1)
     years = get_grid_metadata(all_data)['years']
     time_periods = config['time_periods']
-    year_diverge = time_periods['reference_period']['end_year'] + 1
     
     forward_results = {}
     
@@ -1022,8 +1018,6 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         ref_start_idx = np.where(years == ref_start_year)[0][0]
         ref_end_idx = np.where(years == ref_end_year)[0][0]
 
-        # Calculate year diverge location for weather filtering
-        year_diverge_loc = np.where(years == year_diverge)[0][0]
         
         print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")

@@ -89,31 +89,4 @@ class ModelParamsFactory:
         params = {**self._validated_base, **overrides}
         return ModelParams(**params)
 
-    def create_with_amount_scale(self, amount_scale: float) -> ModelParams:
-        """
-        Convenience method for creating parameters with specific amount_scale.
 
-        Parameters
-        ----------
-        amount_scale : float
-            Amount scale value for this parameter set
-
-        Returns
-        -------
-        ModelParams
-            Parameter instance with specified amount_scale
-        """
-        return self.create_for_step("amount_scale_override", amount_scale=amount_scale)
-
-    def get_base_dict(self) -> Dict[str, Any]:
-        """
-        Get the validated base parameter dictionary.
-
-        Useful for debugging or when you need the raw parameter values.
-
-        Returns
-        -------
-        Dict[str, Any]
-            Validated base parameters as dictionary
-        """
-        return self._validated_base.copy()

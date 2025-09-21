@@ -81,8 +81,6 @@
   "model_params": {
     "_processing_step": "Step 2 - Baseline TFP & Step 3 - Scaling Factors",
     "_description": "Core economic model parameters (Solow-Swan growth model)",
-    "year_diverge": 2025,
-    "amount_scale": -0.10,
     "s": 0.3,
     "alpha": 0.3,
     "delta": 0.1,

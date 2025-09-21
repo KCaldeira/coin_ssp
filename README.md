@@ -599,8 +599,6 @@ The integrated pipeline uses JSON configuration files with the following structu
     }
   ],
   "model_params": {
-    "year_diverge": 2025,
-    "amount_scale": -0.10,
     "s": 0.3,
     "alpha": 0.3,
     "delta": 0.1
@@ -624,9 +622,6 @@ The integrated pipeline uses JSON configuration files with the following structu
 - **`response_function_scalings`**: Climate damage function configurations
 
 **Model Parameters** (optional - uses defaults if not specified):
-- `year_diverge`: Year when climate effects begin (used to define reference period end, default: 2025)
-- `year_scale`: Target year for optimization (default: 2100)  
-- `amount_scale`: Target climate impact on GDP (e.g., -0.05 for 5% loss)
 - Economic parameters: `s`, `alpha`, `delta`
 
 **Scaling Parameters** (required list):
@@ -654,7 +649,7 @@ The model supports two modes for determining scale factors:
 
 **1. Optimization Mode** (when `scale_factor` is not provided):
 - Automatically finds the optimal scale factor to achieve target climate impact
-- Uses `year_scale` and `amount_scale` from model parameters
+- Uses GDP targets from the `gdp_targets` configuration section
 - Shows: `"Optimizing climate response scaling..." → "Scale factor: X, error: Y"`
 
 **2. Direct Mode** (when `scale_factor` is provided):

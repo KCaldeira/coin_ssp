@@ -45,9 +45,6 @@ RATIO_EPSILON = 1e-20
 @dataclass
 # parameters for the COIN-SSP model
 class ModelParams:
-    year_diverge: int = 2025 # year at which climate starts to affect the economy (e.g., 2025)
-    year_scale: int = 2100 # reference year for when to check climate amount (e.g., 2100)
-    amount_scale: float = 0 # target amount of climate impact on gdp in year_scale (e.g., -0.1 for 10% gdp losses in year_scale)
     s: float = 0.3  # savings rate
     alpha: float = 0.3  # elasticity of output with respect to capital
     delta: float = 0.1  # depreciation rate in 1/yr
@@ -372,7 +369,7 @@ def optimize_climate_response_scaling(
         ratios = y_climate[target_indices] / (y_weather[target_indices] + RATIO_EPSILON)
         mean_ratio = np.mean(ratios)
 
-        target = 1.0 + params.amount_scale
+        target = 1.0 + gdp_target['gdp_amount']
         objective_value = (mean_ratio - target) ** 2
         return objective_value
 

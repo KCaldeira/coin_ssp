@@ -133,7 +133,6 @@ def create_country_scaling_page(country, scaling_name, results, scaling_result, 
     ps = scaling_result["params_scaled"]
     scaling_text = (f'Scaling: {scaling_name}\n'
                    f'Scale factor: {scaling_result["optimal_scale"]:.4f}\n'
-                   f'Target: {params.amount_scale:.1%} by {params.year_scale}\n'
                    f'k_tas1: {ps.k_tas1:.6f}  k_tas2: {ps.k_tas2:.6f}\n'
                    f'tfp_tas1: {ps.tfp_tas1:.6f}  tfp_tas2: {ps.tfp_tas2:.6f}\n'
                    f'y_tas1: {ps.y_tas1:.6f}  y_tas2: {ps.y_tas2:.6f}\n'
@@ -959,35 +958,6 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     return (linear_pdf_path, log10_pdf_path)
 
 
-def create_country_pdf_books(all_results, params, output_dir, run_name, timestamp):
-    """Create PDF books with one book per country, one page per scaling set."""
-    output_dir = Path(output_dir)
-    
-    print(f"\nCreating PDF books for {len(all_results)} countries...")
-    
-    pdf_files = []
-    for i, (country, results) in enumerate(sorted(all_results.items()), 1):
-        print(f"  [{i}/{len(all_results)}] Creating book for {country}...")
-        
-        pdf_file = output_dir / f"COIN_SSP_{country.replace(' ', '_')}_Book_{run_name}_{timestamp}.pdf"
-        
-        with PdfPages(pdf_file) as pdf:
-            for j, (scaling_name, scaling_result) in enumerate(results['scaling_results'].items(), 1):
-                print(f"    Page {j}: {scaling_name}")
-                
-                # Create figure for this scaling set
-                fig = plt.figure(figsize=(8.5, 11))  # Letter size portrait
-                create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig)
-                
-                # Save to PDF
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
-        
-        pdf_files.append(pdf_file)
-        print(f"    Saved: {pdf_file}")
-    
-    print(f"  Created {len(pdf_files)} PDF books")
-    return pdf_files
 
 # =============================================================================
 # Temporal Alignment Utilities
@@ -1487,66 +1457,6 @@ def calculate_global_mean(data, lat, valid_mask):
     return np.nansum(masked_data * masked_weights) / np.sum(masked_weights)
 
 
-def calculate_global_median(data, lat, valid_mask):
-    """
-    Calculate area-weighted global median using only valid grid cells.
-
-    Uses the weighted median algorithm: sort data by value, compute cumulative
-    sum of weights, and interpolate to find the value at 50% cumulative weight.
-
-    Parameters
-    ----------
-    data : array
-        2D spatial data (lat, lon)
-    lat : array
-        Latitude coordinates
-    valid_mask : array
-        2D boolean mask (lat, lon) indicating valid grid cells
-
-    Returns
-    -------
-    float
-        Area-weighted global median over valid cells
-    """
-    weights = calculate_area_weights(lat)
-    # Expand weights to match data shape: (lat,) -> (lat, lon)
-    weights_2d = np.broadcast_to(weights[:, np.newaxis], data.shape)
-
-    # Apply mask to both data and weights
-    masked_data = np.where(valid_mask, data, np.nan)
-    masked_weights = np.where(valid_mask, weights_2d, 0.0)
-
-    # Flatten and remove NaN values
-    flat_data = masked_data.flatten()
-    flat_weights = masked_weights.flatten()
-
-    # Remove NaN entries
-    valid_indices = ~np.isnan(flat_data)
-    valid_data = flat_data[valid_indices]
-    valid_weights = flat_weights[valid_indices]
-
-    if len(valid_data) == 0:
-        return np.nan
-
-    # Create 2-column array and sort by data values (column 1)
-    # Column 0: weights, Column 1: data values
-    combined = np.column_stack([valid_weights, valid_data])
-    sorted_indices = np.argsort(combined[:, 1])  # Sort by column 1 (data values)
-    sorted_combined = combined[sorted_indices]
-
-    # Calculate cumulative sum of weights
-    cumsum_weights = np.cumsum(sorted_combined[:, 0])
-    total_weight = cumsum_weights[-1]
-    half_weight = total_weight / 2.0
-
-    # Find interpolated value at half total weight
-    if half_weight <= cumsum_weights[0]:
-        return sorted_combined[0, 1]  # First value
-    elif half_weight >= cumsum_weights[-1]:
-        return sorted_combined[-1, 1]  # Last value
-    else:
-        # Interpolate
-        return np.interp(half_weight, cumsum_weights, sorted_combined[:, 1])
 
 
 # =============================================================================
@@ -2420,18 +2330,16 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     return output_path
 
 
-def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, model_name: str, config: Dict[str, Any]) -> str:
+def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, config: Dict[str, Any]) -> str:
     """
     Save Step 2 baseline TFP results to NetCDF file.
-    
+
     Parameters
     ----------
     tfp_results : Dict[str, Any]
         Results from step2_calculate_baseline_tfp()
     output_path : str
         Complete output file path
-    model_name : str
-        Climate model name
     config : Dict[str, Any]
         Full configuration dictionary to embed in NetCDF file
         
@@ -2442,10 +2350,13 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     """
     import xarray as xr
     import os
-    
+
+    # Extract model name from config
+    model_name = config['climate_model']['model_name']
+
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+
     # Get SSP names and dimensions from first result
     ssp_names = [ssp for ssp in tfp_results.keys() if ssp not in ['_coordinates', '_metadata']]
     first_ssp = tfp_results[ssp_names[0]]
@@ -2523,18 +2434,16 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, mod
     return output_path
 
 
-def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str, model_name: str, config: Dict[str, Any]) -> str:
+def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str, config: Dict[str, Any]) -> str:
     """
     Save Step 3 scaling factor results to NetCDF file.
-    
+
     Parameters
     ----------
     scaling_results : Dict[str, Any]
         Results from step3_calculate_scaling_factors_per_cell()
     output_path : str
         Complete output file path
-    model_name : str
-        Climate model name
     config : Dict[str, Any]
         Full configuration dictionary to embed in NetCDF file
         
@@ -2545,10 +2454,13 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     """
     import xarray as xr
     import os
-    
+
+    # Extract model name from config
+    model_name = config['climate_model']['model_name']
+
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+
     # Extract data arrays and metadata
     scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
     optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
@@ -2674,6 +2586,9 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
+    # Extract model name from config
+    model_name = config['climate_model']['model_name']
+
     # Extract metadata and structure
     forward_results = step4_results['forward_results']
     response_function_names = step4_results['response_function_names']
@@ -2785,158 +2700,6 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
 
     print(f"Step 4 results saved to {len(saved_files)} separate NetCDF files")
     return saved_files
-
-
-def save_step4_results_netcdf_legacy(step4_results: Dict[str, Any], output_path: str, model_name: str, config: Dict[str, Any]) -> str:
-    """
-    Save Step 4 forward model results to NetCDF file.
-    
-    Parameters
-    ----------
-    step4_results : Dict[str, Any]
-        Results from step4_forward_integration_all_ssps()
-    output_path : str
-        Complete output file path
-    model_name : str
-        Climate model name
-    config : Dict[str, Any]
-        Full configuration dictionary to embed in NetCDF file
-        
-    Returns
-    -------
-    str
-        Path to saved NetCDF file
-    """
-    import xarray as xr
-    import os
-    
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
-    # Extract metadata and structure
-    forward_results = step4_results['forward_results']
-    response_function_names = step4_results['response_function_names']
-    target_names = step4_results['target_names']
-    valid_mask = step4_results['valid_mask']
-    coordinates = step4_results['_coordinates']
-    
-    # Get SSP names and dimensions from first SSP result
-    ssp_names = list(forward_results.keys())
-    first_ssp = forward_results[ssp_names[0]]
-    nlat, nlon, n_response_func, n_target, ntime = first_ssp['gdp_climate'].shape
-    
-    # Create arrays for all SSPs: [ssp, response_func, target, time, lat, lon]
-    n_ssps = len(ssp_names)
-    gdp_climate_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
-    gdp_weather_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
-    tfp_climate_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
-    tfp_weather_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
-    k_climate_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
-    k_weather_all = np.full((n_ssps, n_response_func, n_target, ntime, nlat, nlon), np.nan)
-
-    # Stack results from all SSPs and transpose to put time,lat,lon last
-    for i, ssp_name in enumerate(ssp_names):
-        ssp_result = forward_results[ssp_name]
-        # Input shape: [lat, lon, response_func, target, time] -> [response_func, target, time, lat, lon]
-        gdp_climate_all[i] = ssp_result['gdp_climate'].transpose(2, 3, 4, 0, 1)
-        gdp_weather_all[i] = ssp_result['gdp_weather'].transpose(2, 3, 4, 0, 1)
-        tfp_climate_all[i] = ssp_result['tfp_climate'].transpose(2, 3, 4, 0, 1)
-        tfp_weather_all[i] = ssp_result['tfp_weather'].transpose(2, 3, 4, 0, 1)
-        k_climate_all[i] = ssp_result['k_climate'].transpose(2, 3, 4, 0, 1)
-        k_weather_all[i] = ssp_result['k_weather'].transpose(2, 3, 4, 0, 1)
-    
-    # Create time coordinate using actual data years
-    time_coords = np.arange(ntime)
-    
-    # Create xarray dataset with time,lat,lon as last dimensions
-    ds = xr.Dataset(
-        {
-            'gdp_climate': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], gdp_climate_all),
-            'gdp_weather': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], gdp_weather_all),
-            'tfp_climate': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], tfp_climate_all),
-            'tfp_weather': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], tfp_weather_all),
-            'k_climate': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], k_climate_all),
-            'k_weather': (['ssp', 'response_func', 'target', 'time', 'lat', 'lon'], k_weather_all),
-            'valid_mask': (['lat', 'lon'], valid_mask)
-        },
-        coords={
-            'ssp': ssp_names,
-            'response_func': response_function_names,
-            'target': target_names,
-            'time': time_coords,
-            'lat': coordinates['lat'],
-            'lon': coordinates['lon']
-        }
-    )
-    
-    # Add attributes
-    ds.gdp_climate.attrs = {
-        'long_name': 'GDP with climate effects',
-        'units': 'economic units per year',
-        'description': 'GDP projections including full climate change effects'
-    }
-    
-    ds.gdp_weather.attrs = {
-        'long_name': 'GDP with weather effects only',
-        'units': 'economic units per year',
-        'description': 'GDP projections with weather variability but no climate trends'
-    }
-    
-    ds.tfp_climate.attrs = {
-        'long_name': 'Total Factor Productivity with climate effects', 
-        'units': 'normalized to year 0',
-        'description': 'TFP projections including full climate change effects'
-    }
-    
-    ds.tfp_weather.attrs = {
-        'long_name': 'Total Factor Productivity with weather effects only',
-        'units': 'normalized to year 0',
-        'description': 'TFP projections with weather variability but no climate trends'
-    }
-    
-    ds.k_climate.attrs = {
-        'long_name': 'Capital stock with climate effects',
-        'units': 'normalized to year 0',
-        'description': 'Capital stock projections including full climate change effects'
-    }
-    
-    ds.k_weather.attrs = {
-        'long_name': 'Capital stock with weather effects only', 
-        'units': 'normalized to year 0',
-        'description': 'Capital stock projections with weather variability but no climate trends'
-    }
-    
-    ds.valid_mask.attrs = {
-        'long_name': 'Valid economic grid cells',
-        'units': 'boolean',
-        'description': 'True for grid cells with economic activity used in forward modeling'
-    }
-    
-    # Add global attributes
-    total_successful = sum(forward_results[ssp]['successful_forward_runs'] for ssp in ssp_names)
-    total_runs = sum(forward_results[ssp]['total_forward_runs'] for ssp in ssp_names)
-    
-    import json
-    serializable_config = create_serializable_config(config)
-    ds.attrs = {
-        'title': 'COIN-SSP Forward Model Results - Step 4 Results',
-        'model_name': model_name,
-        'total_ssps_processed': step4_results['total_ssps_processed'],
-        'ssp_scenarios': ', '.join(ssp_names),
-        'response_functions': ', '.join(response_function_names),
-        'target_patterns': ', '.join(target_names),
-        'total_forward_runs': total_runs,
-        'successful_forward_runs': total_successful,
-        'overall_success_rate_percent': 100 * total_successful / max(1, total_runs),
-        'description': 'Climate-integrated economic projections using per-grid-cell scaling factors for all SSP scenarios',
-        'creation_date': datetime.now().isoformat(),
-        'configuration_json': json.dumps(serializable_config, indent=2)
-    }
-    
-    # Save to file
-    ds.to_netcdf(output_path)
-    print(f"Step 4 results saved to {output_path}")
-    return output_path
 
 
 def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict[str, Any],
