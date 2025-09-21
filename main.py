@@ -1159,7 +1159,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     print(f"Step 4 line plots saved to: {pdf_path}")
 
     # Ratio plots visualization
-    ratio_pdf_path = create_forward_model_ratio_visualization(step4_results, config, output_dir, model_name, all_data)
+    ratio_pdf_path = create_forward_model_ratio_visualization(step4_results, config, output_dir, all_data)
     print(f"Step 4 ratio plots saved to: {ratio_pdf_path}")
 
     # Maps visualization (generates both linear and log10 scale PDFs)

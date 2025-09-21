@@ -328,7 +328,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, mode
     return pdf_path
 
 
-def create_forward_model_ratio_visualization(forward_results, config, output_dir, model_name, all_netcdf_data):
+def create_forward_model_ratio_visualization(forward_results, config, output_dir, all_netcdf_data):
     """
     Create PDF visualization for Step 4 forward model results showing ratios relative to baseline.
     Generates a multi-page PDF with one page per (target, response_function, SSP) combination.
@@ -341,11 +341,9 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
     forward_results : dict
         Results from Step 4 forward integration containing SSP-specific data
     config : dict
-        Configuration dictionary with scenarios and damage functions
+        Configuration dictionary containing scenarios, damage functions, climate_model.model_name, and run_metadata.json_id
     output_dir : str
         Directory for output files
-    model_name : str
-        Climate model name for labeling
     all_netcdf_data : dict
         All loaded NetCDF data for baseline GDP access
 
@@ -358,8 +356,12 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
     from matplotlib.backends.backend_pdf import PdfPages
     import os
 
-    # Generate output filename
-    pdf_filename = f"step4_forward_model_ratios_{model_name}.pdf"
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+
+    # Generate output filename using standardized pattern
+    pdf_filename = f"step4_{json_id}_{model_name}_forward_model_ratios.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata
@@ -371,9 +373,10 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
     target_names = forward_results['target_names']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
 
-    # Calculate total pages
+    # Calculate total pages and subplot layout
+    n_targets = len(target_names)
     total_pages = len(forward_ssps) * len(response_function_names)
-    print(f"Creating Step 4 ratio visualization: {total_pages} pages (3 targets per page)")
+    print(f"Creating Step 4 ratio visualization: {total_pages} pages ({n_targets} targets per page)")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
@@ -408,7 +411,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
 
                 # Plot each target on this page
                 for target_idx, target_name in enumerate(target_names):
-                    ax = plt.subplot(3, 1, target_idx + 1)  # 3 rows, 1 column
+                    ax = plt.subplot(n_targets, 1, target_idx + 1)  # Dynamic rows, 1 column
 
                     # Extract data for this combination [lat, lon, time]
                     gdp_climate_combo = gdp_climate[:, :, damage_idx, target_idx, :]
