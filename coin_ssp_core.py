@@ -251,12 +251,17 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
     # compute climate effect on capital stock, tfp growth rate, and output
     #note that these are all defined so a positive number means a positive economic impact
-    k_climate = 1.0 + k_tas1 * (tas - tas0) + k_tas2 * (tas - tas0)**2 # units of fraction of capital
-    k_climate += k_pr1 * (pr - pr0) + k_pr2 * (pr - pr0)**2  
-    tfp_climate = 1.0 + tfp_tas1 * (tas - tas0) + tfp_tas2 * (tas - tas0)**2 # units of fraction of TFP
-    tfp_climate += tfp_pr1 * (pr - pr0) + tfp_pr2 * (pr - pr0)**2  
-    y_climate = 1.0 + y_tas1 * (tas - tas0) + y_tas2 * (tas - tas0)**2  # units of fraction of output
-    y_climate += y_pr1 * (pr - pr0) + y_pr2 * (pr - pr0)**2
+    
+    y_climate = 1.0
+    y_climate += ( y_tas1 * tas  + y_tas2 * tas**2 ) -  ( y_tas1 * tas0  + y_tas2 * tas0**2 ) # units of fraction of capital
+    y_climate += (y_pr1 * pr + y_pr2 * pr )**2  - (y_pr1 * pr0 + y_pr2 * pr0 )**2 # units of fraction of capital  
+    k_climate = 1.0 
+    k_climate += ( k_tas1 * tas  + k_tas2 * tas**2 ) -  ( k_tas1 * tas0  + k_tas2 * tas0**2 ) # units of fraction of capital
+    k_climate += (k_pr1 * pr + k_pr2 * pr )**2  - (k_pr1 * pr0 + k_pr2 * pr0 )**2 # units of fraction of capital  
+    tfp_climate = 1.0
+    tfp_climate += ( tfp_tas1 * tas  + tfp_tas2 * tas**2 ) -  ( tfp_tas1 * tas0  + tfp_tas2 * tas0**2 ) # units of fraction of capital
+    tfp_climate += (tfp_pr1 * pr + tfp_pr2 * pr )**2  - (tfp_pr1 * pr0 + tfp_pr2 * pr0 )**2 # units of fraction of capital  
+
 
     a[0] = a0 * tfp_climate[0] # initial TFP adjusted for climate in year 0
 
