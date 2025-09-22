@@ -91,13 +91,13 @@ def validate_output_directory(output_dir):
     if not output_path.is_dir():
         raise FileNotFoundError(f"Path is not a directory: {output_dir}")
 
-    # Define expected file patterns
+    # Define expected file patterns (updated for current naming convention)
     expected_files = {
         'all_loaded_data': 'all_loaded_data_*.nc',
-        'step1_target_gdp': 'step1_target_gdp_*.nc',
-        'step2_baseline_tfp': 'step2_baseline_tfp_*.nc',
-        'step3_scaling_factors': 'step3_scaling_factors_*.nc',
-        'step4_forward_results': 'step4_forward_*.nc'  # Updated pattern for split files
+        'step1_target_gdp': 'step1_*_target_gdp.nc',
+        'step2_baseline_tfp': 'step2_*_baseline_tfp.nc',
+        'step3_scaling_factors': 'step3_*_scaling_factors.nc',
+        'step4_forward_results': 'step4_*_forward_*.nc'  # Updated pattern for split files
     }
 
     found_files = {}
@@ -255,7 +255,7 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
 
     # Find all step4 GDP NetCDF files
     output_dir_path = os.path.dirname(list(output_files.values())[0])
-    step4_pattern = os.path.join(output_dir_path, "step4_forward_*_gdp_*.nc")
+    step4_pattern = os.path.join(output_dir_path, "step4_*_forward_gdp.nc")
     step4_files = glob.glob(step4_pattern)
 
     if not step4_files:
@@ -266,7 +266,7 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
         filtered_files = []
         for filepath in step4_files:
             filename = os.path.basename(filepath)
-            # Extract SSP from filename pattern: step4_forward_ssp126_gdp_CanESM5.nc
+            # Extract SSP from filename pattern: step4_0008_CanESM5_ssp126_forward_gdp.nc
             if any(ssp in filename for ssp in ssp_filter):
                 filtered_files.append(filepath)
         step4_files = filtered_files

@@ -11,6 +11,33 @@ from datetime import datetime
 from typing import Dict, Any, List
 from coin_ssp_core import ScalingParams
 
+def get_adaptive_subplot_layout(n_targets):
+    """
+    Calculate optimal subplot layout based on number of targets.
+
+    For 3 or fewer targets: single column layout
+    For 4+ targets: two-column layout to maintain reasonable aspect ratios
+
+    Parameters
+    ----------
+    n_targets : int
+        Number of targets/plots per page
+
+    Returns
+    -------
+    tuple
+        (rows, cols, figsize) for matplotlib subplot layout
+    """
+    if n_targets <= 3:
+        # Single column layout for 3 or fewer
+        return (n_targets, 1, (12, 16))
+    else:
+        # Two column layout for 4+
+        rows = (n_targets + 1) // 2  # Ceiling division
+        cols = 2
+        height = 4 * rows + 4  # Scale height with number of rows
+        return (rows, cols, (16, height))
+
 def create_serializable_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create a JSON-serializable version of the configuration by filtering out non-serializable objects.
@@ -207,7 +234,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     model_name = config['climate_model']['model_name']
 
     # Generate output filename using standardized pattern
-    pdf_filename = f"step4_{json_id}_{model_name}_forward_model_visualization.pdf"
+    pdf_filename = f"step4_{json_id}_{model_name}_forward_model_lineplots.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata
@@ -217,46 +244,49 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     target_names = forward_results['target_names']
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
 
-    # Calculate total charts and pages
-    total_charts = len(target_names) * len(response_function_names) * len(forward_ssps)
-    charts_per_page = 3
-    total_pages = (total_charts + charts_per_page - 1) // charts_per_page  # Ceiling division
+    # Calculate adaptive layout based on number of targets
+    n_targets = len(target_names)
+    subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    print(f"Creating Step 4 line charts: {total_charts} charts across {total_pages} pages (3 charts per page)")
-    print(f"  {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+    # Calculate total pages (one page per damage function × SSP combination)
+    total_pages = len(response_function_names) * len(forward_ssps)
+
+    print(f"Creating Step 4 line charts: {n_targets} targets per page across {total_pages} pages")
+    print(f"  {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+    print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols per page")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
-        chart_idx = 0
         page_num = 0
 
-        # Loop through all combinations (target innermost for 3-per-page grouping)
+        # Loop through damage functions and SSPs (each gets its own page)
         for damage_idx, damage_name in enumerate(response_function_names):
             damage_config = config['response_function_scalings'][damage_idx]
 
             for ssp in forward_ssps:
 
+                # Create new page for this damage function × SSP combination
+                page_num += 1
+                fig = plt.figure(figsize=fig_size)
+                fig.suptitle(f'Step 4: Forward Model Time Series - {model_name}\n'
+                            f'SSP: {ssp.upper()} | Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                            fontsize=16, fontweight='bold', y=0.96)
+
+                # Plot all targets on this page
                 for target_idx, target_name in enumerate(target_names):
                     target_config = config['gdp_targets'][target_idx]
 
-                    # Start new page if needed (every 3 charts)
-                    if chart_idx % charts_per_page == 0:
-                        if chart_idx > 0:
-                            # Save previous page
-                            plt.tight_layout()
-                            plt.subplots_adjust(top=0.93, bottom=0.05)
-                            pdf.savefig(fig, bbox_inches='tight')
-                            plt.close(fig)
-
-                        # Create new page
-                        page_num += 1
-                        fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
-                        fig.suptitle(f'Step 4: Forward Model Time Series - {model_name} - Page {page_num}/{total_pages}',
-                                    fontsize=16, fontweight='bold', y=0.98)
-
-                    # Position on current page (1-3)
-                    subplot_idx = (chart_idx % charts_per_page) + 1
-                    ax = plt.subplot(charts_per_page, 1, subplot_idx)  # 3 rows, 1 column
+                    # Calculate subplot position (1-indexed)
+                    if subplot_cols == 1:
+                        # Single column layout
+                        subplot_idx = target_idx + 1
+                        ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
+                    else:
+                        # Two column layout
+                        row = target_idx // subplot_cols
+                        col = target_idx % subplot_cols
+                        subplot_idx = row * subplot_cols + col + 1
+                        ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
@@ -315,15 +345,11 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                                fontsize=10, verticalalignment='top',
                                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-                    # Increment chart counter
-                    chart_idx += 1
-
-        # Save final page if there are any charts on it
-        if chart_idx > 0:
-            plt.tight_layout()
-            plt.subplots_adjust(top=0.93, bottom=0.05)
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close(fig)
+                # Save this page after plotting all targets
+                plt.tight_layout()
+                plt.subplots_adjust(top=0.93, bottom=0.05)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
 
         print(f"Generated {total_pages} pages in Step 4 visualization")
 
@@ -731,54 +757,53 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     target_start = config['time_periods']['target_period']['start_year']
     target_end = config['time_periods']['target_period']['end_year']
 
-    # Calculate total maps and pages
-    total_maps = len(target_names) * len(response_function_names) * len(forward_ssps)
-    maps_per_page = 3
-    total_pages = (total_maps + maps_per_page - 1) // maps_per_page  # Ceiling division
+    # Calculate adaptive layout based on number of targets
+    n_targets = len(target_names)
+    subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    print(f"Creating Step 4 maps: {total_maps} maps across {total_pages} pages (3 maps per page)")
-    print(f"  {len(target_names)} targets × {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+    # Calculate total pages (one page per damage function × SSP combination)
+    total_pages = len(response_function_names) * len(forward_ssps)
+
+    print(f"Creating Step 4 maps: {n_targets} targets per page across {total_pages} pages")
+    print(f"  {len(response_function_names)} response functions × {len(forward_ssps)} SSPs")
+    print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols per page")
     print(f"  Generating both linear and log10 scale PDFs in parallel")
 
     # Create both PDFs with multi-page layout
     with PdfPages(linear_pdf_path) as linear_pdf, PdfPages(log10_pdf_path) as log10_pdf:
-        map_idx = 0
         page_num = 0
-        linear_fig = None
-        log10_fig = None
 
-        # Loop through all combinations (target innermost for 3-per-page grouping)
+        # Loop through SSPs and damage functions (each gets its own page)
         for ssp in forward_ssps:
 
             for damage_idx, damage_name in enumerate(response_function_names):
                 damage_config = config['response_function_scalings'][damage_idx]
 
+                # Create new pages for both PDFs for this SSP × damage combination
+                page_num += 1
+                linear_fig = plt.figure(figsize=fig_size)
+                linear_fig.suptitle(f'Step 4: Forward Model Results (Linear Scale) - {model_name}\n'
+                                   f'SSP: {ssp.upper()} | Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                                   fontsize=16, fontweight='bold', y=0.96)
+
+                log10_fig = plt.figure(figsize=fig_size)
+                log10_fig.suptitle(f'Step 4: Forward Model Results (Log10 Scale) - {model_name}\n'
+                                  f'SSP: {ssp.upper()} | Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                                  fontsize=16, fontweight='bold', y=0.96)
+
+                # Plot all targets on this page
                 for target_idx, target_name in enumerate(target_names):
                     target_config = config['gdp_targets'][target_idx]
 
-                    # Start new page if needed (every 3 maps)
-                    if map_idx % maps_per_page == 0:
-                        if map_idx > 0:
-                            # Save previous pages to both PDFs
-                            for fig, pdf in [(linear_fig, linear_pdf), (log10_fig, log10_pdf)]:
-                                plt.figure(fig.number)
-                                plt.tight_layout()
-                                plt.subplots_adjust(top=0.93, bottom=0.05)
-                                pdf.savefig(fig, bbox_inches='tight')
-                                plt.close(fig)
-
-                        # Create new pages for both PDFs
-                        page_num += 1
-                        linear_fig = plt.figure(figsize=(12, 16))
-                        linear_fig.suptitle(f'Step 4: Forward Model Results (Linear Scale) - {model_name} - Page {page_num}/{total_pages}',
-                                    fontsize=16, fontweight='bold', y=0.98)
-
-                        log10_fig = plt.figure(figsize=(12, 16))
-                        log10_fig.suptitle(f'Step 4: Forward Model Results (Log10 Scale) - {model_name} - Page {page_num}/{total_pages}',
-                                    fontsize=16, fontweight='bold', y=0.98)
-
-                    # Position on current page (1-3)
-                    subplot_idx = (map_idx % maps_per_page) + 1
+                    # Calculate subplot position (1-indexed)
+                    if subplot_cols == 1:
+                        # Single column layout
+                        subplot_idx = target_idx + 1
+                    else:
+                        # Two column layout
+                        row = target_idx // subplot_cols
+                        col = target_idx % subplot_cols
+                        subplot_idx = row * subplot_cols + col + 1
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
@@ -822,7 +847,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
                     # Create linear scale map
                     plt.figure(linear_fig.number)
-                    linear_ax = plt.subplot(maps_per_page, 1, subplot_idx)
+                    linear_ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                     # Determine color scale for linear using zero-biased range
                     valid_linear = impact_ratio_linear[valid_mask & np.isfinite(impact_ratio_linear)]
@@ -871,7 +896,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
                     # Create log10 scale map
                     plt.figure(log10_fig.number)
-                    log10_ax = plt.subplot(maps_per_page, 1, subplot_idx)
+                    log10_ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                     # Determine color scale for log10 - use FULL data range to show outliers
                     valid_log10 = impact_ratio_log10[valid_mask & np.isfinite(impact_ratio_log10)]
@@ -940,21 +965,18 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     log10_ax.set_ylim(lat.min(), lat.max())
                     log10_ax.set_aspect('equal')
 
-                    map_idx += 1
-
-        # Save the final pages
-        if map_idx > 0:
-            for fig, pdf in [(linear_fig, linear_pdf), (log10_fig, log10_pdf)]:
-                plt.figure(fig.number)
-                plt.tight_layout()
-                plt.subplots_adjust(top=0.93, bottom=0.05)
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
+                # Save both pages after plotting all targets for this SSP × damage combination
+                for fig, pdf in [(linear_fig, linear_pdf), (log10_fig, log10_pdf)]:
+                    plt.figure(fig.number)
+                    plt.tight_layout()
+                    plt.subplots_adjust(top=0.93, bottom=0.05)
+                    pdf.savefig(fig, bbox_inches='tight')
+                    plt.close(fig)
 
     print(f"Forward model maps saved to:")
     print(f"  Linear scale: {linear_pdf_path}")
     print(f"  Log10 scale: {log10_pdf_path}")
-    print(f"  ({total_pages} pages each, 3 maps per page)")
+    print(f"  ({total_pages} pages each, {n_targets} targets per page)")
     return (linear_pdf_path, log10_pdf_path)
 
 
@@ -2816,18 +2838,31 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                     f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_temp_target:.2f}°C',
                     fontsize=16, fontweight='bold')
 
-        # Create 3 map subplots (assuming we have 3 targets: constant, linear, quadratic)
-        map_positions = [(2, 2, 1), (2, 2, 2), (2, 2, 3)]  # Top row + bottom left
+        # Calculate layout for maps + line plot
+        n_targets = len(target_names)
 
-        for i, target_name in enumerate(target_names[:3]):  # Limit to 3 maps
+        if n_targets <= 3:
+            # Use 2x2 layout: 3 maps + 1 line plot
+            subplot_rows, subplot_cols = 2, 2
+            fig.set_size_inches(16, 12)
+        else:
+            # Use 3x2 layout: up to 5 maps + 1 line plot
+            subplot_rows, subplot_cols = 3, 2
+            fig.set_size_inches(18, 16)
+
+        # Line plot will be in the last position
+        line_plot_position = subplot_rows * subplot_cols
+
+        for i, target_name in enumerate(target_names):  # Show all targets
             reduction_array = reduction_arrays[target_name]
             global_mean = global_means[target_name]
             gdp_weighted_mean = gdp_weighted_means[target_name]
             data_range = data_ranges[target_name]
             target_info = target_results[target_name]
 
-            # Create subplot
-            ax = plt.subplot(*map_positions[i])
+            # Calculate subplot position for maps (1-indexed, avoiding last position)
+            subplot_idx = i + 1
+            ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
             # Create map with zero-centered normalization (mask invalid cells)
             masked_reduction_array = np.where(valid_mask, reduction_array, np.nan)
@@ -2861,8 +2896,8 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             cbar = plt.colorbar(im, ax=ax, shrink=0.7)
             cbar.set_label('Fractional GDP\nReduction', rotation=270, labelpad=20, fontsize=10)
 
-        # Fourth panel: Line plot (bottom right)
-        ax4 = plt.subplot(2, 2, 4)
+        # Line plot in last position
+        ax4 = plt.subplot(subplot_rows, subplot_cols, line_plot_position)
 
         # Temperature range for plotting
         temp_range = np.linspace(-10, 35, 1000)
@@ -3060,40 +3095,46 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
 
     # Get dimensions
     nlat, nlon, n_damage, n_targets = scaling_factors.shape
-    total_maps = n_damage * n_targets
 
-    # New layout: 3 maps per page, arranged vertically
-    maps_per_page = 3
-    total_pages = (total_maps + maps_per_page - 1) // maps_per_page  # Ceiling division
+    # Calculate adaptive layout based on number of targets
+    subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    print(f"Creating Step 3 visualization: {total_maps} maps across {total_pages} pages (3 maps per page)")
+    # Calculate total pages (one page per damage function)
+    total_pages = n_damage
+
+    print(f"Creating Step 3 visualization: {n_targets} targets per page across {total_pages} pages")
+    print(f"  {n_damage} damage functions")
+    print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols per page")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
-        map_idx = 0
         page_num = 0
 
+        # Loop through damage functions (each gets its own page)
         for damage_idx, damage_name in enumerate(response_function_names):
+            damage_config = config['response_function_scalings'][damage_idx]
+
+            # Create new page for this damage function
+            page_num += 1
+            fig = plt.figure(figsize=fig_size)
+            fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp})\n'
+                        f'Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                        fontsize=16, fontweight='bold', y=0.96)
+
+            # Plot all targets on this page
             for target_idx, target_name in enumerate(target_names):
 
-                # Start new page if needed (every 3 maps)
-                if map_idx % maps_per_page == 0:
-                    if map_idx > 0:
-                        # Save previous page
-                        plt.tight_layout()
-                        plt.subplots_adjust(top=0.93, bottom=0.05)
-                        pdf.savefig(fig, bbox_inches='tight')
-                        plt.close(fig)
-
-                    # Create new page
-                    page_num += 1
-                    fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
-                    fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp}) - Page {page_num}/{total_pages}',
-                                fontsize=16, fontweight='bold', y=0.98)
-
-                # Position on current page (1-3)
-                subplot_idx = (map_idx % maps_per_page) + 1
-                ax = plt.subplot(maps_per_page, 1, subplot_idx)  # 3 rows, 1 column
+                # Calculate subplot position (1-indexed)
+                if subplot_cols == 1:
+                    # Single column layout
+                    subplot_idx = target_idx + 1
+                    ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
+                else:
+                    # Two column layout
+                    row = target_idx // subplot_cols
+                    col = target_idx % subplot_cols
+                    subplot_idx = row * subplot_cols + col + 1
+                    ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                 # Extract scaling factor map for this combination
                 sf_map = scaling_factors[:, :, damage_idx, target_idx]
@@ -3143,16 +3184,13 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
                 cbar.set_label('Scaling Factor', rotation=270, labelpad=15, fontsize=12)
                 cbar.ax.tick_params(labelsize=10)
 
-                map_idx += 1
-
-        # Save the final page
-        if map_idx > 0:
+            # Save this page after plotting all targets for this damage function
             plt.tight_layout()
             plt.subplots_adjust(top=0.93, bottom=0.05)
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
 
-    print(f"Scaling factors visualization saved to {pdf_path} ({total_pages} pages, 3 maps per page)")
+    print(f"Scaling factors visualization saved to {pdf_path} ({total_pages} pages, {n_targets} targets per page)")
     return pdf_path
 
 
@@ -3210,40 +3248,46 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
 
     # Get dimensions
     nlat, nlon, n_response, n_targets = optimization_errors.shape
-    total_maps = n_response * n_targets
 
-    # New layout: 3 maps per page, arranged vertically
-    maps_per_page = 3
-    total_pages = (total_maps + maps_per_page - 1) // maps_per_page  # Ceiling division
+    # Calculate adaptive layout based on number of targets
+    subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    print(f"Creating Step 3 objective function visualization: {total_maps} maps across {total_pages} pages (3 maps per page)")
+    # Calculate total pages (one page per response function)
+    total_pages = n_response
+
+    print(f"Creating Step 3 objective function visualization: {n_targets} targets per page across {total_pages} pages")
+    print(f"  {n_response} response functions")
+    print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols per page")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
-        map_idx = 0
         page_num = 0
 
+        # Loop through response functions (each gets its own page)
         for response_idx, response_name in enumerate(response_function_names):
+            response_config = config['response_function_scalings'][response_idx]
+
+            # Create new page for this response function
+            page_num += 1
+            fig = plt.figure(figsize=fig_size)
+            fig.suptitle(f'Step 3: Objective Function Values - {model_name} ({reference_ssp})\n'
+                        f'Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                        fontsize=16, fontweight='bold', y=0.96)
+
+            # Plot all targets on this page
             for target_idx, target_name in enumerate(target_names):
 
-                # Start new page if needed (every 3 maps)
-                if map_idx % maps_per_page == 0:
-                    if map_idx > 0:
-                        # Save previous page
-                        plt.tight_layout()
-                        plt.subplots_adjust(top=0.93, bottom=0.05)
-                        pdf.savefig(fig, bbox_inches='tight')
-                        plt.close(fig)
-
-                    # Create new page
-                    page_num += 1
-                    fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
-                    fig.suptitle(f'Step 3: Objective Function Values - {model_name} ({reference_ssp}) - Page {page_num}/{total_pages}',
-                                fontsize=16, fontweight='bold', y=0.98)
-
-                # Position on current page (1-3)
-                subplot_idx = (map_idx % maps_per_page) + 1
-                ax = plt.subplot(maps_per_page, 1, subplot_idx)  # 3 rows, 1 column
+                # Calculate subplot position (1-indexed)
+                if subplot_cols == 1:
+                    # Single column layout
+                    subplot_idx = target_idx + 1
+                    ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
+                else:
+                    # Two column layout
+                    row = target_idx // subplot_cols
+                    col = target_idx % subplot_cols
+                    subplot_idx = row * subplot_cols + col + 1
+                    ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                 # Extract objective function map for this combination
                 obj_map = optimization_errors[:, :, response_idx, target_idx]
@@ -3308,16 +3352,13 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
                 cbar.set_label('log₁₀(Objective Function Value)\n(Lower = Better Fit)', rotation=270, labelpad=15, fontsize=12)
                 cbar.ax.tick_params(labelsize=10)
 
-                map_idx += 1
-
-        # Save the final page
-        if map_idx > 0:
+            # Save this page after plotting all targets for this response function
             plt.tight_layout()
             plt.subplots_adjust(top=0.93, bottom=0.05)
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
 
-    print(f"Objective function visualization saved to {pdf_path} ({total_pages} pages, 3 maps per page)")
+    print(f"Objective function visualization saved to {pdf_path} ({total_pages} pages, {n_targets} targets per page)")
     return pdf_path
 
 
