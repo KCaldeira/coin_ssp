@@ -449,7 +449,7 @@ def optimize_climate_response_scaling(
 
 def process_damage_target_optimization(
     target_idx, gdp_target, target_results, damage_scalings,
-    temp_data, precip_data, pop_data, gdp_data,
+    tas_data, pr_data, pop_data, gdp_data,
     reference_tfp, valid_mask, tfp_baseline, years, config,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
     total_grid_cells, successful_optimizations, ref_start_idx, ref_end_idx
@@ -471,7 +471,7 @@ def process_damage_target_optimization(
         Target GDP results containing reduction arrays
     damage_scalings : list
         List of damage scaling configurations
-    temp_data, precip_data, pop_data, gdp_data : np.ndarray
+    tas_data, pr_data, pop_data, gdp_data : np.ndarray
         Climate and economic data arrays [time, lat, lon]
     reference_tfp, valid_mask, tfp_baseline : np.ndarray
         TFP reference data
@@ -522,8 +522,8 @@ def process_damage_target_optimization(
                 total_grid_cells += 1
 
                 # Extract time series for this grid cell (climate data is [time, lat, lon])
-                cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
-                cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+                cell_tas = tas_data[:, lat_idx, lon_idx]  # [time]
+                cell_pr = pr_data[:, lat_idx, lon_idx]  # [time]
                 cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
                 cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
                 cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
@@ -533,14 +533,14 @@ def process_damage_target_optimization(
 
                 # Create weather (filtered) time series
                 filter_width = 30  # years (same as country-level code)
-                cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
-                cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
+                cell_tas_weather = apply_time_series_filter(cell_tas, filter_width, ref_start_idx, ref_end_idx)
+                cell_pr_weather = apply_time_series_filter(cell_pr, filter_width, ref_start_idx, ref_end_idx)
 
                 # Create parameters for this grid cell using factory
                 params_cell = config['model_params_factory'].create_for_step(
                     "grid_cell_optimization",
-                    tas0=np.mean(cell_temp[ref_start_idx:ref_end_idx+1]),
-                    pr0=np.mean(cell_precip[ref_start_idx:ref_end_idx+1])
+                    tas0=np.mean(cell_tas[ref_start_idx:ref_end_idx+1]),
+                    pr0=np.mean(cell_pr[ref_start_idx:ref_end_idx+1])
                 )
 
                 # Create cell data dictionary matching gridcell_data structure
@@ -548,10 +548,10 @@ def process_damage_target_optimization(
                     'years': years,
                     'population': cell_pop,
                     'gdp': cell_gdp,
-                    'tas': cell_temp,
-                    'pr': cell_precip,
-                    'tas_weather': cell_temp_weather,
-                    'pr_weather': cell_precip_weather,
+                    'tas': cell_tas,
+                    'pr': cell_pr,
+                    'tas_weather': cell_tas_weather,
+                    'pr_weather': cell_pr_weather,
                     'tfp_baseline': cell_tfp_baseline
                 }
 
@@ -590,7 +590,7 @@ def process_damage_target_optimization(
     }
 
 
-def calculate_reference_climate_baselines(temp_data, precip_data, years, config):
+def calculate_reference_climate_baselines(tas_data, pr_data, years, config):
     """
     Calculate reference climate baselines (tas0, pr0) as 2D arrays for all grid cells.
 
@@ -599,7 +599,7 @@ def calculate_reference_climate_baselines(temp_data, precip_data, years, config)
 
     Parameters
     ----------
-    temp_data, precip_data : np.ndarray
+    tas_data, pr_data : np.ndarray
         Climate data arrays [time, lat, lon]
     years : np.ndarray
         Years array corresponding to time dimension
@@ -620,15 +620,15 @@ def calculate_reference_climate_baselines(temp_data, precip_data, years, config)
     ref_end_idx = np.where(years == ref_end_year)[0][0]
 
     # Calculate reference period means for all grid cells
-    tas0_2d = np.mean(temp_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
-    pr0_2d = np.mean(precip_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+    tas0_2d = np.mean(tas_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+    pr0_2d = np.mean(pr_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
 
     return tas0_2d, pr0_2d
 
 
 def calculate_reference_gdp_climate_variability(
     config,
-    temp_data, precip_data, pop_data, gdp_data,
+    tas_data, pr_data, pop_data, gdp_data,
     reference_tfp, valid_mask, tfp_baseline,
     years, damage_scalings, tas0_2d, pr0_2d
 ):
@@ -648,7 +648,7 @@ def calculate_reference_gdp_climate_variability(
     ----------
     config : dict
         Configuration dictionary
-    temp_data, precip_data, pop_data, gdp_data : np.ndarray
+    tas_data, pr_data, pop_data, gdp_data : np.ndarray
         Climate and economic data arrays [time, lat, lon]
     reference_tfp, valid_mask, tfp_baseline : np.ndarray
         TFP reference data
@@ -666,7 +666,6 @@ def calculate_reference_gdp_climate_variability(
     """
 
     print("Computing reference GDP-climate variability relationship...")
-    print("This involves optimization at each grid cell and may take time...")
 
     # Get dimensions
     nlat, nlon = valid_mask.shape
@@ -691,12 +690,47 @@ def calculate_reference_gdp_climate_variability(
     ref_start_idx = np.where(years == ref_start_year)[0][0]
     ref_end_idx = np.where(years == ref_end_year)[0][0]
 
-    # Create dummy GDP target for optimization (we just need scaling factors)
+    # Create dummy GDP target for optimization with exact specifications
     dummy_gdp_target = {
         'target_type': 'damage',
-        'gdp_amount': -0.05,  # 5% reduction as reference
+        'target_shape': 'constant',
+        'gdp_amount': -0.10,  # 10% reduction as reference
         'target_name': 'variability_reference'
     }
+
+    # Create dummy target_results for the reference case
+    # We need a constant reduction array for the reference optimization
+    constant_reduction = np.full((nlat, nlon), -0.10)  # 10% reduction everywhere
+    dummy_target_results = {
+        'variability_reference': {
+            'reduction_array': constant_reduction
+        }
+    }
+
+    # Run process_damage_target_optimization to get scaled_parameters
+    print("Running reference optimization for variability relationship...")
+    reference_results = process_damage_target_optimization(
+        target_idx=0,  # dummy index
+        gdp_target=dummy_gdp_target,
+        target_results=dummy_target_results,
+        damage_scalings=damage_scalings,
+        tas_data=tas_data,
+        pr_data=pr_data,
+        pop_data=pop_data,
+        gdp_data=gdp_data,
+        reference_tfp=reference_tfp,
+        valid_mask=valid_mask,
+        tfp_baseline=tfp_baseline,
+        years=years,
+        config=config,
+        ref_start_idx=ref_start_idx,
+        ref_end_idx=ref_end_idx,
+        tas0=tas0_2d,
+        pr0=pr0_2d
+    )
+
+    # Extract scaled_parameters from results
+    scaled_parameters = reference_results['scaled_parameters']
 
     processed_cells = 0
     valid_cells = np.sum(valid_mask)
@@ -714,16 +748,16 @@ def calculate_reference_gdp_climate_variability(
             processed_cells += 1
 
             # Extract time series for this grid cell
-            cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
-            cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+            cell_tas = tas_data[:, lat_idx, lon_idx]  # [time]
+            cell_pr = pr_data[:, lat_idx, lon_idx]  # [time]
             cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
             cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
             cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time]
 
             # Create weather (filtered) time series
             filter_width = 30  # years
-            cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
-            cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
+            cell_tas_weather = apply_time_series_filter(cell_tas, filter_width, ref_start_idx, ref_end_idx)
+            cell_pr_weather = apply_time_series_filter(cell_pr, filter_width, ref_start_idx, ref_end_idx)
 
             # Create parameters for this grid cell using factory
             params_cell = config['model_params_factory'].create_for_step(
@@ -737,26 +771,25 @@ def calculate_reference_gdp_climate_variability(
                 'years': years,
                 'population': cell_pop,
                 'gdp': cell_gdp,
-                'tas': cell_temp,
-                'pr': cell_precip,
-                'tas_weather': cell_temp_weather,
-                'pr_weather': cell_precip_weather,
+                'tas': cell_tas,
+                'pr': cell_pr,
+                'tas_weather': cell_tas_weather,
+                'pr_weather': cell_pr_weather,
                 'tfp_baseline': cell_tfp_baseline
             }
 
             try:
-                # Run optimization to get scaling factors
-                optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
-                    cell_data, params_cell, scaling_params, config, dummy_gdp_target
-                )
+                # Use pre-computed scaled parameters from reference optimization
+                # scaled_parameters is [lat, lon, damage_idx] - use first damage function (damage_idx=0)
+                params_scaled = scaled_parameters[lat_idx, lon_idx, 0]
 
                 # Compute y_weather time series using optimal scaling
                 y_weather, *_ = calculate_coin_ssp_forward_model(
-                    cell_tfp_baseline, cell_pop, cell_temp_weather, cell_precip_weather, params_scaled
+                    cell_tfp_baseline, cell_pop, cell_tas_weather, cell_pr_weather, params_scaled
                 )
 
                 # Extract historical period data for regression
-                tas_weather_hist = cell_temp_weather[hist_start_idx:hist_end_idx+1]
+                tas_weather_hist = cell_tas_weather[hist_start_idx:hist_end_idx+1]
                 y_weather_hist = y_weather[hist_start_idx:hist_end_idx+1]
 
                 # Perform linear regression: y_weather ~ tas_weather
@@ -779,7 +812,7 @@ def calculate_reference_gdp_climate_variability(
 
 
 def apply_variability_target_scaling(
-    reference_slopes, gdp_target, temp_data, precip_data,
+    reference_slopes, gdp_target, tas_data, pr_data,
     tas0_2d, pr0_2d, target_idx, damage_scalings,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters
 ):
@@ -800,7 +833,7 @@ def apply_variability_target_scaling(
         Reference slopes [lat, lon] from calculate_reference_gdp_climate_variability
     gdp_target : dict
         Target configuration with variability parameters
-    temp_data, precip_data : np.ndarray
+    tas_data, pr_data : np.ndarray
         Climate data [time, lat, lon]
     tas0_2d, pr0_2d : np.ndarray
         Reference baselines [lat, lon]

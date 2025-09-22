@@ -1472,7 +1472,7 @@ def calculate_global_mean(data, lat, valid_mask):
 # Extracted from calculate_target_gdp_amounts.py for reuse in integrated workflow
 # =============================================================================
 
-def calculate_constant_target_reduction(gdp_amount_value, temp_ref_shape):
+def calculate_constant_target_reduction(gdp_amount_value, tas_ref_shape):
     """
     Calculate constant GDP reduction across all grid cells.
     
@@ -1480,18 +1480,18 @@ def calculate_constant_target_reduction(gdp_amount_value, temp_ref_shape):
     ----------
     gdp_amount_value : float
         Constant reduction value (e.g., -0.10 for 10% reduction)
-    temp_ref_shape : tuple
+    tas_ref_shape : tuple
         Shape of temperature reference array for output sizing
         
     Returns
     -------
     np.ndarray
-        Constant reduction array with shape temp_ref_shape
+        Constant reduction array with shape tas_ref_shape
     """
-    return np.full(temp_ref_shape, gdp_amount_value, dtype=np.float64)
+    return np.full(tas_ref_shape, gdp_amount_value, dtype=np.float64)
 
 
-def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, valid_mask):
+def calculate_linear_target_reduction(linear_config, tas_ref, gdp_target, lat, valid_mask):
     """
     Calculate linear temperature-dependent GDP reduction using constraint satisfaction.
     
@@ -1509,7 +1509,7 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
         - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
         - 'reference_temperature': Reference temperature point (e.g., 30.0)
         - 'amount_at_reference_temp': Reduction at reference temperature (e.g., -0.25)
-    temp_ref : np.ndarray
+    tas_ref : np.ndarray
         Reference period temperature array [lat, lon]
     gdp_target : np.ndarray
         Target period GDP array [lat, lon]
@@ -1531,12 +1531,12 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
     
     # Calculate GDP-weighted global means
     global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
-    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target)
+    gdp_weighted_tas_mean = np.float64(calculate_global_mean(gdp_target * tas_ref, lat, valid_mask) / global_gdp_target)
     
     # Set up weighted least squares system for exact constraint satisfaction
     X = np.array([
         [1.0, T_ref_linear],                    # Point constraint equation
-        [1.0, gdp_weighted_temp_mean]           # GDP-weighted global mean equation
+        [1.0, gdp_weighted_tas_mean]           # GDP-weighted global mean equation
     ], dtype=np.float64)
     
     y = np.array([
@@ -1549,7 +1549,7 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
     a0_linear, a1_linear = coefficients
     
     # Calculate linear reduction array
-    linear_reduction = a0_linear + a1_linear * temp_ref
+    linear_reduction = a0_linear + a1_linear * tas_ref
     
     # Verify constraint satisfaction
     constraint1_check = a0_linear + a1_linear * T_ref_linear  # Should equal value_at_ref_linear
@@ -1570,11 +1570,11 @@ def calculate_linear_target_reduction(linear_config, temp_ref, gdp_target, lat, 
                 'error': float(abs(constraint2_check - global_mean_linear))
             }
         },
-        'gdp_weighted_temp_mean': float(gdp_weighted_temp_mean)
+        'gdp_weighted_tas_mean': float(gdp_weighted_tas_mean)
     }
 
 
-def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target, lat, valid_mask):
+def calculate_quadratic_target_reduction(quadratic_config, tas_ref, gdp_target, lat, valid_mask):
     """
     Calculate quadratic temperature-dependent GDP reduction using derivative constraint.
 
@@ -1593,7 +1593,7 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
         - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
         - 'zero_amount_temperature': Temperature with zero reduction (e.g., 13.5)
         - 'derivative_at_zero_amount_temperature': Slope at T₀ (e.g., -0.01)
-    temp_ref : np.ndarray
+    tas_ref : np.ndarray
         Reference period temperature array [lat, lon]
     gdp_target : np.ndarray
         Target period GDP array [lat, lon]
@@ -1615,8 +1615,8 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
 
     # Calculate GDP-weighted global means
     global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
-    gdp_weighted_temp_mean = np.float64(calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target)
-    gdp_weighted_temp2_mean = np.float64(calculate_global_mean(gdp_target * temp_ref**2, lat, valid_mask) / global_gdp_target)
+    gdp_weighted_tas_mean = np.float64(calculate_global_mean(gdp_target * tas_ref, lat, valid_mask) / global_gdp_target)
+    gdp_weighted_tas2_mean = np.float64(calculate_global_mean(gdp_target * tas_ref**2, lat, valid_mask) / global_gdp_target)
 
     # Mathematical solution for quadratic: f(T) = a + b*T + c*T²
     # Given constraints:
@@ -1630,13 +1630,13 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
     # b = derivative_at_T0 - 2*c*T0
     # a = -derivative_at_T0*T0 + c*T0²
 
-    denominator = T0**2 - 2*T0*gdp_weighted_temp_mean + gdp_weighted_temp2_mean
-    c_quad = (global_mean_quad - derivative_at_T0*(gdp_weighted_temp_mean - T0)) / denominator
+    denominator = T0**2 - 2*T0*gdp_weighted_tas_mean + gdp_weighted_tas2_mean
+    c_quad = (global_mean_quad - derivative_at_T0*(gdp_weighted_tas_mean - T0)) / denominator
     b_quad = derivative_at_T0 - 2*c_quad*T0
     a_quad = -derivative_at_T0*T0 + c_quad*T0**2
 
     # Calculate quadratic reduction array using absolute temperature
-    quadratic_reduction = a_quad + b_quad * temp_ref + c_quad * temp_ref**2
+    quadratic_reduction = a_quad + b_quad * tas_ref + c_quad * tas_ref**2
 
     # Verify constraint satisfaction
     constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
@@ -1663,9 +1663,9 @@ def calculate_quadratic_target_reduction(quadratic_config, temp_ref, gdp_target,
                 'error': float(abs(constraint3_check - global_mean_quad))
             }
         },
-        'gdp_weighted_temp_mean': float(gdp_weighted_temp_mean),
-        'gdp_weighted_temp2_mean': float(gdp_weighted_temp2_mean),
-        'derivative_at_zero_temp': float(derivative_at_T0),
+        'gdp_weighted_tas_mean': float(gdp_weighted_tas_mean),
+        'gdp_weighted_tas2_mean': float(gdp_weighted_tas2_mean),
+        'derivative_at_zero_tas': float(derivative_at_T0),
         'zero_amount_temperature': float(T0)
     }
 
@@ -1688,7 +1688,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
           * Quadratic: 'zero_amount_temperature'
     gridded_data : dict
         Dictionary containing gridded data arrays:
-        - 'temp_ref': Reference period temperature [lat, lon]
+        - 'tas_ref': Reference period temperature [lat, lon]
         - 'gdp_target': Target period GDP [lat, lon]
         - 'lat': Latitude coordinates
 
@@ -1703,7 +1703,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
     """
     results = {}
     
-    temp_ref = gridded_data['temp_ref']
+    tas_ref = gridded_data['tas_ref']
     gdp_target = gridded_data['gdp_target']
     lat = gridded_data['lat']
     valid_mask = gridded_data['valid_mask']
@@ -1717,7 +1717,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
         if target_shape == 'constant':
             # Constant reduction
             reduction_array = calculate_constant_target_reduction(
-                target_config['gdp_amount'], temp_ref.shape
+                target_config['gdp_amount'], tas_ref.shape
             )
             result = {
                 'target_shape': target_shape,
@@ -1731,12 +1731,12 @@ def calculate_all_target_reductions(target_configs, gridded_data):
 
         elif target_shape == 'quadratic':
             # Quadratic reduction (has zero point)
-            result = calculate_quadratic_target_reduction(target_config, temp_ref, gdp_target, lat, valid_mask)
+            result = calculate_quadratic_target_reduction(target_config, tas_ref, gdp_target, lat, valid_mask)
             result['target_shape'] = target_shape
 
         elif target_shape == 'linear':
             # Linear reduction (has global mean constraint)
-            result = calculate_linear_target_reduction(target_config, temp_ref, gdp_target, lat, valid_mask)
+            result = calculate_linear_target_reduction(target_config, tas_ref, gdp_target, lat, valid_mask)
             result['target_shape'] = target_shape
 
         else:
@@ -2283,7 +2283,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     ds = xr.Dataset(
         {
             'target_gdp_amounts': (['target_name', 'lat', 'lon'], target_reductions),
-            'temperature_ref': (['lat', 'lon'], metadata['temp_ref']),
+            'temperature_ref': (['lat', 'lon'], metadata['tas_ref']),
             'gdp_target': (['lat', 'lon'], metadata['gdp_target'])
         },
         coords={
@@ -2317,7 +2317,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
         'reference_ssp': metadata['reference_ssp'],
         'reference_period': f"{metadata['time_periods']['reference_period']['start_year']}-{metadata['time_periods']['reference_period']['end_year']}",
         'target_period': f"{metadata['time_periods']['target_period']['start_year']}-{metadata['time_periods']['target_period']['end_year']}",
-        'global_temp_ref': metadata['global_temp_ref'],
+        'global_tas_ref': metadata['global_tas_ref'],
         'global_gdp_target': metadata['global_gdp_target'],
         'creation_date': datetime.now().isoformat(),
         'configuration_json': json.dumps(serializable_config, indent=2)
@@ -2730,9 +2730,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     metadata = target_results['_metadata']
     lat = metadata['lat']
     lon = metadata['lon']
-    temp_ref = metadata['temp_ref']
+    tas_ref = metadata['tas_ref']
     gdp_target = metadata['gdp_target']
-    global_temp_ref = metadata['global_temp_ref']
+    global_tas_ref = metadata['global_tas_ref']
     global_gdp_target = metadata['global_gdp_target']
 
     # Create meshgrid for plotting
@@ -2756,7 +2756,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     # Calculate GDP-weighted temperature for target period (2080-2100)
     target_period_start = config['time_periods']['target_period']['start_year']
     target_period_end = config['time_periods']['target_period']['end_year']
-    gdp_weighted_temp_target = calculate_global_mean(gdp_target * temp_ref, lat, valid_mask) / global_gdp_target
+    gdp_weighted_tas_target = calculate_global_mean(gdp_target * tas_ref, lat, valid_mask) / global_gdp_target
 
     # Extract reduction arrays and calculate statistics
     reduction_arrays = {}
@@ -2799,7 +2799,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
         # Overall title
         fig.suptitle(f'Target GDP Reductions - {model_name} {reference_ssp.upper()}\n'
-                    f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_temp_target:.2f}°C',
+                    f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_tas_target:.2f}°C',
                     fontsize=16, fontweight='bold')
 
         # Calculate layout for maps + line plot
@@ -2910,10 +2910,10 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                     gdp_targets = config['gdp_targets']
                     linear_config = next(t for t in gdp_targets if t['target_name'] == target_name)
                     if 'reference_temperature' in linear_config:
-                        ref_temp = linear_config['reference_temperature']
+                        ref_tas = linear_config['reference_temperature']
                         ref_value = linear_config['amount_at_reference_temp']
-                        ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
-                                label=f'Linear calib: {ref_temp}°C = {ref_value:.3f}')
+                        ax4.plot(ref_tas, ref_value, 'o', color=color, markersize=8,
+                                label=f'Linear calib: {ref_tas}°C = {ref_value:.3f}')
 
             elif target_shape == 'quadratic':
                 coefficients = target_info['coefficients']
@@ -2931,21 +2931,21 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
                     # Handle new derivative-based specification
                     if 'derivative_at_zero_amount_temperature' in quad_config:
-                        zero_temp = quad_config['zero_amount_temperature']
+                        zero_tas = quad_config['zero_amount_temperature']
                         derivative = quad_config['derivative_at_zero_amount_temperature']
-                        ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
-                                label=f'Quad zero: {zero_temp}°C = 0 (slope={derivative:.3f})')
+                        ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
+                                label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.3f})')
                     # Handle legacy reference point specification
                     elif 'reference_temperature' in quad_config:
-                        ref_temp = quad_config['reference_temperature']
+                        ref_tas = quad_config['reference_temperature']
                         ref_value = quad_config['amount_at_reference_temp']
-                        ax4.plot(ref_temp, ref_value, 'o', color=color, markersize=8,
-                                label=f'Quad calib: {ref_temp}°C = {ref_value:.3f}')
+                        ax4.plot(ref_tas, ref_value, 'o', color=color, markersize=8,
+                                label=f'Quad calib: {ref_tas}°C = {ref_value:.3f}')
 
                         if 'zero_amount_temperature' in quad_config:
-                            zero_temp = quad_config['zero_amount_temperature']
-                            ax4.plot(zero_temp, 0, 's', color=color, markersize=8,
-                                    label=f'Quad zero: {zero_temp}°C = 0')
+                            zero_tas = quad_config['zero_amount_temperature']
+                            ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
+                                    label=f'Quad zero: {zero_tas}°C = 0')
 
         # Add reference lines
         ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)

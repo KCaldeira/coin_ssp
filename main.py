@@ -274,7 +274,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     # Calculate temporal means
     print("Calculating temporal means...")
-    temp_ref = calculate_time_means(data['tas'], data['tas_years'], 
+    tas_ref = calculate_time_means(data['tas'], data['tas_years'], 
                                    time_periods['reference_period']['start_year'],
                                    time_periods['reference_period']['end_year'])
     
@@ -287,17 +287,17 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
 
     # Prepare gridded data for target calculation functions
     gridded_data = {
-        'temp_ref': temp_ref,
+        'tas_ref': tas_ref,
         'gdp_target': gdp_target,
         'lat': data['lat'],
         'valid_mask': valid_mask
     }
     
     # Calculate global means for verification using valid mask
-    global_temp_ref = calculate_global_mean(temp_ref, data['lat'], valid_mask)
+    global_tas_ref = calculate_global_mean(tas_ref, data['lat'], valid_mask)
     global_gdp_target = calculate_global_mean(gdp_target, data['lat'], valid_mask)
     
-    print(f"Global mean reference temperature: {global_temp_ref:.2f}°C")
+    print(f"Global mean reference temperature: {global_tas_ref:.2f}°C")
     print(f"Global mean target GDP: {global_gdp_target:.2e}")
     
     # Calculate all target reductions using extracted functions
@@ -334,11 +334,11 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     # Store coordinate and metadata information
     target_results['_metadata'] = {
-        'temp_ref': temp_ref,
+        'tas_ref': tas_ref,
         'gdp_target': gdp_target,
         'lat': data['lat'],
         'lon': data['lon'],
-        'global_temp_ref': float(global_temp_ref),
+        'global_tas_ref': float(global_tas_ref),
         'global_gdp_target': float(global_gdp_target),
         'reference_ssp': reference_ssp,
         'time_periods': time_periods
@@ -569,8 +569,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     all_data = all_netcdf_data
     
     # Extract climate and population data
-    temp_data = get_ssp_data(all_data, reference_ssp, 'temperature')  # [lat, lon, time]
-    precip_data = get_ssp_data(all_data, reference_ssp, 'precipitation')  # [lat, lon, time] 
+    tas_data = get_ssp_data(all_data, reference_ssp, 'temperature')  # [lat, lon, time]
+    pr_data = get_ssp_data(all_data, reference_ssp, 'precipitation')  # [lat, lon, time] 
     pop_data = get_ssp_data(all_data, reference_ssp, 'population')  # [lat, lon, time]
     gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')  # [lat, lon, time]
     
@@ -579,8 +579,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     valid_mask = reference_tfp['valid_mask']
     tfp_baseline = reference_tfp['tfp_baseline']  # [time, lat, lon]
     
-    # Get dimensions (temp_data is [time, lat, lon])
-    ntime, nlat, nlon = temp_data.shape
+    # Get dimensions (tas_data is [time, lat, lon])
+    ntime, nlat, nlon = tas_data.shape
     
     # Initialize scaling factor arrays 
     scaling_factors = np.full((nlat, nlon, n_response_functions, n_gdp_targets), np.nan)
@@ -620,10 +620,18 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print(f"Processing {nlat} x {nlon} = {nlat*nlon} grid cells")
 
     # Calculate reference climate baselines once for reuse
-    tas0_2d, pr0_2d = calculate_reference_climate_baselines(temp_data, precip_data, years, config)
+    tas0_2d, pr0_2d = calculate_reference_climate_baselines(tas_data, pr_data, years, config)
 
-    # Initialize variability reference scaling (computed once, reused)
-    variability_reference_scaling = None
+    # Check if any targets are of type 'variability'
+    has_variability_targets = any(target.get('target_type', 'damage') == 'variability' for target in gdp_targets)
+    if has_variability_targets:
+        print("Detected 'variability' type GDP targets. Preparing variability reference scaling...")
+        # EXPENSIVE: Compute reference relationship once
+        variability_reference_scaling = calculate_reference_gdp_climate_variability(
+                    config, tas_data, pr_data, pop_data, gdp_data,
+                    reference_tfp, valid_mask, tfp_baseline,
+                    years, damage_scalings, tas0_2d, pr0_2d
+                )
 
     # Process each GDP target with conditional logic based on target type
     for target_idx, gdp_target in enumerate(gdp_targets):
@@ -632,19 +640,11 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         if target_type == 'variability':
 
             if variability_reference_scaling is None:
-                # EXPENSIVE: Compute reference relationship once
-                print("\nComputing reference GDP-climate variability relationship...")
-                variability_reference_scaling = calculate_reference_gdp_climate_variability(
-                    config, temp_data, precip_data, pop_data, gdp_data,
-                    reference_tfp, valid_mask, tfp_baseline,
-                    years, damage_scalings, tas0_2d, pr0_2d
-                )
-                print("Reference relationship established.")
 
             # CHEAP: Apply target-specific scaling
             print(f"\nApplying variability target: {gdp_target['target_name']} ({target_idx+1}/{n_gdp_targets})")
             results = apply_variability_target_scaling(
-                variability_reference_scaling, gdp_target, temp_data, precip_data,
+                variability_reference_scaling, gdp_target, tas_data, pr_data,
                 tas0_2d, pr0_2d, target_idx, damage_scalings,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters
             )
@@ -654,7 +654,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
             # EXPENSIVE: Separate optimization for each damage target
             results = process_damage_target_optimization(
                 target_idx, gdp_target, target_results, damage_scalings,
-                temp_data, precip_data, pop_data, gdp_data,
+                tas_data, pr_data, pop_data, gdp_data,
                 reference_tfp, valid_mask, tfp_baseline, years, config,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
                 total_grid_cells, successful_optimizations, ref_start_idx, ref_end_idx
@@ -960,15 +960,15 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         print(f"\nProcessing SSP scenario: {ssp_name} ({i+1}/{len(forward_ssps)})")
         
         # Get SSP-specific data
-        temp_data = get_ssp_data(all_data, ssp_name, 'temperature')  # [time, lat, lon]
-        precip_data = get_ssp_data(all_data, ssp_name, 'precipitation') # [time, lat, lon]
+        tas_data = get_ssp_data(all_data, ssp_name, 'temperature')  # [time, lat, lon]
+        pr_data = get_ssp_data(all_data, ssp_name, 'precipitation') # [time, lat, lon]
         pop_data = get_ssp_data(all_data, ssp_name, 'population')  # [time, lat, lon]
         gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [time, lat, lon]
 
         # Get baseline TFP for this SSP from Step 2
         tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
 
-        ntime = temp_data.shape[0]  # Time is first dimension
+        ntime = tas_data.shape[0]  # Time is first dimension
         years = get_grid_metadata(all_data)['years']
 
         # Calculate reference period indices for tas0/pr0 baseline calculation
@@ -1015,21 +1015,21 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         total_forward_runs += 1
                         
                         # Extract time series for this grid cell (climate data is [time, lat, lon])
-                        cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
-                        cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+                        cell_tas = tas_data[:, lat_idx, lon_idx]  # [time]
+                        cell_pr = pr_data[:, lat_idx, lon_idx]  # [time]
                         cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
                         cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
                         cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
                         
                         # Create weather (filtered) time series
                         filter_width = 30  # years (same as country-level code)
-                        cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
-                        cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
+                        cell_tas_weather = apply_time_series_filter(cell_tas, filter_width, ref_start_idx, ref_end_idx)
+                        cell_pr_weather = apply_time_series_filter(cell_pr, filter_width, ref_start_idx, ref_end_idx)
                         
                         # Create ModelParams with scaled damage function parameters
                         params_scaled = copy.deepcopy(base_params)
-                        params_scaled.tas0 = np.mean(cell_temp[ref_start_idx:ref_end_idx+1])
-                        params_scaled.pr0 = np.mean(cell_precip[ref_start_idx:ref_end_idx+1])
+                        params_scaled.tas0 = np.mean(cell_tas[ref_start_idx:ref_end_idx+1])
+                        params_scaled.pr0 = np.mean(cell_pr[ref_start_idx:ref_end_idx+1])
                         
                         # Set scaled damage function parameters from Step 3 results
                         params_scaled.k_tas1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0]
@@ -1047,12 +1047,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         
                         # Run forward model with climate data
                         y_climate, a_climate, k_climate_values, _, _, _ = calculate_coin_ssp_forward_model(
-                            cell_tfp_baseline, cell_pop, cell_temp, cell_precip, params_scaled
+                            cell_tfp_baseline, cell_pop, cell_tas, cell_pr, params_scaled
                         )
 
                         # Run forward model with weather data (no climate trends)
                         y_weather, a_weather, k_weather_values, _, _, _ = calculate_coin_ssp_forward_model(
-                            cell_tfp_baseline, cell_pop, cell_temp_weather, cell_precip_weather, params_scaled
+                            cell_tfp_baseline, cell_pop, cell_tas_weather, cell_pr_weather, params_scaled
                         )
 
                         # Store results (convert normalized values back to actual units)
