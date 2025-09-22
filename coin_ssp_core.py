@@ -41,46 +41,10 @@ from scipy.optimize import minimize
 from scipy import stats
 from coin_ssp_utils import apply_time_series_filter, filter_scaling_params
 
+from coin_ssp_models import ScalingParams, ModelParams
+
 # Small epsilon to prevent division by zero in ratio calculations
 RATIO_EPSILON = 1e-20
-
-@dataclass
-# parameters for the COIN-SSP model
-class ModelParams:
-    s: float = 0.3  # savings rate
-    alpha: float = 0.3  # elasticity of output with respect to capital
-    delta: float = 0.1  # depreciation rate in 1/yr
-    tas0: float = 0 # reference temperature for temperature (tas) response
-    pr0: float = 0 # reference precipitation for preciptiation (pr) response
-    k_tas1: float = 0 # linear temperature sensitivity for capital loss
-    k_tas2: float = 0  # quadratic temperature sensitivity for capital loss
-    k_pr1: float = 0  # linear precipitation sensitivity for capital loss
-    k_pr2: float = 0  # quadratic precipitation sensitivity for capital loss
-    tfp_tas1: float = 0  # linear temperature sensitivity for TFP loss
-    tfp_tas2: float = 0  # quadratic temperature sensitivity for TFP loss
-    tfp_pr1: float = 0  # linear precipitation sensitivity for TFP loss
-    tfp_pr2: float = 0  # quadratic precipitation sensitivity for TFP loss
-    y_tas1: float = 0  # linear temperature sensitivity for output loss
-    y_tas2: float = 0  # quadratic temperature sensitivity for output loss
-    y_pr1: float = 0  # linear precipitation sensitivity for output loss
-    y_pr2: float = 0  # quadratic precipitation sensitivity for output loss
-
-@dataclass
-# parameters for scaling climate impacts for damage optimization runs
-class ScalingParams:
-    scaling_name: str = "default"  # name for this scaling parameter set
-    k_tas1: float = 0 # linear temperature sensitivity for capital loss
-    k_tas2: float = 0  # quadratic temperature sensitivity for capital loss
-    k_pr1: float = 0  # linear precipitation sensitivity for capital loss
-    k_pr2: float = 0  # quadratic precipitation sensitivity for capital loss
-    tfp_tas1: float = 0  # linear temperature sensitivity for TFP loss
-    tfp_tas2: float = 0  # quadratic temperature sensitivity for TFP loss
-    tfp_pr1: float = 0  # linear precipitation sensitivity for TFP loss
-    tfp_pr2: float = 0  # quadratic precipitation sensitivity for TFP loss
-    y_tas1: float = 0  # linear temperature sensitivity for output loss
-    y_tas2: float = 0  # quadratic temperature sensitivity for output loss
-    y_pr1: float = 0  # linear precipitation sensitivity for output loss
-    y_pr2: float = 0  # quadratic precipitation sensitivity for output loss
 
 def create_scaled_params(params, scaling, scale_factor):
     """
@@ -362,13 +326,13 @@ def optimize_climate_response_scaling(
 
         # Climate run
         y_climate, *_ = calculate_coin_ssp_forward_model(
-            gridcell_data['tfp_baseline'], gridcell_data['population'],
+            gridcell_data['tfp_baseline'], gridcell_data['pop'],
             gridcell_data['tas'], gridcell_data['pr'], pc
         )
 
         # Weather (baseline) run
         y_weather, *_ = calculate_coin_ssp_forward_model(
-            gridcell_data['tfp_baseline'], gridcell_data['population'],
+            gridcell_data['tfp_baseline'], gridcell_data['pop'],
             gridcell_data['tas_weather'], gridcell_data['pr_weather'], pc
         )
 
@@ -452,7 +416,8 @@ def process_damage_target_optimization(
     tas_data, pr_data, pop_data, gdp_data,
     reference_tfp, valid_mask, tfp_baseline, years, config,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
-    total_grid_cells, successful_optimizations, ref_start_idx, ref_end_idx
+    total_grid_cells, successful_optimizations,
+    tas_weather_data, pr_weather_data
 ):
     """
     Process optimization for a single damage target across all damage functions and grid cells.
@@ -481,10 +446,10 @@ def process_damage_target_optimization(
         Configuration dictionary
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters : np.ndarray
         Output arrays to populate (modified in place)
+    tas_weather_data, pr_weather_data : np.ndarray
+        Pre-computed weather variables [time, lat, lon]
     total_grid_cells, successful_optimizations : int
         Counters (modified in place via list trick)
-    ref_start_idx, ref_end_idx : int
-        Reference period indices
 
     Returns
     -------
@@ -496,6 +461,13 @@ def process_damage_target_optimization(
     target_reduction_array = target_results[target_name]['reduction_array']  # [lat, lon]
 
     print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?)")
+
+    # Calculate reference period indices from config
+    time_periods = config['time_periods']
+    ref_start_year = time_periods['reference_period']['start_year']
+    ref_end_year = time_periods['reference_period']['end_year']
+    ref_start_idx = np.where(years == ref_start_year)[0][0]
+    ref_end_idx = np.where(years == ref_end_year)[0][0]
 
     # Get dimensions
     nlat, nlon = valid_mask.shape
@@ -531,10 +503,9 @@ def process_damage_target_optimization(
                 # Get target reduction for this grid cell
                 target_reduction = target_reduction_array[lat_idx, lon_idx]
 
-                # Create weather (filtered) time series
-                filter_width = 30  # years (same as country-level code)
-                cell_tas_weather = apply_time_series_filter(cell_tas, filter_width, ref_start_idx, ref_end_idx)
-                cell_pr_weather = apply_time_series_filter(cell_pr, filter_width, ref_start_idx, ref_end_idx)
+                # Get weather (filtered) time series from pre-computed arrays
+                cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
+                cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
 
                 # Create parameters for this grid cell using factory
                 params_cell = config['model_params_factory'].create_for_step(
@@ -546,7 +517,7 @@ def process_damage_target_optimization(
                 # Create cell data dictionary matching gridcell_data structure
                 cell_data = {
                     'years': years,
-                    'population': cell_pop,
+                    'pop': cell_pop,
                     'gdp': cell_gdp,
                     'tas': cell_tas,
                     'pr': cell_pr,
@@ -590,7 +561,7 @@ def process_damage_target_optimization(
     }
 
 
-def calculate_reference_climate_baselines(tas_data, pr_data, years, config):
+def calculate_reference_climate_baselines(all_data, config):
     """
     Calculate reference climate baselines (tas0, pr0) as 2D arrays for all grid cells.
 
@@ -599,18 +570,26 @@ def calculate_reference_climate_baselines(tas_data, pr_data, years, config):
 
     Parameters
     ----------
-    tas_data, pr_data : np.ndarray
-        Climate data arrays [time, lat, lon]
-    years : np.ndarray
-        Years array corresponding to time dimension
+    all_data : dict
+        Complete data structure containing all SSP climate data
     config : dict
-        Configuration dictionary containing time_periods
+        Configuration dictionary containing time_periods and ssp_scenarios
 
     Returns
     -------
     tas0_2d, pr0_2d : np.ndarray
         Reference baselines as 2D arrays [lat, lon]
     """
+    # Extract data from all_data structure
+    from coin_ssp_utils import get_ssp_data, get_grid_metadata
+
+    # Get reference SSP from config
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
+    pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
+    years = get_grid_metadata(all_data)['years']
+
     # Get reference period indices
     time_periods = config['time_periods']
     ref_start_year = time_periods['reference_period']['start_year']
@@ -627,10 +606,7 @@ def calculate_reference_climate_baselines(tas_data, pr_data, years, config):
 
 
 def calculate_reference_gdp_climate_variability(
-    config,
-    tas_data, pr_data, pop_data, gdp_data,
-    reference_tfp, valid_mask, tfp_baseline,
-    years, damage_scalings, tas0_2d, pr0_2d
+    all_data, config, reference_tfp, damage_scalings
 ):
     """
     Compute reference relationship between climate variability and GDP variability.
@@ -646,18 +622,14 @@ def calculate_reference_gdp_climate_variability(
 
     Parameters
     ----------
+    all_data : dict
+        Complete data structure containing all SSP climate and economic data
     config : dict
-        Configuration dictionary
-    tas_data, pr_data, pop_data, gdp_data : np.ndarray
-        Climate and economic data arrays [time, lat, lon]
-    reference_tfp, valid_mask, tfp_baseline : np.ndarray
-        TFP reference data
-    years : np.ndarray
-        Years array
+        Configuration dictionary containing ssp_scenarios and time_periods
+    reference_tfp : dict
+        TFP reference data containing valid_mask and tfp_baseline
     damage_scalings : list
         List of damage scaling configurations (for optimization)
-    tas0_2d, pr0_2d : np.ndarray
-        Reference climate baselines [lat, lon]
 
     Returns
     -------
@@ -666,6 +638,28 @@ def calculate_reference_gdp_climate_variability(
     """
 
     print("Computing reference GDP-climate variability relationship...")
+
+    # Extract data from all_data structure
+    from coin_ssp_utils import get_ssp_data, get_grid_metadata
+
+    # Get reference SSP from config
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
+    pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
+    pop_data = get_ssp_data(all_data, reference_ssp, 'pop')
+    gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')
+    tas_weather_data = all_data[reference_ssp]['tas_weather']
+    pr_weather_data = all_data[reference_ssp]['pr_weather']
+    years = get_grid_metadata(all_data)['years']
+
+    # Get reference climate baselines from all_data
+    tas0_2d = all_data['tas0_2d']
+    pr0_2d = all_data['pr0_2d']
+
+    # Extract TFP data
+    valid_mask = reference_tfp['valid_mask']
+    tfp_baseline = reference_tfp['tfp_baseline']
 
     # Get dimensions
     nlat, nlon = valid_mask.shape
@@ -707,26 +701,28 @@ def calculate_reference_gdp_climate_variability(
         }
     }
 
+    # Initialize arrays for the optimization process
+    n_damage_funcs = len(damage_scalings)
+    n_targets = 1  # dummy target for reference computation
+    scaling_factors = np.zeros((nlat, nlon, n_damage_funcs, n_targets))
+    optimization_errors = np.zeros((nlat, nlon, n_damage_funcs, n_targets))
+    convergence_flags = np.zeros((nlat, nlon, n_damage_funcs, n_targets), dtype=bool)
+    scaled_parameters = np.zeros((nlat, nlon, n_damage_funcs, n_targets), dtype=object)
+    total_grid_cells = 0
+    successful_optimizations = 0
+
     # Run process_damage_target_optimization to get scaled_parameters
     print("Running reference optimization for variability relationship...")
     reference_results = process_damage_target_optimization(
-        target_idx=0,  # dummy index
-        gdp_target=dummy_gdp_target,
-        target_results=dummy_target_results,
-        damage_scalings=damage_scalings,
-        tas_data=tas_data,
-        pr_data=pr_data,
-        pop_data=pop_data,
-        gdp_data=gdp_data,
-        reference_tfp=reference_tfp,
-        valid_mask=valid_mask,
-        tfp_baseline=tfp_baseline,
-        years=years,
-        config=config,
-        ref_start_idx=ref_start_idx,
-        ref_end_idx=ref_end_idx,
-        tas0=tas0_2d,
-        pr0=pr0_2d
+        0,  # target_idx (dummy)
+        dummy_gdp_target,
+        dummy_target_results,
+        damage_scalings,
+        tas_data, pr_data, pop_data, gdp_data,
+        reference_tfp, valid_mask, tfp_baseline, years, config,
+        scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
+        total_grid_cells, successful_optimizations,
+        tas_weather_data, pr_weather_data
     )
 
     # Extract scaled_parameters from results
@@ -754,29 +750,9 @@ def calculate_reference_gdp_climate_variability(
             cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
             cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time]
 
-            # Create weather (filtered) time series
-            filter_width = 30  # years
-            cell_tas_weather = apply_time_series_filter(cell_tas, filter_width, ref_start_idx, ref_end_idx)
-            cell_pr_weather = apply_time_series_filter(cell_pr, filter_width, ref_start_idx, ref_end_idx)
-
-            # Create parameters for this grid cell using factory
-            params_cell = config['model_params_factory'].create_for_step(
-                "grid_cell_optimization",
-                tas0=tas0_2d[lat_idx, lon_idx],
-                pr0=pr0_2d[lat_idx, lon_idx]
-            )
-
-            # Create cell data dictionary
-            cell_data = {
-                'years': years,
-                'population': cell_pop,
-                'gdp': cell_gdp,
-                'tas': cell_tas,
-                'pr': cell_pr,
-                'tas_weather': cell_tas_weather,
-                'pr_weather': cell_pr_weather,
-                'tfp_baseline': cell_tfp_baseline
-            }
+            # Extract weather data from pre-computed arrays
+            cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
+            cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
 
             try:
                 # Use pre-computed scaled parameters from reference optimization

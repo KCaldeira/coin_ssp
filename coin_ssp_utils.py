@@ -11,7 +11,7 @@ from pathlib import Path
 import xarray as xr
 from datetime import datetime
 from typing import Dict, Any, List
-from coin_ssp_core import ScalingParams
+from coin_ssp_models import ScalingParams
 
 def get_adaptive_subplot_layout(n_targets):
     """
@@ -141,63 +141,11 @@ def apply_time_series_filter(time_series, filter_width, ref_start_idx, ref_end_i
 
     return result
 
-def create_country_scaling_page(country, scaling_name, results, scaling_result, params, fig):
-    """Create a single page with three panels for one country and scaling set."""
-    fig.suptitle(f'{country} - {scaling_name}', fontsize=16, fontweight='bold')
-    
-    years = results['years']
-    
-    # Panel 1: GDP
-    ax1 = fig.add_subplot(3, 1, 1)
-    ax1.plot(years, results['gdp_observed'], 'k-', label='Baseline', linewidth=2)
-    ax1.plot(years, scaling_result['gdp_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax1.plot(years, scaling_result['gdp_weather'], 'b--', label='Weather', linewidth=1.5)
-    ax1.set_ylabel('GDP (billion $)')
-    ax1.legend(loc='upper left')
-    ax1.grid(True, alpha=0.3)
-    
-    # Add scaling info box in lower right corner with all climate parameters
-    ps = scaling_result["params_scaled"]
-    scaling_text = (f'Scaling: {scaling_name}\n'
-                   f'Scale factor: {scaling_result["optimal_scale"]:.4f}\n'
-                   f'k_tas1: {ps.k_tas1:.6f}  k_tas2: {ps.k_tas2:.6f}\n'
-                   f'tfp_tas1: {ps.tfp_tas1:.6f}  tfp_tas2: {ps.tfp_tas2:.6f}\n'
-                   f'y_tas1: {ps.y_tas1:.6f}  y_tas2: {ps.y_tas2:.6f}\n'
-                   f'k_pr1: {ps.k_pr1:.6f}  k_pr2: {ps.k_pr2:.6f}\n'
-                   f'tfp_pr1: {ps.tfp_pr1:.6f}  tfp_pr2: {ps.tfp_pr2:.6f}\n'
-                   f'y_pr1: {ps.y_pr1:.6f}  y_pr2: {ps.y_pr2:.6f}')
-    
-    ax1.text(0.98, 0.02, scaling_text, transform=ax1.transAxes, fontsize=8,
-             verticalalignment='bottom', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # Panel 2: TFP
-    ax2 = fig.add_subplot(3, 1, 2)
-    ax2.plot(years, results['tfp_baseline'], 'k-', label='Baseline', linewidth=2)
-    ax2.plot(years, scaling_result['tfp_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax2.plot(years, scaling_result['tfp_weather'], 'b--', label='Weather', linewidth=1.5)
-    ax2.set_ylabel('Total Factor Productivity')
-    ax2.legend(loc='upper left')
-    ax2.grid(True, alpha=0.3)
-    
-    # Panel 3: Capital Stock
-    ax3 = fig.add_subplot(3, 1, 3)
-    ax3.plot(years, results['k_baseline'], 'k-', label='Baseline', linewidth=2)
-    ax3.plot(years, scaling_result['k_climate'], 'r-', label='Climate', linewidth=1.5)
-    ax3.plot(years, scaling_result['k_weather'], 'b--', label='Weather', linewidth=1.5)
-    ax3.set_ylabel('Capital Stock (normalized)')
-    ax3.set_xlabel('Year')
-    ax3.legend(loc='upper left')
-    ax3.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    return fig
-
 def filter_scaling_params(scaling_config):
     allowed_keys = set(ScalingParams.__dataclass_fields__.keys())
     return {k: v for k, v in scaling_config.items() if k in allowed_keys}
 
-def create_forward_model_visualization(forward_results, config, output_dir, all_netcdf_data):
+def create_forward_model_visualization(forward_results, config, output_dir, all_data):
     """
     Create comprehensive PDF visualization for Step 4 forward model results.
 
@@ -217,7 +165,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
         Directory for output files
     model_name : str
         Climate model name for labeling
-    all_netcdf_data : dict
+    all_data : dict
         All loaded NetCDF data for baseline GDP access
 
     Returns
@@ -290,9 +238,12 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                     gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
                     gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
 
-                    # Get baseline GDP data from all_netcdf_data
-                    baseline_gdp = get_ssp_data(all_netcdf_data, ssp, 'gdp')  # [time, lat, lon]
-                    years = all_netcdf_data[ssp]['gdp_years']
+                    # Get baseline GDP data from all_data
+                    baseline_gdp = get_ssp_data(all_data, ssp, 'gdp')  # [time, lat, lon]
+    
+                    # Get years array from pre-computed metadata
+                    years = get_grid_metadata(all_data)['years']
+
 
                     # Extract time series for this combination
                     ntime = gdp_climate.shape[4]
@@ -354,7 +305,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     return pdf_path
 
 
-def create_forward_model_ratio_visualization(forward_results, config, output_dir, all_netcdf_data):
+def create_forward_model_ratio_visualization(forward_results, config, output_dir, all_data):
     """
     Create PDF visualization for Step 4 forward model results showing ratios relative to baseline.
     Generates a multi-page PDF with one page per (target, response_function, SSP) combination.
@@ -370,7 +321,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
         Configuration dictionary containing scenarios, damage functions, climate_model.model_name, and run_metadata.json_id
     output_dir : str
         Directory for output files
-    all_netcdf_data : dict
+    all_data : dict
         All loaded NetCDF data for baseline GDP access
 
     Returns
@@ -422,7 +373,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                 gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
 
                 # Get baseline GDP for this SSP
-                baseline_gdp = get_ssp_data(all_netcdf_data, ssp, 'gdp')  # [time, lat, lon]
+                baseline_gdp = get_ssp_data(all_data, ssp, 'gdp')  # [time, lat, lon]
 
                 # Calculate global means for baseline (area-weighted using valid cells only)
                 area_weights = calculate_area_weights(lat)
@@ -691,7 +642,7 @@ def load_step3_results_from_netcdf(netcdf_path: str) -> Dict[str, Any]:
     return scaling_results
 
 
-def create_forward_model_maps_visualization(forward_results, config, output_dir, all_netcdf_data):
+def create_forward_model_maps_visualization(forward_results, config, output_dir, all_data):
     """
     Create spatial maps visualization for Step 4 forward model results.
 
@@ -712,7 +663,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
         Directory for output files
     model_name : str
         Climate model name for labeling
-    all_netcdf_data : dict
+    all_data : dict
         All loaded NetCDF data (not used but kept for consistency)
 
     Returns
@@ -1087,7 +1038,7 @@ def load_and_concatenate_climate_data(config, ssp_name, data_type):
     ssp_name : str
         SSP scenario name
     data_type : str
-        'temperature' or 'precipitation'
+        'tas' or 'pr'
 
     Returns
     -------
@@ -1100,10 +1051,10 @@ def load_and_concatenate_climate_data(config, ssp_name, data_type):
     model_name = climate_model['model_name']
 
     # Get file prefix and variable name from new configuration structure
-    if data_type == 'temperature':
+    if data_type == 'tas':
         prefix = climate_model['file_prefixes']['tas_file_prefix']
         var_name = climate_model['variable_names']['tas_var_name']
-    elif data_type == 'precipitation':
+    elif data_type == 'pr':
         prefix = climate_model['file_prefixes']['pr_file_prefix']
         var_name = climate_model['variable_names']['pr_var_name']
     else:
@@ -1137,7 +1088,7 @@ def load_and_concatenate_climate_data(config, ssp_name, data_type):
     ssp_data = ssp_data_all[ssp_valid_mask]
 
     # Convert temperature from Kelvin to Celsius
-    if data_type == 'temperature':
+    if data_type == 'tas':
         hist_data = hist_data - 273.15
         ssp_data = ssp_data - 273.15
 
@@ -1159,7 +1110,7 @@ def load_and_concatenate_climate_data(config, ssp_name, data_type):
     return concatenated_data, concatenated_years, lat, lon
 
 
-def load_and_concatenate_population_data(config, ssp_name):
+def load_and_concatenate_pop_data(config, ssp_name):
     """
     Load and concatenate historical and SSP-specific population data files.
 
@@ -1258,11 +1209,7 @@ def load_gridded_data(config, case_name):
         - 'pop': population data (time, lat, lon) - annual, common years (exponential growth applied before prediction year)
         - 'lat': latitude coordinates
         - 'lon': longitude coordinates
-        - 'tas_years': temperature time axis (annual years)
-        - 'pr_years': precipitation time axis (annual years)
-        - 'gdp_years': GDP time axis (annual years, interpolated)
-        - 'pop_years': population time axis (annual years)
-        - 'common_years': final common year range for all variables
+        - 'years': common year range for all variables
     """
 
     # Extract configuration values
@@ -1273,11 +1220,11 @@ def load_gridded_data(config, case_name):
 
     # Load temperature data (concatenate historical + SSP)
     print("  Loading temperature data...")
-    tas_raw, tas_years_raw, lat, lon = load_and_concatenate_climate_data(config, case_name, 'temperature')
+    tas_raw, tas_years_raw, lat, lon = load_and_concatenate_climate_data(config, case_name, 'tas')
 
     # Load precipitation data (concatenate historical + SSP)
     print("  Loading precipitation data...")
-    pr_raw, pr_years_raw, _, _ = load_and_concatenate_climate_data(config, case_name, 'precipitation')
+    pr_raw, pr_years_raw, _, _ = load_and_concatenate_climate_data(config, case_name, 'pr')
 
     # Load GDP data (single file with short SSP name, no concatenation)
     print("  Loading GDP data...")
@@ -1304,7 +1251,7 @@ def load_gridded_data(config, case_name):
 
     # Load population data (concatenate historical + SSP)
     print("  Loading population data...")
-    pop_raw, pop_years_raw, _, _ = load_and_concatenate_population_data(config, case_name)
+    pop_raw, pop_years_raw, _, _ = load_and_concatenate_pop_data(config, case_name)
 
     print(f"  Original time ranges:")
     print(f"    Temperature: {tas_years_raw.min()}-{tas_years_raw.max()} ({len(tas_years_raw)} points)")
@@ -1753,7 +1700,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
 # For efficient loading of all SSP scenario data upfront
 # =============================================================================
 
-def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
+def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
     """
     Load all NetCDF files for all SSP scenarios at start of processing.
     
@@ -1780,10 +1727,10 @@ def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, A
         Structure:
         {
             'ssp245': {
-                'temperature': np.array([time, lat, lon]),  # °C
-                'precipitation': np.array([time, lat, lon]), # mm/day
+                'tas': np.array([time, lat, lon]),  # °C
+                'pr': np.array([time, lat, lon]), # mm/day
                 'gdp': np.array([time, lat, lon]),          # economic units
-                'population': np.array([time, lat, lon])    # people
+                'pop': np.array([time, lat, lon])    # people
             },
             'ssp585': { ... },
             '_metadata': {
@@ -1835,10 +1782,10 @@ def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, A
         
         try:
             # Resolve file paths for this SSP
-            temp_file = resolve_netcdf_filepath(config, 'temperature', ssp_name) 
-            precip_file = resolve_netcdf_filepath(config, 'precipitation', ssp_name)
+            temp_file = resolve_netcdf_filepath(config, 'tas', ssp_name) 
+            precip_file = resolve_netcdf_filepath(config, 'pr', ssp_name)
             gdp_file = resolve_netcdf_filepath(config, 'gdp', ssp_name)
-            pop_file = resolve_netcdf_filepath(config, 'population', ssp_name)
+            pop_file = resolve_netcdf_filepath(config, 'pop', ssp_name)
             
             print(f"  Temperature: {os.path.basename(temp_file)}")
             print(f"  Precipitation: {os.path.basename(precip_file)}")
@@ -1850,14 +1797,10 @@ def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, A
             
             # Store in organized structure
             all_data[ssp_name] = {
-                'temperature': ssp_data['tas'],      # [time, lat, lon]
-                'precipitation': ssp_data['pr'],     # [time, lat, lon]
+                'tas': ssp_data['tas'],      # [time, lat, lon]
+                'pr': ssp_data['pr'],     # [time, lat, lon]
                 'gdp': ssp_data['gdp'],              # [time, lat, lon]
-                'population': ssp_data['pop'],       # [time, lat, lon]
-                'temperature_years': ssp_data['tas_years'],
-                'precipitation_years': ssp_data['pr_years'],
-                'gdp_years': ssp_data['gdp_years'],
-                'population_years': ssp_data['pop_years']
+                'pop': ssp_data['pop']      # [time, lat, lon]
             }
             
             # Store metadata from first SSP (coordinates same for all)
@@ -1902,7 +1845,7 @@ def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, A
 
     # Use reference SSP for validity checking
     ref_gdp = all_data[reference_ssp]['gdp']  # [time, lat, lon] (not [lat, lon, time])
-    ref_pop = all_data[reference_ssp]['population']  # [time, lat, lon]
+    ref_pop = all_data[reference_ssp]['pop']  # [time, lat, lon]
 
     # Climate model data convention: [time, lat, lon]
     ntime_actual, nlat_actual, nlon_actual = ref_gdp.shape
@@ -1950,7 +1893,7 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     Parameters
     ----------
     all_data : Dict[str, Any]
-        All loaded NetCDF data from load_all_netcdf_data()
+        All loaded NetCDF data from load_all_data()
     config : Dict[str, Any]
         Configuration dictionary
     output_dir : str
@@ -1991,23 +1934,23 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     temperature_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
     precipitation_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
     gdp_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
-    population_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+    pop_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
 
     # Fill arrays
     for i, ssp_name in enumerate(ssp_names):
         ssp_data = all_data[ssp_name]
-        temperature_all[i] = ssp_data['temperature']      # [time, lat, lon]
-        precipitation_all[i] = ssp_data['precipitation']  # [time, lat, lon]
+        temperature_all[i] = ssp_data['tas']      # [time, lat, lon]
+        precipitation_all[i] = ssp_data['pr']  # [time, lat, lon]
         gdp_all[i] = ssp_data['gdp']                      # [time, lat, lon]
-        population_all[i] = ssp_data['population']        # [time, lat, lon]
+        pop_all[i] = ssp_data['pop']        # [time, lat, lon]
 
     # Create xarray Dataset
     ds = xr.Dataset(
         {
-            'temperature': (['ssp', 'time', 'lat', 'lon'], temperature_all),
-            'precipitation': (['ssp', 'time', 'lat', 'lon'], precipitation_all),
+            'tas': (['ssp', 'time', 'lat', 'lon'], temperature_all),
+            'pr': (['ssp', 'time', 'lat', 'lon'], precipitation_all),
             'gdp': (['ssp', 'time', 'lat', 'lon'], gdp_all),
-            'population': (['ssp', 'time', 'lat', 'lon'], population_all),
+            'pop': (['ssp', 'time', 'lat', 'lon'], pop_all),
             'valid_mask': (['lat', 'lon'], valid_mask)
         },
         coords={
@@ -2019,13 +1962,13 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     )
 
     # Add variable attributes
-    ds.temperature.attrs = {
+    ds.tas.attrs = {
         'long_name': 'Surface Air Temperature',
         'units': 'degrees_celsius',
         'description': 'Annual surface air temperature, converted from Kelvin'
     }
 
-    ds.precipitation.attrs = {
+    ds.pr.attrs = {
         'long_name': 'Precipitation Rate',
         'units': 'mm/day',
         'description': 'Annual precipitation rate'
@@ -2037,7 +1980,7 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
         'description': 'GDP density with exponential growth applied before prediction year'
     }
 
-    ds.population.attrs = {
+    ds.pop.attrs = {
         'long_name': 'Population Density',
         'units': 'people',
         'description': 'Population density with exponential growth applied before prediction year'
@@ -2091,7 +2034,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     config : Dict[str, Any]
         Configuration dictionary
     data_type : str
-        Type of data ('temperature', 'precipitation', 'gdp', 'population', 'target_reductions')
+        Type of data ('tas', 'pr', 'gdp', 'pop', 'target_reductions')
     ssp_name : str
         SSP scenario name (e.g., 'ssp245', 'ssp585')
 
@@ -2105,10 +2048,10 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     input_dir = climate_model['input_directory']
 
     # Map old data_type names to new configuration structure
-    if data_type == 'temperature':
+    if data_type == 'tas':
         prefix = climate_model['file_prefixes']['tas_file_prefix']
         filename = f"{prefix}_{model_name}_historical.nc"  # Return historical file
-    elif data_type == 'precipitation':
+    elif data_type == 'pr':
         prefix = climate_model['file_prefixes']['pr_file_prefix']
         filename = f"{prefix}_{model_name}_historical.nc"  # Return historical file
     elif data_type == 'gdp':
@@ -2119,7 +2062,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
         else:
             short_ssp = ssp_name
         filename = f"{prefix}_{model_name}_{short_ssp}.nc"
-    elif data_type == 'population':
+    elif data_type == 'pop':
         prefix = climate_model['file_prefixes']['pop_file_prefix']
         filename = f"{prefix}_{model_name}_hist.nc"  # Return historical file
     elif data_type == 'target_reductions':
@@ -2139,11 +2082,11 @@ def get_ssp_data(all_data: Dict[str, Any], ssp_name: str, data_type: str) -> np.
     Parameters
     ----------
     all_data : Dict[str, Any]
-        Result from load_all_netcdf_data()
+        Result from load_all_data()
     ssp_name : str
         SSP scenario name (e.g., 'ssp245')
     data_type : str
-        Data type ('temperature', 'precipitation', 'gdp', 'population')
+        Data type ('tas', 'pr', 'gdp', 'pop')
         
     Returns
     -------
@@ -2166,7 +2109,7 @@ def get_grid_metadata(all_data: Dict[str, Any]) -> Dict[str, Any]:
     Parameters
     ----------
     all_data : Dict[str, Any]
-        Result from load_all_netcdf_data()
+        Result from load_all_data()
         
     Returns
     -------
@@ -2187,7 +2130,7 @@ def calculate_tfp_coin_ssp(pop, gdp, params):
     Parameters
     ----------
     pop : array-like
-        Time series of population (L) in people
+        Time series of pop (L) in people
     gdp : array-like
         Time series of gross domestic product (Y) in $/yr
     params : dict or ModelParams
@@ -2628,7 +2571,7 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
             )
 
             # Add comprehensive attributes
-                    serializable_config = create_serializable_config(config)
+            serializable_config = create_serializable_config(config)
             ds.attrs.update({
                 'title': f'COIN-SSP Step 4 Forward Model Results - {ssp_name.upper()} - {var_base.upper()}',
                 'description': f'Forward economic modeling results for {ssp_name.upper()} scenario, {var_base} variables',
@@ -3318,7 +3261,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
     return pdf_path
 
 
-def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_netcdf_data):
+def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data):
     """
     Create comprehensive PDF visualization for Step 2 baseline TFP results.
 
@@ -3560,11 +3503,11 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_netcd
                     max_pop_series = np.full(len(years), np.nan)
                     max_gdp_series = np.full(len(years), np.nan)
 
-                    # Extract data from pre-loaded all_netcdf_data
-                    # NOTE: all_netcdf_data has shape [time, lat, lon] same as TFP
-                    ssp_data = all_netcdf_data[viz_ssp]
-                    min_pop_series = ssp_data['population'][:, min_lat, min_lon]
-                    max_pop_series = ssp_data['population'][:, max_lat, max_lon]
+                    # Extract data from pre-loaded all_data
+                    # NOTE: all_data has shape [time, lat, lon] same as TFP
+                    ssp_data = all_data[viz_ssp]
+                    min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
+                    max_pop_series = ssp_data['pop'][:, max_lat, max_lon]
                     min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
                     max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
 
@@ -3595,3 +3538,108 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_netcd
 
     print(f"Baseline TFP visualization saved to {pdf_path} ({len(forward_ssps)} pages)")
     return pdf_path
+
+
+def calculate_weather_vars(all_data, config):
+    """
+    Calculate weather (filtered) variables and reference baselines for all SSPs.
+
+    Applies 30-year LOESS filtering to temperature and precipitation data relative to
+    reference period mean, creating tas_weather and pr_weather arrays for each SSP.
+    Also computes reference climate baselines (tas0_2d, pr0_2d) once and stores them.
+
+    Parameters
+    ----------
+    all_data : dict
+        Data structure containing climate data for all SSPs
+    config : dict
+        Configuration containing time period definitions
+
+    Returns
+    -------
+    dict
+        Updated all_data with tas_weather, pr_weather, tas0_2d, and pr0_2d added
+    """
+
+    print("Computing weather variables (filtered climate data)...")
+
+    # Get reference period indices
+    time_periods = config['time_periods']
+    years = get_grid_metadata(all_data)['years']
+    ref_start_year = time_periods['reference_period']['start_year']
+    ref_end_year = time_periods['reference_period']['end_year']
+
+    filter_width = 30  # years (consistent with existing code)
+
+    # Process each SSP scenario
+    ssp_scenarios = config['ssp_scenarios']
+    for ssp_name in ssp_scenarios['forward_simulation_ssps']:
+
+        ssp_data = all_data[ssp_name]
+
+        # Find reference period indices
+        ref_start_idx = np.where(years == ref_start_year)[0][0]
+        ref_end_idx = np.where(years == ref_end_year)[0][0]
+
+        # Get climate data arrays [time, lat, lon]
+        tas_data = ssp_data['tas']
+        pr_data = ssp_data['pr']
+
+        # Get dimensions
+        ntime, nlat, nlon = tas_data.shape
+
+        # Initialize weather arrays
+        tas_weather = np.zeros_like(tas_data)
+        pr_weather = np.zeros_like(pr_data)
+
+        print(f"  Processing {ssp_name}: {nlat}x{nlon} grid cells...")
+
+        # Apply filtering to each grid cell
+        for lat_idx in range(nlat):
+            if lat_idx % 20 == 0:  # Progress indicator
+                print(f"    Latitude band {lat_idx+1}/{nlat}")
+
+            for lon_idx in range(nlon):
+                # Extract time series for this grid cell
+                cell_tas = tas_data[:, lat_idx, lon_idx]
+                cell_pr = pr_data[:, lat_idx, lon_idx]
+
+                # Apply weather filtering
+                tas_weather[:, lat_idx, lon_idx] = apply_time_series_filter(
+                    cell_tas, filter_width, ref_start_idx, ref_end_idx
+                )
+                pr_weather[:, lat_idx, lon_idx] = apply_time_series_filter(
+                    cell_pr, filter_width, ref_start_idx, ref_end_idx
+                )
+
+        # Add weather variables to SSP data
+        ssp_data['tas_weather'] = tas_weather
+        ssp_data['pr_weather'] = pr_weather
+
+        print(f"  ✅ {ssp_name} weather variables computed")
+
+    print("✅ All weather variables computed")
+
+    # Compute reference climate baselines using reference SSP
+    print("Computing reference climate baselines...")
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    # Get reference SSP data
+    ref_ssp_data = all_data[reference_ssp]
+    tas_data = ref_ssp_data['tas']
+    pr_data = ref_ssp_data['pr']
+
+    # Get reference period indices
+    ref_start_idx = np.where(years == ref_start_year)[0][0]
+    ref_end_idx = np.where(years == ref_end_year)[0][0]
+
+    # Calculate reference period means for all grid cells
+    tas0_2d = np.mean(tas_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+    pr0_2d = np.mean(pr_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+
+    # Store reference baselines in all_data for easy access
+    all_data['tas0_2d'] = tas0_2d
+    all_data['pr0_2d'] = pr0_2d
+
+    print("✅ Reference climate baselines computed and stored")
+    return all_data

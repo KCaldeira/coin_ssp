@@ -1,794 +1,97 @@
 # COIN_SSP: Gridded Climate-Economic Impact Model
 
-A spatially-explicit implementation of the Solow-Swan growth model that processes gridded climate and economic data to assess climate impacts on economic growth at the grid cell level under various SSP scenarios and RCP climate trajectories.
+A spatially-explicit implementation of the Solow-Swan growth model for assessing climate impacts on economic growth at the grid cell level.
 
-## Project Overview
+## Overview
 
-This project implements a forward-looking Solow-Swan growth model that integrates:
+COIN_SSP processes gridded NetCDF climate and economic data to quantify how climate change affects economic growth through damage functions applied to capital stock, productivity, and output.
 
-- **SSP Economic Scenarios** (gridded GDP and population projections)
-- **NetCDF Climate Data** (gridded temperature and precipitation time series)  
-- **Climate Damage Functions** with multiple response mechanisms
-- **Total Factor Productivity** calculations from observed economic data
+### Core Model
+- **Economic Framework**: Solow-Swan growth model with DICE-derived parameters
+- **Climate Integration**: Temperature and precipitation damage functions (linear/quadratic)
+- **Spatial Processing**: Grid cell-level optimization and forward modeling
+- **Scenario Support**: Multiple SSP economic scenarios and climate projections
 
-The model processes gridded NetCDF data to understand how climate change affects economic growth at the spatial scale of climate models through impacts on capital stock, productivity, and output.
+## Installation
 
-## Model Framework
-
-### Core Economic Model
-Based on the Solow-Swan growth model with parameters derived from DICE:
-
-```
-Y(t) = A(t) * K(t)^α * L(t)^(1-α)
-dK/dt = s * Y(t) - δ * K(t)
-```
-
-Where:
-- `Y(t)` = Output (GDP)
-- `A(t)` = Total Factor Productivity 
-- `K(t)` = Capital Stock
-- `L(t)` = Labor/Population
-- `s` = Savings Rate (30%)
-- `α` = Capital Elasticity (0.3) 
-- `δ` = Depreciation Rate (10%/year)
-
-### Climate Response Functions
-
-Three types of climate damage mechanisms:
-
-1. **Capital Stock Damage**: `k_climate = 1 + k_tas1*(T-T0) + k_tas2*(T-T0)²`
-2. **TFP Growth Damage**: `tfp_climate = 1 + tfp_tas1*(T-T0) + tfp_tas2*(T-T0)²`
-3. **Output Damage**: `y_climate = 1 + y_tas1*(T-T0) + y_tas2*(T-T0)²`
-
-All damage functions support both temperature and precipitation sensitivities.
-
-## Data Processing Pipeline
-
-### 1. Raw Data Sources
-- **Climate Data**: Gridded NetCDF files with historical (1850-2014) + RCP scenarios (2015-2100) annual temperature/precipitation
-- **Economic Data**: Gridded NetCDF files with SSP scenarios for GDP and population (annual resolution, 1950-2100)
-- **Storage**: NetCDF input files located in `./data/input/`
-- **Coverage**: Global grid coverage at climate model resolution
-
-### 2. Data Harmonization
-- **Spatial Alignment**: Ensures consistent grid cell indexing between climate and economic NetCDF files
-- **Temporal Alignment**: Synchronizes annual time series across all data sources
-- **Quality Assurance**: Validates grid cell completeness and data continuity
-
-### 3. Historical Data Modification for Climate-Independence
-To ensure that baseline economic projections are not contaminated by historical climate effects, the model applies exponential growth interpolation to GDP and population data before the prediction year (2015):
-
-- **Motivation**: Historical GDP and population records may contain embedded responses to past climate variability and change. To isolate purely socioeconomic growth trends from climate influences, we replace historical data with smooth exponential trajectories.
-
-- **Implementation**: For each grid cell, GDP and population values between the first available data year and 2015 are replaced using:
-  ```
-  value[year] = value[first_year] × (value[2015] / value[first_year])^((year - first_year) / (2015 - first_year))
-  ```
-
-- **Rationale**: This approach preserves the observed values at the boundary years (first available year and prediction year) while ensuring that intermediate years follow a pure exponential growth path uncontaminated by historical climate effects. The resulting time series represent counterfactual socioeconomic development trajectories that would have occurred under constant climate conditions.
-
-- **Scope**: Applied during data loading (`load_gridded_data()`) to both GDP and population arrays for all SSP scenarios, ensuring consistent baseline conditions across all subsequent economic modeling steps.
-
-### 4. Complete Dataset Archive Generation
-After data loading and harmonization, the pipeline automatically creates a comprehensive NetCDF archive file containing all processed input data:
-
-- **Filename**: `all_loaded_data_{json_id}_{model_name}_{timestamp}.nc`
-- **Purpose**: Complete reference dataset for validation, analysis, and reproducibility
-- **Contents**:
-  - All SSP scenarios with harmonized temporal alignment
-  - Temperature and precipitation data (converted to standard units)
-  - GDP and population data (with exponential growth modifications applied)
-  - Valid grid cell mask identifying economically active regions
-  - Complete processing metadata and configuration embedded as global attributes
-
-- **Data Structure**: 4D arrays organized as `[ssp, time, lat, lon]` with comprehensive coordinate metadata
-- **Quality Assurance**: Includes statistics on grid coverage, valid cells, temporal span, and processing parameters
-- **Traceability**: Full JSON configuration embedded to ensure complete reproducibility of results
-
-This archive serves as the definitive input dataset for all subsequent processing steps and provides a complete snapshot of the harmonized, climate-independent baseline data used throughout the economic modeling pipeline.
-
-### 5. Grid Cell Processing
-
-The following pipeline will be done for each climate model under consideration
-
-**Step 1: Develop target gdp changes using the SSP245 scenario**
-```python
-# Vectorized across all grid cells
-calculate_target_reductions(config_file)
-```
-
-**Step 2: Grid Cell TFP Calculation for each of the SSP scenarios, without consideration of climate change**
-```python
-# Applied to each grid cell independently
-tfp_baseline, k_baseline = calculate_tfp_coin_ssp(population_grid, gdp_grid, params)
-```
-
-**Step 3: Calculate the scaling factors for each grid cell for each damage function case and each target gdp change for SSP245**
-
-Note that as the json file is now configured we are considering 6 damage function cases (linear and quadratic on output, capital stock and growth rate in total factor productivity) and 3 target gdp changes (constant, linear, and quadratic).
-
-```python
-# Applied to each grid cell independently
-optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(country_data, params, scaling_params)
-```
-
-**Step 4: Climate-Integrated Forward Model**  
-
-Run forward case for all available SSPs for this model using the scaling results from the previous step
-```python
-# Vectorized across all grid cells
-results = calculate_coin_ssp_forward_model(tfp_baseline, population_grid, gdp_grid, temperature_grid, params)
-```
-
-### Standard Loop Nesting Orders
-
-The pipeline uses two standardized loop nesting orders for consistency and optimal visualization grouping:
-
-#### **1. Computational Loop Order**
-Used in Steps 3, 4, and 5 for calculations and optimization:
-
-```python
-# COMPUTATIONAL HIERARCHY (outermost to innermost):
-for target_idx in range(n_targets):           # 1. GDP reduction target
-    for damage_idx in range(n_damage_funcs):      # 2. Damage function
-        for lat_idx in range(nlat):                    # 3. Latitude
-            for lon_idx in range(nlon):                    # 4. Longitude
-                for time_idx in range(ntime):                 # 5. Time (when needed)
-                    # Core computation here
-```
-
-#### **2. Visualization Loop Order**
-Used for PDF generation to group related comparisons (3-per-page):
-
-```python
-# VISUALIZATION HIERARCHY (outermost to innermost):
-for ssp in ssp_scenarios:                    # 1. SSP scenario
-    for damage_idx in range(n_damage_funcs):    # 2. Damage function
-        for target_idx in range(n_targets):         # 3. GDP target (INNERMOST)
-            # Create visualization (3 targets per page)
-```
-
-**Design Rationale:**
-- **Computational**: Target outermost enables parameter-specific optimization strategies
-- **Visualization**: Target innermost groups all 3 GDP reduction targets on same page for easy comparison
-- **Spatial Loops**: Grid cell independence enables parallelization in both patterns
-- **Memory Efficiency**: Both patterns optimize memory access patterns for their specific use cases
-
-**Implementation:**
-- **Steps 3-4**: Use computational order for optimization and forward modeling
-- **All PDFs**: Use visualization order for consistent 3-per-page target grouping
-- **Step 1-2**: SSP-specific processing with simplified loop structures
-
-**Step 5: NetCDF Output Generation**
-```python
-# Save gridded results to NetCDF with proper metadata
-save_gridded_results(results, output_path, grid_metadata)
-```
-
-## Implementation Status
-
-### ✅ Completed Components
-
-#### ✅ **Production-Ready Integrated Pipeline**
-- **Complete 5-Step Workflow** (`main.py`): **FULLY FUNCTIONAL** integrated processing pipeline following README Section 3
-- **Timing & Performance Monitoring**: Comprehensive step-by-step timing with terminal performance reports
-- **Data Loading Optimization**: Single NetCDF load with reuse across all processing steps (3x performance improvement)
-- **Fail-Fast Architecture**: Clean error handling with no optional arguments or backward compatibility
-- **Skip-Step Functionality**: `--step3-file` option to load previous optimization results for faster development
-
-#### Foundation Economic Model
-- **TFP Calculation Module** (`coin_ssp_core.py`): Core Solow-Swan TFP calculation from GDP/population time series
-- **Economic Model Core**: Production-ready implementation with robust capital stock handling
-- **Climate Response Functions**: Linear and quadratic temperature/precipitation damage mechanisms
-
-#### Gridded Data Infrastructure
-- **NetCDF Data Loaders** (`coin_ssp_utils.py`): Consolidated utilities for gridded climate and economic data from `./data/input/`
-  - Functions: `load_gridded_data()`, `calculate_area_weights()`, `calculate_time_means()`, `calculate_global_mean()`
-  - Handles 4 NetCDF files: temperature, precipitation, GDP, population
-  - Automatic Kelvin to Celsius conversion using physical constant 273.15
-  - Area-weighted global means using cosine of latitude
-  - Temporal averaging over user-specified year ranges
-  - NetCDF files now stored in repository (small file sizes, updated .gitignore)
-
-#### Target GDP Reduction System
-- **Integrated Target Processing** (Step 1 in main pipeline): Creates spatially-explicit economic impact targets
-  - Three reduction types: constant, linear (temperature-dependent), quadratic (temperature-dependent)
-  - GDP-weighted global constraint satisfaction using weighted least squares (OLS)
-  - NetCDF output (3×lat×lon array) saved to pipeline output directory
-  - Multi-page PDF visualization: global maps + temperature-damage function plots
-  - Global map headers show GDP-weighted global means (not area-weighted)
-  - Fixed color scale (-1 to +1) with actual range annotations
-  - Comprehensive constraint verification with 10+ decimal precision
-
-#### Integrated Configuration System
-- **Unified JSON Schema** (`coin_ssp_config_0007.json`): Complete workflow configuration combining all processing components
-  - **Climate Models**: Flexible NetCDF file naming convention `{prefix}_{model_name}_{ssp_name}.nc`
-  - **Damage Function Scalings**: Enhanced scaling parameters with optimization targets from `coin_ssp*.json` files
-  - **GDP Reduction Targets**: Integrated target specifications with bounded options configured in main JSON file
-  - **SSP Scenarios**: Reference SSP for calibration + list of forward simulation scenarios
-  - **Processing Control**: Grid processing options, validation settings, output formats
-
-#### ✅ Complete Integrated Processing Pipeline Implementation
-- **Main Integrated Pipeline** (`main.py`): **COMPLETE** 5-step processing workflow following README Section 3
-  - **Step 1**: ✅ **Calculate target GDP changes** using reference SSP (global constraint satisfaction)
-  - **Step 2**: ✅ **Generate baseline TFP** for all SSPs (per grid cell, no climate effects)
-  - **Step 3**: ✅ **Per-grid-cell scaling factor optimization** - runs `optimize_climate_response_scaling` for each grid cell
-  - **Step 4**: ✅ **Forward model integration** for all SSPs using per-cell scaling factors with climate and weather scenarios
-  - **Step 5**: ✅ **Processing summary generation** with step-by-step NetCDF output completed by each step
-  - **Flexible Dimensions**: All arrays sized dynamically based on JSON configuration
-  - **Status**: **ENTIRE WORKFLOW IMPLEMENTED** - Ready for testing, validation, and scientific study runs
-
-### ⚠️ Known Issues
-
-#### Pending Investigations
-- **SSP Scenario Differentiation**: Forward model results show limited differentiation between SSP245/SSP585 scenarios
-- **Combined Response Function**: Target achievement below expected 10% under SSP245 quadratic scenario
-- **Status**: Requires investigation to ensure proper SSP scenario implementation and response function calibration
-
-#### Target GDP Reduction Algorithm
-- **Quadratic function unrealistic values**: Quadratic reduction shows extreme negative values (>100% GDP loss) in polar regions
-- **Root cause**: Unconstrained quadratic function can produce economically meaningless results (GDP reductions >100%)
-- **Linear function issue**: Mathematical solution can show counterintuitive temperature-damage relationships in some regions
-- **Mathematical accuracy**: Constraint satisfaction is precise (10+ decimals) but economic realism needs bounds
-- **Status**: Requires reformulation with realistic bounds or alternative functional forms
-- **Documentation**: Extensively documented constraint equations and verification methods in code
-
-### ✅ Recent Fixes and Improvements
-
-#### Critical NaN/Division by Zero Resolution (December 2024)
-The integrated processing pipeline encountered NaN generation during optimization due to several interconnected issues with NetCDF data processing:
-
-**Root Causes Identified and Fixed**:
-1. **Temporal Interpolation Issues**: Different NetCDF files had mismatched time dimensions (GDP: 18 points, Population: 95 points, Temperature: 86 points)
-   - **Solution**: Implemented temporal alignment utilities (`extract_year_coordinate()`, `interpolate_to_annual_grid()`) to harmonize all variables to common annual resolution
-
-2. **Grid Cell Screening Inadequacy**: Original screening only checked first time point, allowing cells with zeros in middle of time series
-   - **Solution**: Enhanced screening to validate all time points with centralized `valid_mask` computation
-
-3. **NetCDF Dimension Order Confusion**: Code incorrectly assumed `[lat, lon, time]` when climate model convention is `[time, lat, lon]`
-   - **Solution**: Fixed dimension unpacking throughout pipeline: `ntime, nlat, nlon = data.shape` and array indexing `data[:, lat_idx, lon_idx]`
-
-4. **Division by Zero in Optimization**: Negative GDP values constrained to zero caused `y_weather = 0` in ratio calculations
-   - **Solution**: Added `RATIO_EPSILON = 1e-20` constant and changed ratio calculation to `y_climate[idx] / (y_weather[idx] + RATIO_EPSILON)`
-
-**Technical Improvements**:
-- **Variable Naming**: Renamed `country_data` to `gridcell_data` throughout codebase for clarity in gridded context
-- **Progress Indicators**: Added dot-per-latitude-band progress display during optimization step with organized output
-- **Enhanced Debugging**: Comprehensive NaN diagnostic output showing complete gridcell data, parameters, and time series when errors occur
-- **Error Termination**: RuntimeError with full diagnosis when NaN/Inf ratios detected, enabling root cause analysis
-
-**Code Quality Enhancements**:
-- **Centralized Constants**: Module-level `RATIO_EPSILON` for maintainable division-by-zero prevention
-- **Improved Warning Messages**: Clear "filtered out N time values with incomplete data" messages instead of confusing warnings
-- **Output Cleanup**: Commented out verbose objective function output to reduce console noise during optimization
-- **Documentation Updates**: Enhanced CLAUDE.md with NetCDF conventions and debugging lessons learned
-
-**Pipeline Status**: The complete 5-step integrated processing pipeline now runs to completion without NaN errors and provides robust handling of edge cases in gridded climate-economic data processing.
-
-### 🚧 Next Development Phase
-
-#### Integrated Processing Pipeline Implementation Status
-
-**✅ Phase 1: Steps 1-3 Complete**
-
-**Step 1: Target GDP Changes (Complete)**
-- **Hybrid Approach Success**: Extracted core functions to `coin_ssp_utils.py` for code reuse
-- **Full Integration**: Target GDP calculation with dynamic file resolution and JSON configuration
-- **NetCDF Output**: Enhanced NetCDF files with coordinate systems and constraint verification metadata
-- **Multi-Target Processing**: Handles any number of constant/linear/quadratic targets with comprehensive results
-
-**Step 2: Baseline TFP Calculation (Complete)**
-- **Centralized Data Loading**: Efficient NetCDF data loading for all SSP scenarios upfront using `load_all_netcdf_data()`
-- **Grid Cell Processing**: Applies `calculate_tfp_coin_ssp` to each valid grid cell (GDP > 0, population > 0)
-- **Multi-SSP Support**: Calculates baseline TFP for all forward simulation SSP scenarios
-- **NetCDF Output**: 4D arrays `[ssp, lat, lon, time]` with TFP and capital stock time series
-- **Validation Integration**: Grid cell validity masks and processing statistics included
-
-**Step 3: Per-Grid-Cell Scaling Factor Optimization (Complete)**
-- **Individual Grid Cell Optimization**: Runs `optimize_climate_response_scaling` for each valid grid cell
-- **Complete Parameter Integration**: Uses Step 1 target reductions and Step 2 baseline TFP as inputs
-- **Standard Loop Structure**: Follows `target → damage_function → spatial` hierarchy for consistency
-- **Enhanced NetCDF Output**: 5D scaled parameter arrays `[lat, lon, damage_func, target, param]` including all 12 climate damage parameters
-- **Weather Filtering Integration**: Applies LOESS filtering to extract weather variability (detrends relative to reference period mean)
-- **Comprehensive Results**: Scaling factors, optimization errors, convergence flags, and scaled damage function parameters
-- **Performance Tracking**: Success rates, processing statistics, and error handling with graceful degradation
-
-**✅ Implementation Complete: All Processing Steps Functional**
-
-**Technical Achievements Completed**:
-- **Step-by-Step Data Persistence**: Results written to NetCDF after each step completion for debugging and resumability
-- **Enhanced NetCDF Output**: Complete coordinate systems, comprehensive metadata, and processing provenance
-- **Memory Management**: Large gridded arrays written to disk immediately after processing to free memory
-- **Standard Loop Structure**: Consistent `target → damage_function → spatial` hierarchy across all steps
-- **Error Handling**: Graceful degradation with detailed success rate reporting for grid cell processing
-- **Hybrid Architecture**: Maintains backward compatibility while building integrated functionality
-
-## 🚀 Next Steps: Scientific Study Preparation
-
-### **Phase 1: Testing and Validation**
-With the complete integrated workflow now implemented, the next priority is thorough testing and validation:
-
-#### **Pipeline Testing**
-- **Small Grid Testing**: Test complete workflow with small grid subsets to validate functionality
-- **Integration Testing**: Verify data flow between all steps and NetCDF output integrity
-- **Performance Testing**: Assess memory usage, processing time, and scalability for full grids
-- **Error Handling Validation**: Test robustness with edge cases and optimization failures
-
-#### **Scientific Validation**
-- **Constraint Verification**: Validate that Step 1 target GDP constraints are properly satisfied in Step 4 forward results
-- **Economic Bounds Checking**: Ensure Step 4 results show realistic economic projections (no extreme GDP losses)
-- **Climate vs Weather Comparison**: Verify that climate scenarios show appropriate differences from weather-only scenarios
-- **Cross-SSP Consistency**: Check that relative differences between SSP scenarios are economically sensible
-
-### **Phase 2: Enhanced Data Visualization**
-- **NetCDF Analysis Tools**: Develop utilities for exploring and analyzing the 6D output arrays from Step 4
-- **Comparative Visualization**: Create tools to visualize climate vs weather scenarios and SSP differences
-- **Statistical Summary Tools**: Generate summary statistics across damage functions, targets, and spatial regions
-- **Diagnostic Plots**: Extend existing PDF generation to include forward model results and optimization diagnostics
-
-### **Phase 3: Production Scientific Runs**
-Once testing and visualization are complete, the pipeline will be ready for full scientific study runs:
-
-#### **Study Design**
-- **Climate Model Selection**: Determine which climate models to process for comprehensive analysis
-- **Scenario Coverage**: Select appropriate SSP scenarios for climate impact assessment
-- **Damage Function Analysis**: Run all damage function configurations to assess uncertainty ranges
-- **Regional Analysis**: Process multiple grid resolutions and regional subsets as needed
-
-#### **Production Processing**
-- **High-Performance Computing**: Optimize pipeline for cluster/HPC environments for large-scale processing
-- **Batch Processing**: Implement scripts for processing multiple climate models and scenarios systematically
-- **Quality Assurance**: Establish protocols for validating production run results and identifying processing errors
-- **Data Management**: Organize and archive large-scale NetCDF outputs for scientific analysis
-
-#### Core Model
-- **Economic Core** (`coin_ssp_core.py`): 
-  - `ModelParams` and `ScalingParams` dataclasses with all economic and climate sensitivity parameters
-  - `calculate_tfp_coin_ssp()` - baseline TFP from observed GDP/population
-  - `calculate_coin_ssp_forward_model()` - climate-integrated economic projections with robust capital stock handling
-  - `optimize_climate_response_scaling()` - L-BFGS-B optimization for climate parameter calibration
-- **Utilities** (`coin_ssp_utils.py`): 
-  - `apply_time_series_filter()` - LOESS filtering for weather extraction (detrends relative to reference period mean)
-  - `create_scaled_params()` - centralized parameter scaling (compute once, use many times)
-  - `create_country_scaling_page()` - three-panel visualization generation
-  - `create_country_pdf_books()` - automated PDF report generation
-- **Main Pipeline** (`main.py`): JSON-configured workflow with timestamped outputs
-
-#### Optimization & Calibration
-- **Climate Parameter Scaling**: Automated optimization to achieve target economic impacts
-- **Multiple Damage Functions**: Capital, TFP, and output damage mechanisms with linear/quadratic temperature and precipitation responses
-- **Robust Optimization**: L-BFGS-B with proper bounds and convergence handling
-- **Flexible Scaling Modes**: Both optimization-based and direct parameter specification
-
-### 📊 Current Datasets
-
-| File | Countries | Years | Resolution | Size |
-|------|-----------|-------|------------|------|
-| `Historical_SSP1_annual.csv` | 145 | 1980-2100 | Annual | 1.2MB |
-| `Historical_SSP2_annual.csv` | 146 | 1980-2100 | Annual | 1.3MB |
-| `Historical_SSP3_annual.csv` | 146 | 1980-2100 | Annual | 1.3MB |
-| `Historical_SSP4_annual.csv` | 146 | 1980-2100 | Annual | 1.3MB |
-| `Historical_SSP5_annual.csv` | 146 | 1980-2100 | Annual | 1.3MB |
-
-**Columns**: `country, year, population, GDP, tas, pr`
-
-## 📈 Enhanced Visualization and Analysis Framework
-
-### Overview
-With the complete integrated processing pipeline now functional, the next development priority is comprehensive visualization and numerical analysis capabilities to evaluate and validate the climate-economic modeling results. This framework will enable systematic assessment of model outputs across multiple dimensions: spatial patterns, temporal evolution, scenario comparisons, and damage function sensitivity.
-
-### Planned Visualization Capabilities
-
-#### **1. Spatial Analysis and Mapping**
-- **Global Impact Maps**: Visualize climate damage patterns across grid cells for different scenarios and damage functions
-- **Regional Comparison Tools**: Focus analysis on specific geographic regions (continents, countries, climate zones)
-- **Constraint Verification Maps**: Validate that target GDP reductions are spatially consistent and economically realistic
-- **Optimization Success Analysis**: Map regions where scaling factor optimization succeeded vs. failed, with diagnostic information
-
-#### **2. Multi-Dimensional Output Analysis**
-The integrated pipeline produces complex 6D output arrays `[ssp, lat, lon, damage_func, target, time]` requiring specialized analysis tools:
-
-- **SSP Scenario Comparison**: Side-by-side analysis of economic impacts across different socio-economic pathways
-- **Damage Function Sensitivity**: Visualize uncertainty ranges across linear/quadratic capital/TFP/output damage mechanisms
-- **Target GDP Reduction Analysis**: Compare spatial patterns for constant, linear, and quadratic reduction targets
-- **Climate vs Weather Separation**: Quantify and visualize the pure climate signal vs. weather variability impacts
-
-#### **3. Time Series Analysis and Trends**
-- **Economic Trajectory Visualization**: Plot GDP, TFP, and capital stock evolution for selected regions and scenarios
-- **Damage Function Convergence**: Visualize how different damage mechanisms lead to varying long-term economic outcomes
-- **Constraint Tracking**: Monitor whether target GDP reductions are maintained throughout forward model projections
-- **Baseline vs Climate-Integrated Comparison**: Three-panel plots showing baseline, weather-only, and climate-integrated scenarios
-
-#### **4. Statistical Summary and Validation**
-- **Global and Regional Aggregation**: Calculate area-weighted and GDP-weighted means for validation against literature
-- **Uncertainty Quantification**: Statistical distributions across damage functions and target reduction scenarios
-- **Optimization Diagnostics**: Success rates, convergence properties, and parameter scaling factor distributions
-- **Economic Bounds Validation**: Verify that projected impacts remain within economically realistic ranges (no extreme GDP losses >80%)
-
-### Implementation Strategy
-
-#### **Phase 1: NetCDF Analysis Infrastructure**
-```python
-# Specialized utilities for exploring high-dimensional output arrays
-analyze_6d_output(netcdf_path, analysis_type='spatial_pattern')
-compare_ssp_scenarios(results_dict, metric='gdp_damage', year=2100)
-extract_regional_timeseries(netcdf_path, region='North_America')
-validate_constraint_satisfaction(step1_targets, step4_results)
-```
-
-#### **Phase 2: Advanced Visualization Tools**
-```python
-# Multi-panel comparative visualization
-create_scenario_comparison_plots(results, scenarios=['ssp245', 'ssp585'])
-generate_damage_function_uncertainty_fans(results, region='global')
-plot_spatial_optimization_diagnostics(scaling_results, success_threshold=0.8)
-create_climate_vs_weather_difference_maps(forward_results, year=2100)
-```
-
-#### **Phase 3: Automated Report Generation**
-```python
-# Comprehensive analysis reports
-generate_model_validation_report(all_results, output_path='validation_report.pdf')
-create_regional_analysis_book(results, regions=['Africa', 'Asia', 'Europe'])
-produce_damage_function_comparison_summary(results, save_path='damage_comparison.pdf')
-```
-
-### Proposed Output Formats
-
-#### **Interactive Analysis**
-- **Jupyter Notebooks**: Template notebooks for exploring results interactively
-- **Web-based Dashboards**: Interactive tools for stakeholders to explore scenarios
-- **Parameterized Analysis**: Configurable analysis scripts for different research questions
-
-#### **Publication-Ready Figures**
-- **High-resolution Maps**: Global and regional impact visualizations with proper cartographic projections
-- **Multi-panel Time Series**: Standardized plots for comparing scenarios and damage functions
-- **Statistical Summary Tables**: Formatted results tables for academic publications
-- **Uncertainty Visualization**: Error bars, confidence intervals, and sensitivity analysis plots
-
-#### **Quality Assurance Reports**
-- **Model Validation Summaries**: Systematic checks of economic realism and constraint satisfaction
-- **Processing Diagnostics**: Success rates, computational performance, and optimization convergence
-- **Data Quality Reports**: Grid cell coverage, temporal completeness, and interpolation quality assessment
-
-### Scientific Applications
-
-#### **Climate Impact Assessment**
-- **Damage Function Comparison**: Evaluate which climate response mechanisms (capital vs TFP vs output) produce most realistic results
-- **Scenario Analysis**: Quantify economic differences between SSP245 and SSP585 pathways under different damage assumptions
-- **Regional Vulnerability**: Identify geographic regions most susceptible to climate-economic impacts
-- **Temporal Analysis**: Understand how climate damages evolve over the 21st century
-
-#### **Policy Analysis Support**
-- **Target Setting Validation**: Verify that spatially-explicit GDP reduction targets are economically consistent
-- **Mitigation Scenario Comparison**: Compare economic outcomes under different emissions pathways
-- **Adaptation Strategy Assessment**: Identify regions where climate adaptation investments would be most effective
-- **Uncertainty Communication**: Provide robust uncertainty ranges for policy-relevant economic projections
-
-### Technical Requirements
-
-#### **Data Management**
-- **Large Array Handling**: Efficient processing of multi-gigabyte 6D NetCDF arrays
-- **Memory Optimization**: Chunked analysis for processing larger-than-memory datasets
-- **Parallel Processing**: Distribute analysis across multiple cores/nodes for large-scale studies
-- **Archive Integration**: Seamless access to processed results from different model runs and timestamps
-
-#### **Visualization Performance**
-- **Interactive Responsiveness**: Fast rendering for exploratory analysis
-- **High-Resolution Output**: Publication-quality figure generation
-- **Batch Processing**: Automated generation of large numbers of comparative plots
-- **Customization Framework**: Flexible styling and layout options for different audiences
-
-This enhanced visualization and analysis framework will transform the COIN-SSP pipeline from a data processing tool into a comprehensive climate-economic assessment platform, enabling rigorous scientific analysis and policy-relevant insights from gridded climate-economic modeling results.
-
-## Getting Started
-
-### Installation
 ```bash
-# Clone repository
 git clone https://github.com/KCaldeira/coin_ssp.git
 cd coin_ssp
-
-# Create virtual environment  
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Running the Model
+## Usage
 
-#### Integrated Processing Pipeline (Grid-Cell Level)
-The complete 5-step integrated workflow for gridded climate-economic modeling:
-
+### Complete Processing Pipeline
 ```bash
-# Complete integrated pipeline (Steps 1-5) with timing report
-python main.py coin_ssp_config_0007.json
+# Run full 5-step integrated workflow
+python main.py coin_ssp_config_0008.json
 
-# Skip Step 3 optimization by loading previous results (faster development)
-python main.py coin_ssp_config_0007.json --step3-file data/output/output_0007_CanESM5_20250917_160000/step3_scaling_factors_0007_CanESM5_ssp245.nc
-
-# Results saved to: ./data/output/output_{json_id}_{model}_{timestamp}/
-# Configuration file: Original JSON config automatically copied for reproducibility
-# Step outputs: step1_target_gdp_{json_id}_{model}_{ssp}.nc, step2_baseline_tfp_{json_id}_{model}.nc, etc.
-# PDF visualizations: step1_{json_id}_{model}_{ssp}_target_gdp_visualization.pdf, step2_{json_id}_{model}_baseline_tfp_visualization.pdf, etc.
-# Timing report: Shows duration for each step and total pipeline time
+# Skip Step 3 optimization (faster development)
+python main.py coin_ssp_config_0008.json --step3-file previous_step3_results.nc
 ```
 
-**Performance Monitoring**: The pipeline now includes comprehensive timing that shows:
-- Data loading time
-- Individual step durations (Step 1-5)
-- Total pipeline execution time
-- Partial timing report even on failures
+### Processing Steps
+1. **Target GDP Changes**: Calculate spatially-explicit economic impact targets
+2. **Baseline TFP**: Compute total factor productivity without climate effects
+3. **Scaling Optimization**: Per-grid-cell parameter calibration for damage functions
+4. **Forward Integration**: Climate-integrated economic projections for all SSPs
+5. **Summary Generation**: Aggregate results and visualization
 
-#### Post-Processing Analysis Framework
-Comprehensive analysis of pipeline results using the dedicated post-processing framework:
+## Configuration
 
-```bash
-# Analyze results from a completed pipeline run
-python main_postprocess.py data/output/output_0007_CanESM5_20250919_123456/
+JSON configuration files specify:
+- **Climate Model**: NetCDF file patterns and model information
+- **SSP Scenarios**: Reference SSP for calibration + forward simulation scenarios
+- **GDP Targets**: Constant, linear, or quadratic reduction patterns
+- **Damage Functions**: Climate response mechanisms (capital/TFP/output)
+- **Model Parameters**: Solow-Swan economic parameters
 
-# The framework automatically:
-# - Validates pipeline output files (steps 1-5 NetCDF files, PDFs, etc.)
-# - Creates timestamped analysis output directory
-# - Runs all implemented post-processing analyses
-# - Provides comprehensive timing and success/failure reporting
+## Key Features
 
-# Results saved to: ./data/output/postprocess_{pipeline_run}_{timestamp}/
-# Analysis-specific subdirectories: analysis_1/, analysis_2/, etc.
-```
+✅ **Production Ready**: Complete 5-step processing pipeline
+✅ **Adaptive Optimization**: Automatic bounds expansion when hitting optimization limits
+✅ **Weather Variables**: Pre-computed LOESS-filtered climate variability
+✅ **Variability Targets**: Support for both damage and variability target types
+✅ **Fail-Fast Design**: Clean error handling without defensive programming
+✅ **Comprehensive Visualization**: Multi-page PDFs with adaptive layouts
 
-**Framework Features**:
-- **Modular Design**: Each analysis is self-contained and independently runnable
-- **Automatic Validation**: Verifies all required pipeline output files are present
-- **Organized Output**: Creates dedicated analysis directories with timestamps
-- **Error Handling**: Robust error reporting with detailed failure diagnostics
-- **Future Extensibility**: Ready for selective analysis flags and additional analyses
+## Output Files
 
-**Available Analyses**:
-- **Temperature-GDP Variability Correlations**: Computes correlations between temperature and GDP variability (detrended residuals) after removing 30-year LOESS trends. This shows how short-term climate fluctuations relate to short-term economic fluctuations for all SSP/target/response function combinations. Reports correlation coefficients, linear regression slopes, and standard deviation ratios.
+Results saved to timestamped directories:
+- **NetCDF Data**: Complete step-by-step processing results
+- **PDF Visualizations**: Maps, time series, and diagnostic plots
+- **CSV Summaries**: GDP-weighted statistics and analysis
+- **Configuration Archive**: Complete reproducibility information
 
-#### Country-Level Analysis (Legacy)
-Traditional country-by-country processing using JSON configuration:
+## Data Requirements
 
-```bash
-# Process all countries using JSON configuration
-python main.py coin_ssp_experiment1.json
+- **Climate Data**: Gridded NetCDF temperature/precipitation (historical + projections)
+- **Economic Data**: Gridded NetCDF GDP/population (SSP scenarios)
+- **File Structure**: Standardized naming convention with model/scenario identifiers
+- **Storage**: Files located in `./data/input/` directory
 
-# Process limited number of countries for testing
-python main.py coin_ssp_experiment1.json --max-countries 5
+## Recent Updates
 
-# Results saved to: ./data/output/run_{run_name}_{timestamp}/
-# Individual CSV files: [country]_results_{run_name}_{timestamp}.csv
-# PDF books: COIN_SSP_{country}_Book_{run_name}_{timestamp}.pdf
-```
+- **Weather Variables**: Centralized computation and storage in `all_data` structure
+- **Reference Baselines**: Pre-computed `tas0_2d`/`pr0_2d` climate baselines
+- **Function Signatures**: Simplified parameter lists using `all_data` and `config`
+- **Import Organization**: All imports moved to top of files
+- **Variable Naming**: Consistent `tas`/`pr` climatological conventions
 
-### JSON Configuration Structure
+## Architecture
 
-The integrated pipeline uses JSON configuration files with the following structure:
-
-```json
-{
-  "run_metadata": {
-    "json_id": "0007",
-    "run_name": "CanESM5_ssp245_reference_experiment_v2",
-    "description": "Experiment description",
-    "created_date": "2025-09-15"
-  },
-  "climate_model": {
-    "model_name": "CanESM5",
-    "input_directory": "data/input",
-    "file_prefixes": {
-      "tas_file_prefix": "CLIMATE",
-      "pr_file_prefix": "CLIMATE",
-      "gdp_file_prefix": "GDP",
-      "pop_file_prefix": "POP"
-    }
-  },
-  "ssp_scenarios": {
-    "reference_ssp": "ssp245",
-    "forward_simulation_ssps": ["ssp126", "ssp245", "ssp460", "ssp370", "ssp585"]
-  },
-  "gdp_targets": [
-    {
-      "target_name": "const_10%",
-      "target_shape": "constant",
-      "target_type": "damage",
-      "gdp_amount": -0.016666666666667
-    }
-  ],
-  "model_params": {
-    "s": 0.3,
-    "alpha": 0.3,
-    "delta": 0.1
-  },
-  "response_function_scalings": [
-    {
-      "scaling_name": "output_linear",
-      "y_tas1": 1.0
-    }
-  ]
-}
-```
-
-**Key Configuration Sections:**
-
-- **`run_metadata`**: Contains `json_id` used for standardized file naming across all pipeline outputs
-- **`climate_model`**: Defines NetCDF file prefixes and model information
-- **`ssp_scenarios`**: Specifies reference SSP for calibration and forward simulation scenarios
-- **`gdp_targets`**: Target GDP reduction patterns (constant, linear, quadratic)
-- **`model_params`**: Core Solow-Swan economic parameters
-- **`response_function_scalings`**: Climate damage function configurations
-
-**Model Parameters** (optional - uses defaults if not specified):
-- Economic parameters: `s`, `alpha`, `delta`
-
-**Scaling Parameters** (required list):
-- `scaling_name`: Unique identifier for this parameter set
-- `scale_factor`: Optional - if provided, uses this value directly instead of optimization
-- Climate sensitivity parameters: `k_tas1/2`, `tfp_tas1/2`, `y_tas1/2`, `k_pr1/2`, `tfp_pr1/2`, `y_pr1/2`
-
-### Output Files
-The model generates timestamped output in `./data/output/run_{run_name}_{timestamp}/`:
-
-1. **Individual CSV files**: `[Country_Name]_results_{run_name}_{timestamp}.csv` - Complete time series data for each country:
-   - **Common columns**: `year`, `population`, `gdp_observed`, `tas`, `pr`, `tas_weather`, `pr_weather`, `tfp_baseline`, `k_baseline`
-   - **Per-scaling columns**: `gdp_climate_{scaling_name}`, `tfp_climate_{scaling_name}`, `k_climate_{scaling_name}`, `gdp_weather_{scaling_name}`, etc.
-
-2. **PDF Books**: `COIN_SSP_{Country}_Book_{run_name}_{timestamp}.pdf` - One book per country:
-   - **One page per scaling set** within each country book
-   - Each page shows three panels: GDP, TFP, Capital Stock
-   - Each panel shows: Baseline vs Climate vs Weather projections
-   - Page title: `{Country} - {scaling_name}`
-   - Info box shows optimization results and target parameters
-
-### Scaling Modes
-
-The model supports two modes for determining scale factors:
-
-**1. Optimization Mode** (when `scale_factor` is not provided):
-- Automatically finds the optimal scale factor to achieve target climate impact
-- Uses GDP targets from the `gdp_targets` configuration section
-- Shows: `"Optimizing climate response scaling..." → "Scale factor: X, error: Y"`
-
-**2. Direct Mode** (when `scale_factor` is provided):
-- Uses the specified scale factor directly, skipping optimization
-- Faster execution for testing or when optimal values are known
-- Shows: `"Using provided scale factor: X"`
-
-### Workflow Structure
-The model processes data with the following structure:
-- **Outer loop**: Countries (optimized for comparing scaling sets within countries)
-- **Inner loop**: Scaling parameter sets
-- **Scale determination**: Either optimized or directly specified per scaling set
-- **Three scenarios**: Baseline (no climate), Climate (full trends), Weather (variability only)
-
-### Usage Example
-```python
-from coin_ssp_core import ModelParams, calculate_tfp_coin_ssp, calculate_coin_ssp_forward_model
-import pandas as pd
-
-# Load country data
-data = pd.read_csv('./data/input/Historical_SSP2_annual.csv')
-country_data = data[data.country == 'United States'].sort_values('year')
-
-# Set up parameters
-params = ModelParams(
-    s=0.3,          # 30% savings rate
-    alpha=0.3,      # Capital elasticity  
-    delta=0.1,      # 10% depreciation
-    tas0=20.0,      # Reference temperature
-    tfp_tas2=-0.01  # Quadratic temperature sensitivity for TFP
-)
-
-# Calculate baseline TFP (no climate effects)
-tfp, capital = calculate_tfp_coin_ssp(
-    country_data.population.values,
-    country_data.GDP.values, 
-    params
-)
-
-# Run climate-integrated model
-gdp_climate, tfp_climate, k_climate, climate_factors = calculate_coin_ssp_forward_model(
-    tfp,
-    country_data.population.values,
-    country_data.GDP.values, 
-    country_data.tas.values,
-    params
-)
-```
-
-## Model Features
-
-### ✅ Current Capabilities
-- **Complete Integrated Pipeline**: Full 5-step workflow from target GDP patterns through forward economic projections
-- **Country-level Analysis**: 146 countries with complete 1980-2100 time series
-- **Multi-scenario Support**: All 5 SSP economic scenarios with flexible reference/forward scenario selection
-- **Climate Integration**: Temperature and precipitation response functions with automatic parameter calibration
-- **Gridded Data Processing**: NetCDF utilities for spatial climate and economic data with standardized naming conventions
-- **Target GDP Reduction System**: Spatially-explicit constraint satisfaction with GDP-weighted global means
-- **Unified Configuration**: Integrated JSON schema combining climate models, response functions, targets, and SSP scenarios
-- **Skip-Step Functionality**: Optional `--step3-file` argument to load previous optimization results for faster testing
-- **Enhanced Visualization**: Zero-biased colorbar scaling, spatial ratio maps, and comprehensive PDF reports
-- **Hybrid Code Architecture**: Extracted reusable functions in `coin_ssp_utils.py` with preserved standalone functionality
-- **Flexible Configuration**: Multiple scaling parameter sets with both optimization and direct scaling modes
-- **Robust Economic Modeling**: Negative capital stock protection and fail-fast error handling
-- **Advanced Mapping**: Step 4 spatial maps showing climate/weather GDP ratios with blue-red colormaps
-- **Optimization Framework**: L-BFGS-B optimization for achieving target economic impacts
-- **Quality Assurance**: Comprehensive data validation, constraint verification, and economic bounds checking
-
-### 🔄 Research Applications
-- **Climate Impact Assessment**: Quantify economic losses under different warming scenarios with optimized response functions
-- **Policy Analysis**: Compare adaptation strategies across SSP pathways and scaling mechanisms
-- **Parameter Sensitivity**: Automated scaling to achieve specific economic impact targets (e.g., 5%, 10%, 20% GDP losses)
-- **Counterfactual Studies**: Climate vs. weather-only vs. baseline economic projections with visual comparison
-- **Response Function Comparison**: Capital, TFP, and output response mechanisms with linear and quadratic responses
-- **Spatial Pattern Analysis**: Visualize climate/weather GDP ratios and response function scaling factors across global grids
-- **Target Period Assessment**: Focus analysis on 2080-2100 target period with mean ratio optimization
-
-## Data Quality
-
-### Economic Data Interpolation
-- **Method**: Linear interpolation between 5-year SSP data points
-- **Validation**: Original 5-year values preserved exactly (0.000 difference)
-- **Coverage**: Historical Reference (1950-2019) + SSP scenarios (2020-2100)
-
-### Climate Data
-- **Resolution**: Annual temperature (°C) and precipitation (mm/day)
-- **Sources**: Historical observations (1850-2014) + CMIP6 projections (2015-2100)
-- **Processing**: Country-level spatial averages
-
-### Country Coverage
-- **Total**: 146 countries with complete data
-- **Additions**: Enhanced mapping resolved 9 country name mismatches
-- **Quality**: All countries have continuous annual time series across all variables
-
-## File Structure
-```
-coin_ssp/
-├── coin_ssp_core.py                    # Main economic model functions
-├── coin_ssp_utils.py                   # Consolidated utilities (LOESS filtering + NetCDF processing + visualization)
-├── main.py                             # Integrated grid-cell processing pipeline (5-step workflow)
-├── main_postprocess.py                 # Post-processing analysis framework for pipeline results
-├── coin_ssp_config_0007.json    # Current unified configuration for complete workflow
-├── create_ratio_maps.py                # Standalone tool for creating climate/weather GDP ratio maps
-├── data/
-│   ├── input/                          # NetCDF gridded climate/economic data + country datasets
-│   │   ├── gridRawAlt_tas_CanESM5_ssp245.nc    # Gridded temperature data (updated file patterns)
-│   │   ├── gridRawAlt_pr_CanESM5_ssp245.nc     # Gridded precipitation data
-│   │   ├── Gridded_GDPdensity_CanESM5_ssp245.nc # Gridded GDP projections
-│   │   ├── GriddedAlt_POPdensity_CanESM5_ssp245.nc # Gridded population projections (corrected time axis)
-│   │   ├── Historical_SSP1_annual.csv
-│   │   ├── Historical_SSP2_annual.csv
-│   │   └── ...
-│   └── output/                         # Timestamped model run results
-│       ├── run_20250903_143052/        # Country-level results
-│       │   ├── [country]_results_20250903_143052.csv
-│       │   └── COIN_SSP_Results_Book_20250903_143052.pdf
-│       ├── output_0007_CanESM5_20250915_140000/  # Integrated pipeline results
-│       │   ├── coin_ssp_config_0007.json        # Configuration file (copied for reproducibility)
-│       │   ├── all_loaded_data_0007_CanESM5.nc  # Complete input dataset (all SSPs + valid mask)
-│       │   ├── step1_target_gdp_0007_CanESM5_ssp245.nc      # Target GDP reductions
-│       │   ├── step2_baseline_tfp_0007_CanESM5.nc           # Baseline TFP calculations
-│       │   ├── step3_scaling_factors_0007_CanESM5_ssp245.nc # Response function scaling factors
-│       │   ├── step4_forward_results_0007_CanESM5.nc        # Forward economic projections
-│       │   ├── step1_0007_CanESM5_ssp245_target_gdp_visualization.pdf    # Target reduction visualizations
-│       │   ├── step2_0007_CanESM5_baseline_tfp_visualization.pdf        # Baseline TFP visualizations
-│       │   ├── step3_0007_CanESM5_ssp245_scaling_maps.pdf               # Scaling factor visualizations
-│       │   ├── step4_0007_CanESM5_forward_plots.pdf                     # Forward model time series
-│       │   ├── step4_0007_CanESM5_forward_maps.pdf                      # Spatial ratio maps
-│       │   └── step4_0007_CanESM5_ratio_maps.pdf                        # Alternative ratio map visualization
-```
+- **`coin_ssp_core.py`**: Core economic model and optimization functions
+- **`coin_ssp_utils.py`**: Data processing, visualization, and utility functions
+- **`main.py`**: Integrated 5-step processing pipeline
+- **Configuration**: JSON-based workflow control with unified schema
 
 ## Contributing
 
-This project follows the coding philosophy outlined in `CLAUDE.md`:
-- **Elegant, fail-fast code** that surfaces errors quickly
-- **Minimal input validation** - let exceptions bubble up naturally  
-- **Mathematical clarity** over defensive programming
-- **Numpy vectorization** preferred over loops and conditionals
-
-## License
-
-This project is designed for climate economics research and follows open science principles.
+This project follows elegant, fail-fast coding principles:
+- No input validation on function parameters
+- Let exceptions bubble up naturally
+- Prefer mathematical clarity over defensive checks
+- Use numpy vectorization instead of loops
