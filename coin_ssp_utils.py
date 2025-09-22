@@ -1,12 +1,14 @@
+import copy
+import json
 import os
 import numpy as np
+import pandas as pd
 import statsmodels.api as sm
-import copy
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
 import xarray as xr
-import pandas as pd
 from datetime import datetime
 from typing import Dict, Any, List
 from coin_ssp_core import ScalingParams
@@ -52,8 +54,6 @@ def create_serializable_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Dict[str, Any]
         Filtered configuration dictionary safe for JSON serialization
     """
-    import json
-    import copy
 
     # Make a deep copy to avoid modifying the original
     filtered_config = copy.deepcopy(config)
@@ -225,9 +225,6 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     str
         Path to generated PDF file
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -381,9 +378,6 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
     str
         Path to generated PDF file
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -635,7 +629,6 @@ def load_step3_results_from_netcdf(netcdf_path: str) -> Dict[str, Any]:
     Dict[str, Any]
         Dictionary containing Step 3 results in the same format as step3_calculate_scaling_factors_per_cell()
     """
-    import xarray as xr
 
     print(f"Loading Step 3 results from: {netcdf_path}")
 
@@ -727,10 +720,6 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     tuple
         (linear_pdf_path, log10_pdf_path) - Paths to both generated PDF files
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -1105,7 +1094,6 @@ def load_and_concatenate_climate_data(config, ssp_name, data_type):
     tuple
         (concatenated_data, concatenated_years, valid_mask, coordinates)
     """
-    import os
 
     climate_model = config['climate_model']
     input_dir = climate_model['input_directory']
@@ -1192,7 +1180,6 @@ def load_and_concatenate_population_data(config, ssp_name):
     tuple
         (concatenated_data, concatenated_years, coordinates)
     """
-    import os
 
     climate_model = config['climate_model']
     input_dir = climate_model['input_directory']
@@ -1277,7 +1264,6 @@ def load_gridded_data(config, case_name):
         - 'pop_years': population time axis (annual years)
         - 'common_years': final common year range for all variables
     """
-    import os
 
     # Extract configuration values
     model_name = config['climate_model']['model_name']
@@ -1810,7 +1796,6 @@ def load_all_netcdf_data(config: Dict[str, Any], output_dir: str) -> Dict[str, A
             }
         }
     """
-    import os
     
     print("\n" + "="*60)
     print("LOADING ALL NETCDF DATA")  
@@ -1976,10 +1961,6 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     str
         Path to written NetCDF file
     """
-    import xarray as xr
-    import numpy as np
-    import os
-    from datetime import datetime
 
     # Extract metadata
     metadata = all_data['_metadata']
@@ -2069,7 +2050,6 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     }
 
     # Add global attributes
-    import json
     serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'All Loaded NetCDF Data for COIN-SSP Processing',
@@ -2280,8 +2260,6 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     str
         Path to saved NetCDF file
     """
-    import xarray as xr
-    import os
     
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -2333,7 +2311,6 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     }
     
     # Add global attributes
-    import json
     serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'COIN-SSP Target GDP Reductions - Step 1 Results',
@@ -2370,8 +2347,6 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, con
     str
         Path to saved NetCDF file
     """
-    import xarray as xr
-    import os
 
     # Extract model name from config
     model_name = config['climate_model']['model_name']
@@ -2436,7 +2411,6 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, con
     }
     
     # Add global attributes
-    import json
     serializable_config = create_serializable_config(config)
     total_processed = sum(result['grid_cells_processed'] for ssp_name, result in tfp_results.items()
                          if ssp_name not in ['_coordinates', '_metadata'])
@@ -2474,8 +2448,6 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     str
         Path to saved NetCDF file
     """
-    import xarray as xr
-    import os
 
     # Extract model name from config
     model_name = config['climate_model']['model_name']
@@ -2557,7 +2529,6 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     }
     
     # Add global attributes
-    import json
     serializable_config = create_serializable_config(config)
     ds.attrs = {
         'title': 'COIN-SSP Scaling Factors - Step 3 Results',
@@ -2602,8 +2573,6 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
     List[str]
         List of paths to saved NetCDF files
     """
-    import xarray as xr
-    import os
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
@@ -2659,8 +2628,7 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
             )
 
             # Add comprehensive attributes
-            import json
-            serializable_config = create_serializable_config(config)
+                    serializable_config = create_serializable_config(config)
             ds.attrs.update({
                 'title': f'COIN-SSP Step 4 Forward Model Results - {ssp_name.upper()} - {var_base.upper()}',
                 'description': f'Forward economic modeling results for {ssp_name.upper()} scenario, {var_base} variables',
@@ -2749,10 +2717,6 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     str
         Path to generated PDF file
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -3065,10 +3029,6 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
     str
         Path to generated PDF file
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -3218,10 +3178,6 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
     str
         Path to generated PDF file
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -3387,10 +3343,6 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_netcd
     str
         Path to generated PDF file
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    from matplotlib.backends.backend_pdf import PdfPages
-    import os
 
     # Extract configuration values for standardized naming
     json_id = config['run_metadata']['json_id']
@@ -3617,7 +3569,6 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_netcd
                     max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
 
                     # Create DataFrame and save to CSV
-                    import pandas as pd
                     extremes_data = {
                         'year': years,
                         'min_pop': min_pop_series,

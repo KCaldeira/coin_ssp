@@ -14,9 +14,11 @@ Processing Flow (per README.md Section 3):
 5. Generate summary data products (global and regional aggregates)
 """
 
+import argparse
 import copy
 import json
 import os
+import pandas as pd
 import shutil
 import sys
 import time
@@ -34,9 +36,14 @@ from coin_ssp_utils import (
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
     create_objective_function_visualization,
     create_forward_model_visualization, create_forward_model_maps_visualization,
-    create_forward_model_ratio_visualization, load_step3_results_from_netcdf
+    create_forward_model_ratio_visualization, load_step3_results_from_netcdf,
+    calculate_area_weights
 )
-from coin_ssp_core import ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model
+from coin_ssp_core import (
+    ModelParams, ScalingParams, optimize_climate_response_scaling, calculate_coin_ssp_forward_model,
+    calculate_reference_climate_baselines, calculate_reference_gdp_climate_variability,
+    apply_variability_target_scaling, process_damage_target_optimization
+)
 from model_params_factory import ModelParamsFactory
 
 
@@ -611,96 +618,51 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print("Starting per-grid-cell optimization...")
     print("This may take significant time for large grids...")
     print(f"Processing {nlat} x {nlon} = {nlat*nlon} grid cells")
-    
-    # Standard loop structure: GDP target → damage function → spatial (lat/lon) → combinations
+
+    # Calculate reference climate baselines once for reuse
+    tas0_2d, pr0_2d = calculate_reference_climate_baselines(temp_data, precip_data, years, config)
+
+    # Initialize variability reference scaling (computed once, reused)
+    variability_reference_scaling = None
+
+    # Process each GDP target with conditional logic based on target type
     for target_idx, gdp_target in enumerate(gdp_targets):
-        target_name = gdp_target['target_name']
-        target_reduction_array = target_results[target_name]['reduction_array']  # [lat, lon]
-        
-        print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/{n_gdp_targets})")
-        
-        for damage_idx, damage_scaling in enumerate(damage_scalings):
-            scaling_name = damage_scaling['scaling_name']
-            print(f"  Response function: {scaling_name} ({damage_idx+1}/{n_response_functions})")
-            
-            # Create ScalingParams for this damage function
-            scaling_config = filter_scaling_params(damage_scaling)
-            scaling_params = ScalingParams(**scaling_config)
-            
-            for lat_idx in range(nlat):
-                # Progress indicator: print dot for each latitude band
-                print(".", end="", flush=True)
+        target_type = gdp_target.get('target_type', 'damage')  # Default to 'damage' for backward compatibility
 
-                for lon_idx in range(nlon):
-                    
-                    # Check if grid cell is valid (has economic activity)
-                    if not valid_mask[lat_idx, lon_idx]:
-                        continue
-                        
-                    total_grid_cells += 1
-                    
-                    # Extract time series for this grid cell (climate data is [time, lat, lon])
-                    cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
-                    cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
-                    cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
-                    cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
-                    cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
-                    
-                    # Get target reduction for this grid cell  
-                    target_reduction = target_reduction_array[lat_idx, lon_idx]
-                    
-                    # Create weather (filtered) time series
-                    filter_width = 30  # years (same as country-level code)
-                    cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
-                    cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
-                    
-                    # Create parameters for this grid cell using factory
-                    params_cell = config['model_params_factory'].create_for_step(
-                        "grid_cell_optimization",
-                        tas0=np.mean(cell_temp[ref_start_idx:ref_end_idx+1]),
-                        pr0=np.mean(cell_precip[ref_start_idx:ref_end_idx+1])
-                    )
-                    
-                    # Create cell data dictionary matching gridcell_data structure
-                    cell_data = {
-                        'years': years,
-                        'population': cell_pop,
-                        'gdp': cell_gdp,
-                        'tas': cell_temp,
-                        'pr': cell_precip,
-                        'tas_weather': cell_temp_weather,
-                        'pr_weather': cell_precip_weather,
-                        'tfp_baseline': cell_tfp_baseline
-                    }
-                    
-                    # Run per-grid-cell optimization
-                    optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
-                        cell_data, params_cell, scaling_params, config, gdp_target
-                    )
+        if target_type == 'variability':
 
-                    # Store results
-                    scaling_factors[lat_idx, lon_idx, damage_idx, target_idx] = optimal_scale
-                    optimization_errors[lat_idx, lon_idx, damage_idx, target_idx] = final_error
-                    convergence_flags[lat_idx, lon_idx, damage_idx, target_idx] = True
+            if variability_reference_scaling is None:
+                # EXPENSIVE: Compute reference relationship once
+                print("\nComputing reference GDP-climate variability relationship...")
+                variability_reference_scaling = calculate_reference_gdp_climate_variability(
+                    config, temp_data, precip_data, pop_data, gdp_data,
+                    reference_tfp, valid_mask, tfp_baseline,
+                    years, damage_scalings, tas0_2d, pr0_2d
+                )
+                print("Reference relationship established.")
 
-                    # Store scaled damage function parameters
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0] = params_scaled.k_tas1
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 1] = params_scaled.k_tas2
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 2] = params_scaled.k_pr1
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 3] = params_scaled.k_pr2
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 4] = params_scaled.tfp_tas1
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 5] = params_scaled.tfp_tas2
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 6] = params_scaled.tfp_pr1
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 7] = params_scaled.tfp_pr2
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 8] = params_scaled.y_tas1
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 9] = params_scaled.y_tas2
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10] = params_scaled.y_pr1
-                    scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11] = params_scaled.y_pr2
+            # CHEAP: Apply target-specific scaling
+            print(f"\nApplying variability target: {gdp_target['target_name']} ({target_idx+1}/{n_gdp_targets})")
+            results = apply_variability_target_scaling(
+                variability_reference_scaling, gdp_target, temp_data, precip_data,
+                tas0_2d, pr0_2d, target_idx, damage_scalings,
+                scaling_factors, optimization_errors, convergence_flags, scaled_parameters
+            )
 
-                    successful_optimizations += 1
+        else:  # target_type == 'damage'
 
-            # Newline after each damage function completes its latitude bands
-            print()
+            # EXPENSIVE: Separate optimization for each damage target
+            results = process_damage_target_optimization(
+                target_idx, gdp_target, target_results, damage_scalings,
+                temp_data, precip_data, pop_data, gdp_data,
+                reference_tfp, valid_mask, tfp_baseline, years, config,
+                scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
+                total_grid_cells, successful_optimizations, ref_start_idx, ref_end_idx
+            )
+
+            # Update counters from damage optimization
+            total_grid_cells = results['total_grid_cells']
+            successful_optimizations = results['successful_optimizations']
 
     print(f"\nOptimization completed:")
     print(f"  Total valid grid cells processed: {total_grid_cells}")  
@@ -816,7 +778,6 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
 
             # Calculate GDP-weighted median using user's algorithm
             # Create weights = cos(lat) * GDP and sort by scaling factor values
-            from coin_ssp_utils import calculate_area_weights
             area_weights = calculate_area_weights(lat_values)
             area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], scale_data.shape)
 
@@ -891,8 +852,6 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
 
     # Write to CSV file if output_dir provided
     if output_dir and csv_data:
-        import pandas as pd
-        import os
 
         json_id = config['run_metadata']['json_id']
         model_name = config['climate_model']['model_name']
@@ -1371,7 +1330,6 @@ def run_pipeline(config_path: str, step3_file: str = None) -> None:
 
 def main():
     """Main entry point for integrated processing pipeline."""
-    import argparse
 
     parser = argparse.ArgumentParser(
         description="COIN-SSP Integrated Processing Pipeline",

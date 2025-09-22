@@ -42,6 +42,11 @@
       "end_year": 1910,
       "description": "Zero-climate change reference period for calculation of tas0 and pr0"
     },
+    "historical_period": {
+      "start_year": 1861,
+      "end_year": 2014,
+      "description": "Historical period for variability relationship calibration"
+    },
     "target_period": {
       "start_year": 2080,
       "end_year": 2100,
@@ -49,6 +54,7 @@
     },
     "prediction_period": {
       "start_year": 2015,
+      "end_year": 2100,
       "description": "Year before which population and GDP is assumed to grow exponentially"
     }
   },
@@ -67,20 +73,6 @@
         "target_type": "damage",
         "gdp_amount": -0.10,
         "description": "Uniform 10% GDP reduction across all grid cells"
-      },
-      {
-        "target_name": "const_20%",
-        "target_shape": "constant",
-        "target_type": "damage",
-        "gdp_amount": -0.20,
-        "description": "Uniform 20% GDP reduction across all grid cells"
-      },
-      {
-        "target_name": "const_40%",
-        "target_shape": "constant",
-        "target_type": "damage",
-        "gdp_amount": -0.40,
-        "description": "Uniform 40% GDP reduction across all grid cells"
       }
   ],
 

@@ -176,3 +176,100 @@ None currently under active investigation.
 - **Visualization Standardization**: All maps use `pcolormesh` with 3-per-page layouts
 - **Enhanced Analysis**: GDP-weighted statistics and objective function metrics in CSV outputs
 - **Simplified Weather Filtering**: Time series filtering now detrends relative to reference period mean for all years
+
+<!-- TEMP-DEV-SECTION-START -->
+## 🚧 TEMPORARY: Variability Target Implementation Plan
+
+**Status**: Phase 1-3 Complete ✅ - Ready for testing with existing damage targets
+
+### JSON Configuration Updates Required
+1. **Add historical_period**:
+   ```json
+   "historical_period": {
+     "start_year": 1861,
+     "end_year": 2014,
+     "description": "Historical period for variability relationship calibration"
+   }
+   ```
+
+2. **Add end_year to prediction_period**:
+   ```json
+   "prediction_period": {
+     "start_year": 2015,
+     "end_year": 2100,
+     "description": "Year before which population and GDP is assumed to grow exponentially"
+   }
+   ```
+
+3. **GDP Target Types**:
+   - `target_type: "damage"` → affects damage in target_period (existing)
+   - `target_type: "variability"` → defines GDP variability scaling with temperature variability in historical_period (new)
+
+### Main.py Architecture Changes (around lines 614-700)
+
+**Current Structure**: Single loop calling `optimize_climate_response_scaling` for all targets
+
+**New Structure**: Conditional processing by target type
+```python
+# Around line 614 - Add early calculations
+tas0_2d, pr0_2d = calculate_reference_climate_baselines(temp_data, precip_data, years, config)
+
+variability_reference_scaling = None  # Computed once, reused
+
+for target_idx, gdp_target in enumerate(gdp_targets):
+    target_type = gdp_target['target_type']
+
+    if target_type == 'variability':
+        if variability_reference_scaling is None:
+            # EXPENSIVE: lat-lon loop with optimization to establish reference relationship
+            variability_reference_scaling = calculate_reference_gdp_climate_variability(...)
+
+        # CHEAP: multiply reference by target-specific scaling
+        results = apply_variability_target_scaling(variability_reference_scaling, gdp_target, ...)
+
+    else:  # target_type == 'damage'
+        # EXPENSIVE: separate optimization for each damage target (existing approach)
+        results = process_damage_target_optimization(...)  # Extract lines 622-700
+```
+
+### New Functions Needed
+
+1. **`calculate_reference_climate_baselines(temp_data, precip_data, years, config)`**
+   - Calculate tas0, pr0 as 2D arrays [lat, lon]
+   - Based on reference_period mean (like current grid cell optimization)
+   - Called once after data loading
+   - Returns: (tas0_2d, pr0_2d)
+
+2. **`calculate_reference_gdp_climate_variability(...)`**
+   - Does lat-lon loop calling `optimize_climate_response_scaling` (damage-type optimization)
+   - Computes linear regression: y_weather ~ tas_weather for each grid cell
+   - Returns: reference_slopes [lat, lon] (slope coefficients)
+   - Called once per run (expensive)
+
+3. **`apply_variability_target_scaling(reference_slopes, gdp_target, temp_data, precip_data, tas0_2d, pr0_2d, target_idx)`**
+   - Uses tas_weather (variability only)
+   - Applies: `variability_effect = reference_slope[lat,lon] * f(tas_weather, gdp_target_params)`
+   - Returns: results dict for storage in scaling_factors arrays
+   - Called once per variability target (cheap)
+
+4. **`process_damage_target_optimization(...)`**
+   - Extract existing code from lines 622-700
+   - Handle all damage target processing
+   - Called once per damage target (expensive)
+
+### Technical Details
+- **Climate Data**: Use `tas_weather` (variability component) for variability targets
+- **Reference Values**: `tas0_2d`, `pr0_2d` as 2D arrays matching damage optimization approach
+- **Performance**: "Calculate once, use multiple times" - expensive reference computation, cheap target applications
+- **Storage**: Results stored in same `scaling_factors[lat, lon, damage_idx, target_idx]` arrays for consistency
+
+### Implementation Priority
+1. JSON config updates
+2. Extract `process_damage_target_optimization` function
+3. Add `calculate_reference_climate_baselines`
+4. Add stub versions of variability functions
+5. Update main.py conditional logic
+6. Implement full variability calculation logic
+
+**Key Risk**: Complex refactoring of main optimization loop - test thoroughly with existing damage targets first.
+<!-- TEMP-DEV-SECTION-END -->

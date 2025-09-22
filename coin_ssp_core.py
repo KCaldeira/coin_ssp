@@ -38,6 +38,8 @@ import numpy as np
 from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
+from scipy import stats
+from coin_ssp_utils import apply_time_series_filter, filter_scaling_params
 
 # Small epsilon to prevent division by zero in ratio calculations
 RATIO_EPSILON = 1e-20
@@ -335,15 +337,15 @@ def optimize_climate_response_scaling(
     # Extract configuration parameters
     target_period = config['time_periods']['target_period']
     target_type = gdp_target['target_type']
-    prediction_start_year = config['time_periods']['prediction_period']['start_year']
+    historical_end_year = config['time_periods']['historical_period']['end_year']
 
     # Precompute target period indices
     start_year = target_period['start_year']
     end_year = target_period['end_year']
     years = gridcell_data['years']
 
-    # Find index of prediction_start_year
-    prediction_start_idx = np.where(years >= prediction_start_year)[0][0]
+    # Find index of historical period end (for potential future use in variability calculations)
+    historical_end_idx = np.where(years <= historical_end_year)[0][-1]
     target_mask = (years >= start_year) & (years <= end_year)
     target_indices = np.where(target_mask)[0]
 
@@ -378,37 +380,10 @@ def optimize_climate_response_scaling(
         objective_value = (mean_ratio - target) ** 2
         return objective_value
 
-    def objective_variability(xarr):
-        # xarr is a length-1 array because we're using scipy.optimize.minimize
-        scale = float(xarr[0])
-
-        # Create scaled parameters using helper function
-        pc = create_scaled_params(params, scaling, scale)
-
-        # Weather (baseline) run
-        y_weather, *_ = calculate_coin_ssp_forward_model(
-            gridcell_data['tfp_baseline'], gridcell_data['population'],
-            gridcell_data['tas_weather'], gridcell_data['pr_weather'], pc
-        )
-
-        # Split time series into historical and prediction periods using pre-computed index
-        # Calculate historical period variability (before prediction period)
-        stddev_y_weather = np.std(y_weather[:prediction_start_idx])
-
-        objective_value = (hist_var_ratio - pred_var_ratio) ** 2
-        return objective_value
-
-    # Choose objective function based on target type
-    if target_type == "damage":
-        objective_func = objective_damage
-    elif target_type == "variability":
-        objective_func = objective_variability
-    else:
-        raise ValueError(f"Unknown target_type '{target_type}'. Must be 'damage' or 'variability'.")
 
     # Initial optimization with original bounds
     res = minimize(
-        objective_func,
+        objective_damage,
         x0=[x0],
         bounds=[bounds],                # keeps search inside [lo, hi]
         method="L-BFGS-B",              # supports bounds + numeric gradient
@@ -470,3 +445,422 @@ def optimize_climate_response_scaling(
 
     scaled_params = create_scaled_params(params, scaling, optimal_scale)
     return optimal_scale, final_error, scaled_params
+
+
+def process_damage_target_optimization(
+    target_idx, gdp_target, target_results, damage_scalings,
+    temp_data, precip_data, pop_data, gdp_data,
+    reference_tfp, valid_mask, tfp_baseline, years, config,
+    scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
+    total_grid_cells, successful_optimizations, ref_start_idx, ref_end_idx
+):
+    """
+    Process optimization for a single damage target across all damage functions and grid cells.
+
+    This function encapsulates the nested loops and per-grid-cell optimization that was
+    previously inline in main.py (lines 622-700). It handles all damage functions for
+    a single GDP target.
+
+    Parameters
+    ----------
+    target_idx : int
+        Index of current GDP target
+    gdp_target : dict
+        GDP target configuration
+    target_results : dict
+        Target GDP results containing reduction arrays
+    damage_scalings : list
+        List of damage scaling configurations
+    temp_data, precip_data, pop_data, gdp_data : np.ndarray
+        Climate and economic data arrays [time, lat, lon]
+    reference_tfp, valid_mask, tfp_baseline : np.ndarray
+        TFP reference data
+    years : np.ndarray
+        Years array
+    config : dict
+        Configuration dictionary
+    scaling_factors, optimization_errors, convergence_flags, scaled_parameters : np.ndarray
+        Output arrays to populate (modified in place)
+    total_grid_cells, successful_optimizations : int
+        Counters (modified in place via list trick)
+    ref_start_idx, ref_end_idx : int
+        Reference period indices
+
+    Returns
+    -------
+    dict
+        Updated counters: {'total_grid_cells': int, 'successful_optimizations': int}
+    """
+
+    target_name = gdp_target['target_name']
+    target_reduction_array = target_results[target_name]['reduction_array']  # [lat, lon]
+
+    print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?)")
+
+    # Get dimensions
+    nlat, nlon = valid_mask.shape
+    n_response_functions = len(damage_scalings)
+
+    for damage_idx, damage_scaling in enumerate(damage_scalings):
+        scaling_name = damage_scaling['scaling_name']
+        print(f"  Response function: {scaling_name} ({damage_idx+1}/{n_response_functions})")
+
+        # Create ScalingParams for this damage function
+        scaling_config = filter_scaling_params(damage_scaling)
+        scaling_params = ScalingParams(**scaling_config)
+
+        for lat_idx in range(nlat):
+            # Progress indicator: print dot for each latitude band
+            print(".", end="", flush=True)
+
+            for lon_idx in range(nlon):
+
+                # Check if grid cell is valid (has economic activity)
+                if not valid_mask[lat_idx, lon_idx]:
+                    continue
+
+                total_grid_cells += 1
+
+                # Extract time series for this grid cell (climate data is [time, lat, lon])
+                cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
+                cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+                cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
+                cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
+                cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
+
+                # Get target reduction for this grid cell
+                target_reduction = target_reduction_array[lat_idx, lon_idx]
+
+                # Create weather (filtered) time series
+                filter_width = 30  # years (same as country-level code)
+                cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
+                cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
+
+                # Create parameters for this grid cell using factory
+                params_cell = config['model_params_factory'].create_for_step(
+                    "grid_cell_optimization",
+                    tas0=np.mean(cell_temp[ref_start_idx:ref_end_idx+1]),
+                    pr0=np.mean(cell_precip[ref_start_idx:ref_end_idx+1])
+                )
+
+                # Create cell data dictionary matching gridcell_data structure
+                cell_data = {
+                    'years': years,
+                    'population': cell_pop,
+                    'gdp': cell_gdp,
+                    'tas': cell_temp,
+                    'pr': cell_precip,
+                    'tas_weather': cell_temp_weather,
+                    'pr_weather': cell_precip_weather,
+                    'tfp_baseline': cell_tfp_baseline
+                }
+
+                # Run per-grid-cell optimization
+                optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
+                    cell_data, params_cell, scaling_params, config, gdp_target
+                )
+
+                # Store results
+                scaling_factors[lat_idx, lon_idx, damage_idx, target_idx] = optimal_scale
+                optimization_errors[lat_idx, lon_idx, damage_idx, target_idx] = final_error
+                convergence_flags[lat_idx, lon_idx, damage_idx, target_idx] = True
+
+                # Store scaled damage function parameters
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0] = params_scaled.k_tas1
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 1] = params_scaled.k_tas2
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 2] = params_scaled.k_pr1
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 3] = params_scaled.k_pr2
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 4] = params_scaled.tfp_tas1
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 5] = params_scaled.tfp_tas2
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 6] = params_scaled.tfp_pr1
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 7] = params_scaled.tfp_pr2
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 8] = params_scaled.y_tas1
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 9] = params_scaled.y_tas2
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10] = params_scaled.y_pr1
+                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11] = params_scaled.y_pr2
+
+                successful_optimizations += 1
+
+        # Newline after each damage function completes its latitude bands
+        print()
+
+    return {
+        'total_grid_cells': total_grid_cells,
+        'successful_optimizations': successful_optimizations
+    }
+
+
+def calculate_reference_climate_baselines(temp_data, precip_data, years, config):
+    """
+    Calculate reference climate baselines (tas0, pr0) as 2D arrays for all grid cells.
+
+    This computes the reference period mean temperature and precipitation for each grid cell,
+    following the same approach as the per-grid-cell optimization but computed once for reuse.
+
+    Parameters
+    ----------
+    temp_data, precip_data : np.ndarray
+        Climate data arrays [time, lat, lon]
+    years : np.ndarray
+        Years array corresponding to time dimension
+    config : dict
+        Configuration dictionary containing time_periods
+
+    Returns
+    -------
+    tas0_2d, pr0_2d : np.ndarray
+        Reference baselines as 2D arrays [lat, lon]
+    """
+    # Get reference period indices
+    time_periods = config['time_periods']
+    ref_start_year = time_periods['reference_period']['start_year']
+    ref_end_year = time_periods['reference_period']['end_year']
+
+    ref_start_idx = np.where(years == ref_start_year)[0][0]
+    ref_end_idx = np.where(years == ref_end_year)[0][0]
+
+    # Calculate reference period means for all grid cells
+    tas0_2d = np.mean(temp_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+    pr0_2d = np.mean(precip_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+
+    return tas0_2d, pr0_2d
+
+
+def calculate_reference_gdp_climate_variability(
+    config,
+    temp_data, precip_data, pop_data, gdp_data,
+    reference_tfp, valid_mask, tfp_baseline,
+    years, damage_scalings, tas0_2d, pr0_2d
+):
+    """
+    Compute reference relationship between climate variability and GDP variability.
+
+    Performs lat-lon loop with optimization to establish the reference relationship:
+    y_weather ~ tas_weather linear regression for each grid cell.
+
+    For each valid grid cell:
+    1. Run optimization to get scaling factors (using first damage function as reference)
+    2. Compute y_weather time series using optimal scaling
+    3. Compute linear regression: y_weather ~ tas_weather over historical period
+    4. Store slope as reference relationship
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    temp_data, precip_data, pop_data, gdp_data : np.ndarray
+        Climate and economic data arrays [time, lat, lon]
+    reference_tfp, valid_mask, tfp_baseline : np.ndarray
+        TFP reference data
+    years : np.ndarray
+        Years array
+    damage_scalings : list
+        List of damage scaling configurations (for optimization)
+    tas0_2d, pr0_2d : np.ndarray
+        Reference climate baselines [lat, lon]
+
+    Returns
+    -------
+    reference_slopes : np.ndarray
+        Linear regression slopes [lat, lon] for y_weather ~ tas_weather relationship
+    """
+
+    print("Computing reference GDP-climate variability relationship...")
+    print("This involves optimization at each grid cell and may take time...")
+
+    # Get dimensions
+    nlat, nlon = valid_mask.shape
+    reference_slopes = np.full((nlat, nlon), np.nan)
+
+    # Use first damage function as reference for optimization
+    reference_damage_scaling = damage_scalings[0]
+    scaling_config = filter_scaling_params(reference_damage_scaling)
+    scaling_params = ScalingParams(**scaling_config)
+
+    # Get historical period indices for regression
+    time_periods = config['time_periods']
+    hist_start_year = time_periods['historical_period']['start_year']
+    hist_end_year = time_periods['historical_period']['end_year']
+
+    hist_start_idx = np.where(years >= hist_start_year)[0][0]
+    hist_end_idx = np.where(years <= hist_end_year)[0][-1]
+
+    # Get reference period indices for filtering
+    ref_start_year = time_periods['reference_period']['start_year']
+    ref_end_year = time_periods['reference_period']['end_year']
+    ref_start_idx = np.where(years == ref_start_year)[0][0]
+    ref_end_idx = np.where(years == ref_end_year)[0][0]
+
+    # Create dummy GDP target for optimization (we just need scaling factors)
+    dummy_gdp_target = {
+        'target_type': 'damage',
+        'gdp_amount': -0.05,  # 5% reduction as reference
+        'target_name': 'variability_reference'
+    }
+
+    processed_cells = 0
+    valid_cells = np.sum(valid_mask)
+
+    for lat_idx in range(nlat):
+        # Progress indicator
+        if lat_idx % 10 == 0:
+            print(f"  Processing latitude band {lat_idx+1}/{nlat} ({100*processed_cells/valid_cells:.1f}% of valid cells)")
+
+        for lon_idx in range(nlon):
+            # Check if grid cell is valid
+            if not valid_mask[lat_idx, lon_idx]:
+                continue
+
+            processed_cells += 1
+
+            # Extract time series for this grid cell
+            cell_temp = temp_data[:, lat_idx, lon_idx]  # [time]
+            cell_precip = precip_data[:, lat_idx, lon_idx]  # [time]
+            cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
+            cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
+            cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time]
+
+            # Create weather (filtered) time series
+            filter_width = 30  # years
+            cell_temp_weather = apply_time_series_filter(cell_temp, filter_width, ref_start_idx, ref_end_idx)
+            cell_precip_weather = apply_time_series_filter(cell_precip, filter_width, ref_start_idx, ref_end_idx)
+
+            # Create parameters for this grid cell using factory
+            params_cell = config['model_params_factory'].create_for_step(
+                "grid_cell_optimization",
+                tas0=tas0_2d[lat_idx, lon_idx],
+                pr0=pr0_2d[lat_idx, lon_idx]
+            )
+
+            # Create cell data dictionary
+            cell_data = {
+                'years': years,
+                'population': cell_pop,
+                'gdp': cell_gdp,
+                'tas': cell_temp,
+                'pr': cell_precip,
+                'tas_weather': cell_temp_weather,
+                'pr_weather': cell_precip_weather,
+                'tfp_baseline': cell_tfp_baseline
+            }
+
+            try:
+                # Run optimization to get scaling factors
+                optimal_scale, final_error, params_scaled = optimize_climate_response_scaling(
+                    cell_data, params_cell, scaling_params, config, dummy_gdp_target
+                )
+
+                # Compute y_weather time series using optimal scaling
+                y_weather, *_ = calculate_coin_ssp_forward_model(
+                    cell_tfp_baseline, cell_pop, cell_temp_weather, cell_precip_weather, params_scaled
+                )
+
+                # Extract historical period data for regression
+                tas_weather_hist = cell_temp_weather[hist_start_idx:hist_end_idx+1]
+                y_weather_hist = y_weather[hist_start_idx:hist_end_idx+1]
+
+                # Perform linear regression: y_weather ~ tas_weather
+                if len(tas_weather_hist) > 10 and len(y_weather_hist) > 10:  # Need sufficient data
+                    slope, intercept, r_value, p_value, std_err = stats.linregress(tas_weather_hist, y_weather_hist)
+                    reference_slopes[lat_idx, lon_idx] = slope
+                else:
+                    # Insufficient data
+                    reference_slopes[lat_idx, lon_idx] = 0.0
+
+            except Exception as e:
+                # Optimization failed
+                print(f"    Warning: Optimization failed at grid cell ({lat_idx}, {lon_idx}): {e}")
+                reference_slopes[lat_idx, lon_idx] = 0.0
+
+    print(f"Reference relationship computation complete.")
+    print(f"  Valid slope estimates: {np.sum(np.isfinite(reference_slopes) & (reference_slopes != 0))}/{valid_cells}")
+
+    return reference_slopes
+
+
+def apply_variability_target_scaling(
+    reference_slopes, gdp_target, temp_data, precip_data,
+    tas0_2d, pr0_2d, target_idx, damage_scalings,
+    scaling_factors, optimization_errors, convergence_flags, scaled_parameters
+):
+    """
+    Apply variability target scaling using reference relationship.
+
+    Uses the reference slopes and current temperature data to compute variability effects
+    for the specified target, avoiding expensive optimization.
+
+    The variability scaling applies the relationship:
+    scaling_factor = reference_slope * target_scaling_parameter
+
+    Where target_scaling_parameter comes from the gdp_target configuration.
+
+    Parameters
+    ----------
+    reference_slopes : np.ndarray
+        Reference slopes [lat, lon] from calculate_reference_gdp_climate_variability
+    gdp_target : dict
+        Target configuration with variability parameters
+    temp_data, precip_data : np.ndarray
+        Climate data [time, lat, lon]
+    tas0_2d, pr0_2d : np.ndarray
+        Reference baselines [lat, lon]
+    target_idx : int
+        Target index for result storage
+    damage_scalings : list
+        Damage scaling configurations
+    scaling_factors, optimization_errors, convergence_flags, scaled_parameters : np.ndarray
+        Output arrays to populate (modified in place)
+
+    Returns
+    -------
+    dict
+        Results summary
+    """
+    nlat, nlon = tas0_2d.shape
+    n_damage = len(damage_scalings)
+
+    target_name = gdp_target['target_name']
+    print(f"Applying variability target: {target_name}")
+
+    # Extract target scaling parameter from gdp_target configuration
+    # For now, use the same parameter naming as damage targets
+    # TODO: Define specific variability parameter names
+    target_scaling_param = gdp_target.get('gdp_amount', 1.0)  # Default multiplier
+
+    print(f"  Target scaling parameter: {target_scaling_param}")
+    print(f"  Reference slopes range: {np.nanmin(reference_slopes):.6f} to {np.nanmax(reference_slopes):.6f}")
+
+    # Apply scaling to all damage functions (same relationship applies to all)
+    for damage_idx in range(n_damage):
+        # Compute variability scaling factors using reference relationship
+        # scaling_factor = reference_slope * target_parameter
+        target_scaling_factors = reference_slopes * target_scaling_param
+
+        # Store results in output arrays
+        scaling_factors[:, :, damage_idx, target_idx] = target_scaling_factors
+
+        # For variability targets, set optimization error to zero (no optimization performed)
+        optimization_errors[:, :, damage_idx, target_idx] = 0.0
+
+        # Mark as converged where we have valid reference slopes
+        convergence_flags[:, :, damage_idx, target_idx] = np.isfinite(reference_slopes)
+
+        # For scaled_parameters, we don't have meaningful values for variability targets
+        # Leave them as NaN to indicate they're not applicable
+        # (variability targets use the reference relationship directly)
+
+    # Summary statistics
+    valid_cells = np.sum(np.isfinite(reference_slopes))
+    applied_cells = np.sum(np.isfinite(target_scaling_factors))
+
+    print(f"  Applied to {applied_cells}/{valid_cells} valid grid cells")
+    if applied_cells > 0:
+        scaling_range = target_scaling_factors[np.isfinite(target_scaling_factors)]
+        print(f"  Scaling factors range: {np.min(scaling_range):.6f} to {np.max(scaling_range):.6f}")
+
+    return {
+        'variability_target_processed': True,
+        'target_name': target_name,
+        'applied_cells': applied_cells,
+        'valid_cells': valid_cells
+    }
