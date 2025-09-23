@@ -269,7 +269,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
         'gdp': all_data[reference_ssp]['gdp'],
         'lat': all_data['_metadata']['lat'],
         'lon': all_data['_metadata']['lon'],
-        'years': get_grid_metadata(all_data)['years']
+        'years': all_data['years']
           }
     
     # Calculate temporal means
@@ -492,7 +492,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
     reference_ssp = config['ssp_scenarios']['reference_ssp']
    
     # Get years array from pre-computed metadata
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']
 
 
     tfp_results['_metadata'] = {
@@ -606,7 +606,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     params = config['model_params_factory'].create_base()
     
     # Get years array from pre-computed metadata
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']
 
     # Calculate reference period indices for tas0/pr0 baseline calculation
     time_periods = config['time_periods']
@@ -747,7 +747,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
     # Calculate target period GDP for weighting (use same period as target calculation)
     target_start = config['time_periods']['target_period']['start_year']
     target_end = config['time_periods']['target_period']['end_year']
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']
 
     start_idx = target_start - years[0]
     end_idx = target_end - years[0] + 1
@@ -958,7 +958,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     # Get grid dimensions
     nlat, nlon = valid_mask.shape
     
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']
     time_periods = config['time_periods']
     
     forward_results = {}
@@ -980,7 +980,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
 
         ntime = tas_data.shape[0]  # Time is first dimension
-        years = get_grid_metadata(all_data)['years']
+        years = all_data['years']
 
         # Calculate reference period indices for tas0/pr0 baseline calculation
         ref_start_year = time_periods['reference_period']['start_year']

@@ -209,12 +209,12 @@ def obtain_configuration_information(output_files, analysis_output_dir):
     return config_data
 
 
-def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, config, ssp_filter=None):
+def analysis_tas_gdp_correlations(output_files, analysis_output_dir, config, ssp_filter=None):
     """
-    Analyze correlations between temperature and GDP variability (detrended residuals).
+    Analyze correlations between tas and GDP variability (detrended residuals).
 
     For each SSP/target/response function combination, computes correlations between
-    temperature variability and GDP variability after removing 30-year LOESS trends.
+    tas variability and GDP variability after removing 30-year LOESS trends.
     This shows how short-term climate fluctuations relate to short-term economic fluctuations.
     Reports correlation coefficient, linear regression slope, and ratio of standard deviations.
 
@@ -233,24 +233,24 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
     print("📊 Analysis: Temperature-GDP Variability Correlations (Detrended)")
 
     # Create analysis output directory
-    analysis_dir = os.path.join(analysis_output_dir, "temperature_gdp_variability_correlations")
+    analysis_dir = os.path.join(analysis_output_dir, "tas_gdp_variability_correlations")
     os.makedirs(analysis_dir, exist_ok=True)
     print(f"    Output directory: {analysis_dir}")
 
-    # Load temperature data from all_loaded_data file
-    print("    📈 Loading temperature data...")
-    temp_ds = xr.open_dataset(output_files['all_loaded_data'])
-    temperature_data = temp_ds.temperature.values  # [ssp, time, lat, lon]
-    temp_coords = {
-        'ssp': temp_ds.ssp.values,
-        'time': temp_ds.time.values,
-        'lat': temp_ds.lat.values,
-        'lon': temp_ds.lon.values
+    # Load tas data from all_loaded_data file
+    print("    📈 Loading tas data...")
+    tas_ds = xr.open_dataset(output_files['all_loaded_data'])
+    tas_data = tas_ds.tas.values  # [ssp, time, lat, lon]
+    tas_coords = {
+        'ssp': tas_ds.ssp.values,
+        'time': tas_ds.time.values,
+        'lat': tas_ds.lat.values,
+        'lon': tas_ds.lon.values
     }
-    valid_mask = temp_ds.valid_mask.values  # [lat, lon]
-    temp_ds.close()
+    valid_mask = tas_ds.valid_mask.values  # [lat, lon]
+    tas_ds.close()
 
-    print(f"    Temperature data shape: {temperature_data.shape}")
+    print(f"    Temperature data shape: {tas_data.shape}")
     print(f"    Valid grid cells: {np.sum(valid_mask)}")
 
     # Find all step4 GDP NetCDF files
@@ -285,9 +285,9 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
 
     # Get full time range for LOESS filtering
     full_start_idx = 0
-    full_end_idx = len(temp_coords['time']) - 1
+    full_end_idx = len(tas_coords['time']) - 1
 
-    print(f"    🎯 LOESS detrending over full time series: {temp_coords['time'][0]}-{temp_coords['time'][-1]} (indices {full_start_idx}-{full_end_idx})")
+    print(f"    🎯 LOESS detrending over full time series: {tas_coords['time'][0]}-{tas_coords['time'][-1]} (indices {full_start_idx}-{full_end_idx})")
 
     # Initialize results storage
     correlation_results = []
@@ -314,14 +314,14 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
 
         step4_ds.close()
 
-        # Find corresponding temperature data for this SSP
-        ssp_idx = np.where(temp_coords['ssp'] == ssp_name)[0]
+        # Find corresponding tas data for this SSP
+        ssp_idx = np.where(tas_coords['ssp'] == ssp_name)[0]
         if len(ssp_idx) == 0:
-            print(f"      ❌ No temperature data found for SSP {ssp_name}")
+            print(f"      ❌ No tas data found for SSP {ssp_name}")
             continue
 
         ssp_idx = ssp_idx[0]
-        temp_ssp = temperature_data[ssp_idx]  # [time, lat, lon]
+        tas_ssp = tas_data[ssp_idx]  # [time, lat, lon]
 
         print(f"      📋 SSP: {ssp_name}, Variable: GDP")
         print(f"      📋 Targets: {len(target_names)}, Response functions: {len(response_func_names)}")
@@ -344,18 +344,18 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
                 std_ratios_climate = []
                 std_ratios_weather = []
 
-                for lat_idx in range(temp_ssp.shape[1]):
-                    for lon_idx in range(temp_ssp.shape[2]):
+                for lat_idx in range(tas_ssp.shape[1]):
+                    for lon_idx in range(tas_ssp.shape[2]):
                         if not valid_mask[lat_idx, lon_idx]:
                             continue
 
                         # Extract time series for this grid cell
-                        temp_series = temp_ssp[:, lat_idx, lon_idx]
+                        tas_series = tas_ssp[:, lat_idx, lon_idx]
                         gdp_climate_series = gdp_climate_combo[:, lat_idx, lon_idx]
                         gdp_weather_series = gdp_weather_combo[:, lat_idx, lon_idx]
 
                         # Skip if any data is invalid
-                        if (np.any(~np.isfinite(temp_series)) or
+                        if (np.any(~np.isfinite(tas_series)) or
                             np.any(~np.isfinite(gdp_climate_series)) or
                             np.any(~np.isfinite(gdp_weather_series))):
                             continue
@@ -364,31 +364,31 @@ def analysis_temperature_gdp_correlations(output_files, analysis_output_dir, con
                         # Note: apply_time_series_filter returns detrended data, we need the trend itself
 
                         # Get LOESS trends directly using lowess
-                        t = np.arange(len(temp_series), dtype=float)
-                        frac = min(1.0, 30 / len(temp_series))
+                        t = np.arange(len(tas_series), dtype=float)
+                        frac = min(1.0, 30 / len(tas_series))
 
-                        temp_trend = sm.nonparametric.lowess(temp_series, t, frac=frac, it=1, return_sorted=False)
+                        tas_trend = sm.nonparametric.lowess(tas_series, t, frac=frac, it=1, return_sorted=False)
                         gdp_climate_trend = sm.nonparametric.lowess(gdp_climate_series, t, frac=frac, it=1, return_sorted=False)
                         gdp_weather_trend = sm.nonparametric.lowess(gdp_weather_series, t, frac=frac, it=1, return_sorted=False)
 
                         # Calculate variability
-                        # for temperature: subtract smoothed trend (absolute deviations)
-                        temp_variability = temp_series - temp_trend
+                        # for tas: subtract smoothed trend (absolute deviations)
+                        tas_variability = tas_series - tas_trend
                         # for GDP: divide by smoothed trend to get relative variability (fractional changes)
                         gdp_climate_variability = gdp_climate_series / gdp_climate_trend
                         gdp_weather_variability = gdp_weather_series / gdp_weather_trend
 
 
                         # Calculate correlations and regression statistics
-                        # Climate scenario (temp_ssp vs gdp_climate)
-                        corr_climate, _ = stats.pearsonr(temp_variability, gdp_climate_variability)
-                        slope_climate, _, _, _, _ = stats.linregress(temp_variability, gdp_climate_variability)
-                        std_ratio_climate = np.std(gdp_climate_variability) / np.std(temp_variability)
+                        # Climate scenario (tas_ssp vs gdp_climate)
+                        corr_climate, _ = stats.pearsonr(tas_variability, gdp_climate_variability)
+                        slope_climate, _, _, _, _ = stats.linregress(tas_variability, gdp_climate_variability)
+                        std_ratio_climate = np.std(gdp_climate_variability) / np.std(tas_variability)
 
-                        # Weather scenario (temp_ssp vs gdp_weather)
-                        corr_weather, _ = stats.pearsonr(temp_variability, gdp_weather_variability)
-                        slope_weather, _, _, _, _ = stats.linregress(temp_variability, gdp_weather_variability)
-                        std_ratio_weather = np.std(gdp_weather_variability) / np.std(temp_variability)
+                        # Weather scenario (tas_ssp vs gdp_weather)
+                        corr_weather, _ = stats.pearsonr(tas_variability, gdp_weather_variability)
+                        slope_weather, _, _, _, _ = stats.linregress(tas_variability, gdp_weather_variability)
+                        std_ratio_weather = np.std(gdp_weather_variability) / np.std(tas_variability)
 
                         # Store results
                         correlations_climate.append(corr_climate)
@@ -542,7 +542,7 @@ def run_all_analyses(output_files, analysis_output_dir, ssp_filter=None):
 
     # Define subsequent analyses (config is now available)
     analyses = [
-        ("Temperature-GDP Variability Correlations", analysis_temperature_gdp_correlations),
+        ("Temperature-GDP Variability Correlations", analysis_tas_gdp_correlations),
         ("Analysis 3", analysis_3_placeholder)
     ]
 
@@ -555,7 +555,7 @@ def run_all_analyses(output_files, analysis_output_dir, ssp_filter=None):
 
         try:
             # Pass output_files, config, and SSP filter to analyses
-            if analysis_func == analysis_temperature_gdp_correlations:
+            if analysis_func == analysis_tas_gdp_correlations:
                 analysis_func(output_files, analysis_output_dir, config, ssp_filter)
             else:
                 analysis_func(output_files, analysis_output_dir, config)

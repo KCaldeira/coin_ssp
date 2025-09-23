@@ -242,7 +242,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                     baseline_gdp = get_ssp_data(all_data, ssp, 'gdp')  # [time, lat, lon]
     
                     # Get years array from pre-computed metadata
-                    years = get_grid_metadata(all_data)['years']
+                    years = all_data['years']
 
 
                     # Extract time series for this combination
@@ -1782,13 +1782,13 @@ def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
         
         try:
             # Resolve file paths for this SSP
-            temp_file = resolve_netcdf_filepath(config, 'tas', ssp_name) 
-            precip_file = resolve_netcdf_filepath(config, 'pr', ssp_name)
+            tas_file = resolve_netcdf_filepath(config, 'tas', ssp_name)
+            pr_file = resolve_netcdf_filepath(config, 'pr', ssp_name)
             gdp_file = resolve_netcdf_filepath(config, 'gdp', ssp_name)
             pop_file = resolve_netcdf_filepath(config, 'pop', ssp_name)
             
-            print(f"  Temperature: {os.path.basename(temp_file)}")
-            print(f"  Precipitation: {os.path.basename(precip_file)}")
+            print(f"  Temperature: {os.path.basename(tas_file)}")
+            print(f"  Precipitation: {os.path.basename(pr_file)}")
             print(f"  GDP: {os.path.basename(gdp_file)}")
             print(f"  Population: {os.path.basename(pop_file)}")
             
@@ -1809,9 +1809,10 @@ def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
                     'lat': ssp_data['lat'],
                     'lon': ssp_data['lon'],
                     'grid_shape': (len(ssp_data['lat']), len(ssp_data['lon'])),
-                    'time_shape': len(ssp_data['tas_years']),  # Assuming all same length
-                    'years': ssp_data['common_years']  # Common years array computed once
+                    'time_shape': len(ssp_data['tas_years'])  # Assuming all same length
                 })
+                # Store years at top level for easy access across all functions
+                all_data['years'] = ssp_data['common_years']
             
             print(f"  Data shape: {ssp_data['tas'].shape}")
             print(f"  ✅ Successfully loaded {ssp_name}")
@@ -1931,24 +1932,24 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     n_time, n_lat, n_lon = len(years), len(lat), len(lon)
 
     # Initialize arrays [ssp, time, lat, lon]
-    temperature_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
-    precipitation_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+    tas_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
+    pr_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
     gdp_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
     pop_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
 
     # Fill arrays
     for i, ssp_name in enumerate(ssp_names):
         ssp_data = all_data[ssp_name]
-        temperature_all[i] = ssp_data['tas']      # [time, lat, lon]
-        precipitation_all[i] = ssp_data['pr']  # [time, lat, lon]
+        tas_all[i] = ssp_data['tas']      # [time, lat, lon]
+        pr_all[i] = ssp_data['pr']  # [time, lat, lon]
         gdp_all[i] = ssp_data['gdp']                      # [time, lat, lon]
         pop_all[i] = ssp_data['pop']        # [time, lat, lon]
 
     # Create xarray Dataset
     ds = xr.Dataset(
         {
-            'tas': (['ssp', 'time', 'lat', 'lon'], temperature_all),
-            'pr': (['ssp', 'time', 'lat', 'lon'], precipitation_all),
+            'tas': (['ssp', 'time', 'lat', 'lon'], tas_all),
+            'pr': (['ssp', 'time', 'lat', 'lon'], pr_all),
             'gdp': (['ssp', 'time', 'lat', 'lon'], gdp_all),
             'pop': (['ssp', 'time', 'lat', 'lon'], pop_all),
             'valid_mask': (['lat', 'lon'], valid_mask)
@@ -2105,18 +2106,21 @@ def get_ssp_data(all_data: Dict[str, Any], ssp_name: str, data_type: str) -> np.
 def get_grid_metadata(all_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract grid metadata from loaded NetCDF data structure.
-    
+
     Parameters
     ----------
     all_data : Dict[str, Any]
         Result from load_all_data()
-        
+
     Returns
     -------
     Dict[str, Any]
         Metadata dictionary containing coordinates and dimensions
     """
-    return all_data['_metadata']
+    metadata = all_data['_metadata'].copy()
+    # Add years from top-level location
+    metadata['years'] = all_data['years']
+    return metadata
 
 
 # =============================================================================
@@ -2226,7 +2230,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     ds = xr.Dataset(
         {
             'target_gdp_amounts': (['target_name', 'lat', 'lon'], target_reductions),
-            'temperature_ref': (['lat', 'lon'], metadata['tas_ref']),
+            'tas_ref': (['lat', 'lon'], metadata['tas_ref']),
             'gdp_target': (['lat', 'lon'], metadata['gdp_target'])
         },
         coords={
@@ -2243,7 +2247,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
         'description': f'Target reduction patterns for {len(target_names)} cases'
     }
     
-    ds.temperature_ref.attrs = {
+    ds.tas_ref.attrs = {
         'long_name': 'Reference period temperature',
         'units': '°C'
     }
@@ -2807,7 +2811,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         ax4 = plt.subplot(subplot_rows, subplot_cols, line_plot_position)
 
         # Temperature range for plotting
-        temp_range = np.linspace(-10, 35, 1000)
+        tas_range = np.linspace(-10, 35, 1000)
 
         # Plot each function
         colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
@@ -2832,11 +2836,11 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 gdp_targets = config['gdp_targets']
                 const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
                 constant_value = const_config['gdp_amount']
-                function_values = np.full_like(temp_range, constant_value)
+                function_values = np.full_like(tas_range, constant_value)
                 label = f'Constant: {constant_value:.3f}'
 
                 # Horizontal line for constant
-                ax4.plot(temp_range, function_values, color=color, linewidth=2,
+                ax4.plot(tas_range, function_values, color=color, linewidth=2,
                         label=label, alpha=0.8)
 
             elif target_shape == 'linear':
@@ -2844,9 +2848,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 if coefficients:
                     # Linear function: reduction = a0 + a1 * T
                     a0, a1 = coefficients['a0'], coefficients['a1']
-                    function_values = a0 + a1 * temp_range
+                    function_values = a0 + a1 * tas_range
 
-                    ax4.plot(temp_range, function_values, color=color, linewidth=2,
+                    ax4.plot(tas_range, function_values, color=color, linewidth=2,
                             label=f'Linear: {a0:.4f} + {a1:.4f}×T', alpha=0.8)
 
                     # Add calibration point from config
@@ -2863,9 +2867,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 if coefficients:
                     # Quadratic function: reduction = a + b*T + c*T²
                     a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
-                    function_values = a + b * temp_range + c * temp_range**2
+                    function_values = a + b * tas_range + c * tas_range**2
 
-                    ax4.plot(temp_range, function_values, color=color, linewidth=2,
+                    ax4.plot(tas_range, function_values, color=color, linewidth=2,
                             label=f'Quadratic: {a:.4f} + {b:.4f}×T + {c:.6f}×T²', alpha=0.8)
 
                     # Add calibration points from config
@@ -2929,10 +2933,10 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 coefficients = target_info['coefficients']
                 if target_shape == 'linear':
                     a0, a1 = coefficients['a0'], coefficients['a1']
-                    values = a0 + a1 * temp_range
+                    values = a0 + a1 * tas_range
                 elif target_shape == 'quadratic':
                     a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
-                    values = a + b * temp_range + c * temp_range**2
+                    values = a + b * tas_range + c * tas_range**2
                 all_y_values.extend(values)
 
         if all_y_values:
@@ -3565,7 +3569,7 @@ def calculate_weather_vars(all_data, config):
 
     # Get reference period indices
     time_periods = config['time_periods']
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']  # Use years from top-level location
     ref_start_year = time_periods['reference_period']['start_year']
     ref_end_year = time_periods['reference_period']['end_year']
 

@@ -588,7 +588,7 @@ def calculate_reference_climate_baselines(all_data, config):
 
     tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
     pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']
 
     # Get reference period indices
     time_periods = config['time_periods']
@@ -651,7 +651,7 @@ def calculate_reference_gdp_climate_variability(
     gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')
     tas_weather_data = all_data[reference_ssp]['tas_weather']
     pr_weather_data = all_data[reference_ssp]['pr_weather']
-    years = get_grid_metadata(all_data)['years']
+    years = all_data['years']
 
     # Get reference climate baselines from all_data
     tas0_2d = all_data['tas0_2d']
