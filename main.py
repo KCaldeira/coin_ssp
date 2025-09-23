@@ -4,7 +4,7 @@ Integrated COIN-SSP Processing Pipeline
 
 This module implements the complete processing pipeline for gridded climate-economic 
 modeling using unified JSON configuration files. The pipeline processes one climate 
-model at a time with configurable SSP scenarios, damage functions, and GDP targets.
+model at a time with configurable SSP scenarios, response functions, and GDP targets.
 
 Processing Flow (per README.md Section 3):
 1. Develop target GDP changes using SSP245 scenario (global calculation)
@@ -43,7 +43,7 @@ from coin_ssp_utils import (
 )
 from coin_ssp_core import (
     optimize_climate_response_scaling, calculate_coin_ssp_forward_model,
-    calculate_reference_gdp_climate_variability, apply_variability_target_scaling, process_damage_target_optimization
+    calculate_reference_gdp_climate_variability, apply_variability_target_scaling, process_response_target_optimization
 )
 from model_params_factory import ModelParamsFactory
 
@@ -528,7 +528,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     This step optimizes scaling factors individually for each grid cell by:
     1. For each grid cell:
-       - For each damage function scaling configuration:
+       - For each response function scaling configuration:
          - For each target GDP change pattern:
            - Run optimize_climate_response_scaling using that cell's data
            - Find scaling factor that achieves target GDP reduction for that location
@@ -553,10 +553,10 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print("="*80)
     
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-    damage_scalings = config['response_function_scalings']
+    response_scalings = config['response_function_scalings']
     gdp_targets = config['gdp_targets']
     
-    n_response_functions = len(damage_scalings)
+    n_response_functions = len(response_scalings)
     n_gdp_targets = len(gdp_targets)
     total_combinations = n_response_functions * n_gdp_targets
     
@@ -592,7 +592,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     optimization_errors = np.full((nlat, nlon, n_response_functions, n_gdp_targets), np.nan)
     convergence_flags = np.full((nlat, nlon, n_response_functions, n_gdp_targets), False)
     
-    # Initialize arrays for scaled damage function parameters [lat, lon, response_func, target, param]
+    # Initialize arrays for scaled response function parameters [lat, lon, response_func, target, param]
     # The 12 parameters are: k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2
     n_scaled_params = 12
     scaled_parameters = np.full((nlat, nlon, n_response_functions, n_gdp_targets, n_scaled_params), np.nan)
@@ -634,7 +634,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         print("Detected 'variability' type GDP targets. Preparing variability reference scaling...")
         # EXPENSIVE: Compute reference relationship once
         variability_reference_scaling = calculate_reference_gdp_climate_variability(
-                    all_data, config, reference_tfp, damage_scalings
+                    all_data, config, reference_tfp, response_scalings
                 )
 
     # Process each GDP target with conditional logic based on target type
@@ -651,15 +651,15 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
             print(f"\nApplying variability target: {gdp_target['target_name']} ({target_idx+1}/{n_gdp_targets})")
             results = apply_variability_target_scaling(
                 variability_reference_scaling, gdp_target, tas_data, pr_data,
-                tas0_2d, pr0_2d, target_idx, damage_scalings,
+                tas0_2d, pr0_2d, target_idx, response_scalings,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters
             )
 
         else:  # target_type == 'damage'
 
             # EXPENSIVE: Separate optimization for each damage target
-            results = process_damage_target_optimization(
-                target_idx, gdp_target, target_results, damage_scalings,
+            results = process_response_target_optimization(
+                target_idx, gdp_target, target_results, response_scalings,
                 tas_data, pr_data, pop_data, gdp_data,
                 reference_tfp, valid_mask, tfp_baseline, years, config,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
@@ -683,7 +683,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         'convergence_flags': convergence_flags,   # [lat, lon, response_func_idx, target_idx] boolean
         'scaled_parameters': scaled_parameters,   # [lat, lon, response_func_idx, target_idx, param_idx]
         'scaled_param_names': scaled_param_names, # Parameter names for the last dimension
-        'response_function_names': [df['scaling_name'] for df in damage_scalings],
+        'response_function_names': [df['scaling_name'] for df in response_scalings],
         'target_names': [tgt['target_name'] for tgt in gdp_targets], 
         'total_grid_cells': total_grid_cells,
         'successful_optimizations': successful_optimizations,
@@ -911,7 +911,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     This step applies the forward economic model by:
     1. For each forward simulation SSP:
        - Load climate data (temperature, precipitation)
-       - For each damage function and target combination:
+       - For each response function and target combination:
          - Apply per-cell scaling factors from Step 3
          - Run calculate_coin_ssp_forward_model for each grid cell
          - Generate climate-integrated projections using baseline TFP from Step 2
@@ -1009,8 +1009,8 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
             target_name = target_names[target_idx]
             print(f"    GDP reduction target: {target_name} ({target_idx+1}/{n_gdp_targets})")
 
-            for damage_idx in range(n_response_functions):
-                damage_name = response_function_names[damage_idx]
+            for response_idx in range(n_response_functions):
+                response_name = response_function_names[response_idx]
                 
                 for lat_idx in range(nlat):
                     for lon_idx in range(nlon):
@@ -1020,7 +1020,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                             continue
                         
                         # Check if scaling factor optimization was successful for this combination
-                        if np.isnan(scaling_factors[lat_idx, lon_idx, damage_idx, target_idx]):
+                        if np.isnan(scaling_factors[lat_idx, lon_idx, response_idx, target_idx]):
                             continue
                             
                         total_forward_runs += 1
@@ -1036,24 +1036,24 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]  # [time]
                         cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]    # [time]
                         
-                        # Create ModelParams with scaled damage function parameters
+                        # Create ModelParams with scaled response function parameters
                         params_scaled = copy.deepcopy(base_params)
                         params_scaled.tas0 = np.mean(cell_tas[ref_start_idx:ref_end_idx+1])
                         params_scaled.pr0 = np.mean(cell_pr[ref_start_idx:ref_end_idx+1])
                         
-                        # Set scaled damage function parameters from Step 3 results
-                        params_scaled.k_tas1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0]
-                        params_scaled.k_tas2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 1]
-                        params_scaled.k_pr1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 2]
-                        params_scaled.k_pr2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 3]
-                        params_scaled.tfp_tas1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 4]
-                        params_scaled.tfp_tas2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 5]
-                        params_scaled.tfp_pr1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 6]
-                        params_scaled.tfp_pr2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 7]
-                        params_scaled.y_tas1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 8]
-                        params_scaled.y_tas2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 9]
-                        params_scaled.y_pr1 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10]
-                        params_scaled.y_pr2 = scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11]
+                        # Set scaled response function parameters from Step 3 results
+                        params_scaled.k_tas1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 0]
+                        params_scaled.k_tas2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 1]
+                        params_scaled.k_pr1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 2]
+                        params_scaled.k_pr2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 3]
+                        params_scaled.tfp_tas1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 4]
+                        params_scaled.tfp_tas2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 5]
+                        params_scaled.tfp_pr1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 6]
+                        params_scaled.tfp_pr2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 7]
+                        params_scaled.y_tas1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 8]
+                        params_scaled.y_tas2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 9]
+                        params_scaled.y_pr1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 10]
+                        params_scaled.y_pr2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 11]
                         
                         # Run forward model with climate data
                         y_climate, a_climate, k_climate_values, _, _, _ = calculate_coin_ssp_forward_model(
@@ -1066,12 +1066,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         )
 
                         # Store results (convert normalized values back to actual units)
-                        gdp_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = y_climate * cell_gdp[0]
-                        gdp_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = y_weather * cell_gdp[0]
-                        tfp_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = a_climate
-                        tfp_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = a_weather
-                        k_climate[lat_idx, lon_idx, damage_idx, target_idx, :] = k_climate_values
-                        k_weather[lat_idx, lon_idx, damage_idx, target_idx, :] = k_weather_values
+                        gdp_climate[lat_idx, lon_idx, response_idx, target_idx, :] = y_climate * cell_gdp[0]
+                        gdp_weather[lat_idx, lon_idx, response_idx, target_idx, :] = y_weather * cell_gdp[0]
+                        tfp_climate[lat_idx, lon_idx, response_idx, target_idx, :] = a_climate
+                        tfp_weather[lat_idx, lon_idx, response_idx, target_idx, :] = a_weather
+                        k_climate[lat_idx, lon_idx, response_idx, target_idx, :] = k_climate_values
+                        k_weather[lat_idx, lon_idx, response_idx, target_idx, :] = k_weather_values
 
                         successful_forward_runs += 1
         

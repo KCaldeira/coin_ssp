@@ -411,8 +411,8 @@ def optimize_climate_response_scaling(
     return optimal_scale, final_error, scaled_params
 
 
-def process_damage_target_optimization(
-    target_idx, gdp_target, target_results, damage_scalings,
+def process_response_target_optimization(
+    target_idx, gdp_target, target_results, response_scalings,
     tas_data, pr_data, pop_data, gdp_data,
     reference_tfp, valid_mask, tfp_baseline, years, config,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
@@ -420,10 +420,10 @@ def process_damage_target_optimization(
     tas_weather_data, pr_weather_data
 ):
     """
-    Process optimization for a single damage target across all damage functions and grid cells.
+    Process optimization for a single damage target across all response functions and grid cells.
 
     This function encapsulates the nested loops and per-grid-cell optimization that was
-    previously inline in main.py (lines 622-700). It handles all damage functions for
+    previously inline in main.py (lines 622-700). It handles all response functions for
     a single GDP target.
 
     Parameters
@@ -434,7 +434,7 @@ def process_damage_target_optimization(
         GDP target configuration
     target_results : dict
         Target GDP results containing reduction arrays
-    damage_scalings : list
+    response_scalings : list
         List of damage scaling configurations
     tas_data, pr_data, pop_data, gdp_data : np.ndarray
         Climate and economic data arrays [time, lat, lon]
@@ -471,14 +471,14 @@ def process_damage_target_optimization(
 
     # Get dimensions
     nlat, nlon = valid_mask.shape
-    n_response_functions = len(damage_scalings)
+    n_response_functions = len(response_scalings)
 
-    for damage_idx, damage_scaling in enumerate(damage_scalings):
-        scaling_name = damage_scaling['scaling_name']
-        print(f"  Response function: {scaling_name} ({damage_idx+1}/{n_response_functions})")
+    for response_idx, response_scaling in enumerate(response_scalings):
+        scaling_name = response_scaling['scaling_name']
+        print(f"  Response function: {scaling_name} ({response_idx+1}/{n_response_functions})")
 
-        # Create ScalingParams for this damage function
-        scaling_config = filter_scaling_params(damage_scaling)
+        # Create ScalingParams for this response function
+        scaling_config = filter_scaling_params(response_scaling)
         scaling_params = ScalingParams(**scaling_config)
 
         for lat_idx in range(nlat):
@@ -532,27 +532,27 @@ def process_damage_target_optimization(
                 )
 
                 # Store results
-                scaling_factors[lat_idx, lon_idx, damage_idx, target_idx] = optimal_scale
-                optimization_errors[lat_idx, lon_idx, damage_idx, target_idx] = final_error
-                convergence_flags[lat_idx, lon_idx, damage_idx, target_idx] = True
+                scaling_factors[lat_idx, lon_idx, response_idx, target_idx] = optimal_scale
+                optimization_errors[lat_idx, lon_idx, response_idx, target_idx] = final_error
+                convergence_flags[lat_idx, lon_idx, response_idx, target_idx] = True
 
-                # Store scaled damage function parameters
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 0] = params_scaled.k_tas1
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 1] = params_scaled.k_tas2
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 2] = params_scaled.k_pr1
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 3] = params_scaled.k_pr2
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 4] = params_scaled.tfp_tas1
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 5] = params_scaled.tfp_tas2
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 6] = params_scaled.tfp_pr1
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 7] = params_scaled.tfp_pr2
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 8] = params_scaled.y_tas1
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 9] = params_scaled.y_tas2
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 10] = params_scaled.y_pr1
-                scaled_parameters[lat_idx, lon_idx, damage_idx, target_idx, 11] = params_scaled.y_pr2
+                # Store scaled response function parameters
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 0] = params_scaled.k_tas1
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 1] = params_scaled.k_tas2
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 2] = params_scaled.k_pr1
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 3] = params_scaled.k_pr2
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 4] = params_scaled.tfp_tas1
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 5] = params_scaled.tfp_tas2
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 6] = params_scaled.tfp_pr1
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 7] = params_scaled.tfp_pr2
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 8] = params_scaled.y_tas1
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 9] = params_scaled.y_tas2
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 10] = params_scaled.y_pr1
+                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 11] = params_scaled.y_pr2
 
                 successful_optimizations += 1
 
-        # Newline after each damage function completes its latitude bands
+        # Newline after each response function completes its latitude bands
         print()
 
     return {
@@ -606,7 +606,7 @@ def calculate_reference_climate_baselines(all_data, config):
 
 
 def calculate_reference_gdp_climate_variability(
-    all_data, config, reference_tfp, damage_scalings
+    all_data, config, reference_tfp, response_scalings
 ):
     """
     Compute reference relationship between climate variability and GDP variability.
@@ -615,7 +615,7 @@ def calculate_reference_gdp_climate_variability(
     y_weather ~ tas_weather linear regression for each grid cell.
 
     For each valid grid cell:
-    1. Run optimization to get scaling factors (using first damage function as reference)
+    1. Run optimization to get scaling factors (using first response function as reference)
     2. Compute y_weather time series using optimal scaling
     3. Compute linear regression: y_weather ~ tas_weather over historical period
     4. Store slope as reference relationship
@@ -628,7 +628,7 @@ def calculate_reference_gdp_climate_variability(
         Configuration dictionary containing ssp_scenarios and time_periods
     reference_tfp : dict
         TFP reference data containing valid_mask and tfp_baseline
-    damage_scalings : list
+    response_scalings : list
         List of damage scaling configurations (for optimization)
 
     Returns
@@ -665,9 +665,9 @@ def calculate_reference_gdp_climate_variability(
     nlat, nlon = valid_mask.shape
     reference_slopes = np.full((nlat, nlon), np.nan)
 
-    # Use first damage function as reference for optimization
-    reference_damage_scaling = damage_scalings[0]
-    scaling_config = filter_scaling_params(reference_damage_scaling)
+    # Use first response function as reference for optimization
+    reference_response_scaling = response_scalings[0]
+    scaling_config = filter_scaling_params(reference_response_scaling)
     scaling_params = ScalingParams(**scaling_config)
 
     # Get historical period indices for regression
@@ -702,22 +702,22 @@ def calculate_reference_gdp_climate_variability(
     }
 
     # Initialize arrays for the optimization process
-    n_damage_funcs = len(damage_scalings)
+    n_response_functions = len(response_scalings)
     n_targets = 1  # dummy target for reference computation
-    scaling_factors = np.zeros((nlat, nlon, n_damage_funcs, n_targets))
-    optimization_errors = np.zeros((nlat, nlon, n_damage_funcs, n_targets))
-    convergence_flags = np.zeros((nlat, nlon, n_damage_funcs, n_targets), dtype=bool)
-    scaled_parameters = np.zeros((nlat, nlon, n_damage_funcs, n_targets), dtype=object)
+    scaling_factors = np.zeros((nlat, nlon, n_response_functions, n_targets))
+    optimization_errors = np.zeros((nlat, nlon, n_response_functions, n_targets))
+    convergence_flags = np.zeros((nlat, nlon, n_response_functions, n_targets), dtype=bool)
+    scaled_parameters = np.zeros((nlat, nlon, n_response_functions, n_targets), dtype=object)
     total_grid_cells = 0
     successful_optimizations = 0
 
-    # Run process_damage_target_optimization to get scaled_parameters
+    # Run process_response_target_optimization to get scaled_parameters
     print("Running reference optimization for variability relationship...")
-    reference_results = process_damage_target_optimization(
+    reference_results = process_response_target_optimization(
         0,  # target_idx (dummy)
         dummy_gdp_target,
         dummy_target_results,
-        damage_scalings,
+        response_scalings,
         tas_data, pr_data, pop_data, gdp_data,
         reference_tfp, valid_mask, tfp_baseline, years, config,
         scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
@@ -756,7 +756,7 @@ def calculate_reference_gdp_climate_variability(
 
             try:
                 # Use pre-computed scaled parameters from reference optimization
-                # scaled_parameters is [lat, lon, damage_idx] - use first damage function (damage_idx=0)
+                # scaled_parameters is [lat, lon, response_idx] - use first response function (response_idx=0)
                 params_scaled = scaled_parameters[lat_idx, lon_idx, 0]
 
                 # Compute y_weather time series using optimal scaling
@@ -789,7 +789,7 @@ def calculate_reference_gdp_climate_variability(
 
 def apply_variability_target_scaling(
     reference_slopes, gdp_target, tas_data, pr_data,
-    tas0_2d, pr0_2d, target_idx, damage_scalings,
+    tas0_2d, pr0_2d, target_idx, response_scalings,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters
 ):
     """
@@ -815,7 +815,7 @@ def apply_variability_target_scaling(
         Reference baselines [lat, lon]
     target_idx : int
         Target index for result storage
-    damage_scalings : list
+    response_scalings : list
         Damage scaling configurations
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters : np.ndarray
         Output arrays to populate (modified in place)
@@ -826,7 +826,7 @@ def apply_variability_target_scaling(
         Results summary
     """
     nlat, nlon = tas0_2d.shape
-    n_damage = len(damage_scalings)
+    n_response_functions = len(response_scalings)
 
     target_name = gdp_target['target_name']
     print(f"Applying variability target: {target_name}")
@@ -839,20 +839,20 @@ def apply_variability_target_scaling(
     print(f"  Target scaling parameter: {target_scaling_param}")
     print(f"  Reference slopes range: {np.nanmin(reference_slopes):.6f} to {np.nanmax(reference_slopes):.6f}")
 
-    # Apply scaling to all damage functions (same relationship applies to all)
-    for damage_idx in range(n_damage):
+    # Apply scaling to all response functions (same relationship applies to all)
+    for response_idx in range(n_response_functions):
         # Compute variability scaling factors using reference relationship
         # scaling_factor = reference_slope * target_parameter
         target_scaling_factors = reference_slopes * target_scaling_param
 
         # Store results in output arrays
-        scaling_factors[:, :, damage_idx, target_idx] = target_scaling_factors
+        scaling_factors[:, :, response_idx, target_idx] = target_scaling_factors
 
         # For variability targets, set optimization error to zero (no optimization performed)
-        optimization_errors[:, :, damage_idx, target_idx] = 0.0
+        optimization_errors[:, :, response_idx, target_idx] = 0.0
 
         # Mark as converged where we have valid reference slopes
-        convergence_flags[:, :, damage_idx, target_idx] = np.isfinite(reference_slopes)
+        convergence_flags[:, :, response_idx, target_idx] = np.isfinite(reference_slopes)
 
         # For scaled_parameters, we don't have meaningful values for variability targets
         # Leave them as NaN to indicate they're not applicable

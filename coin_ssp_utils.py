@@ -175,7 +175,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     forward_results : dict
         Results from Step 4 forward integration containing SSP-specific data
     config : dict
-        Configuration dictionary with scenarios and damage functions
+        Configuration dictionary with scenarios and response functions
     output_dir : str
         Directory for output files
     model_name : str
@@ -208,7 +208,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     n_targets = len(target_names)
     subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    # Calculate total pages (one page per damage function × SSP combination)
+    # Calculate total pages (one page per response function × SSP combination)
     total_pages = len(response_function_names) * len(forward_ssps)
 
     print(f"Creating Step 4 line charts: {n_targets} targets per page across {total_pages} pages")
@@ -219,17 +219,17 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     with PdfPages(pdf_path) as pdf:
         page_num = 0
 
-        # Loop through damage functions and SSPs (each gets its own page)
-        for damage_idx, damage_name in enumerate(response_function_names):
-            damage_config = config['response_function_scalings'][damage_idx]
+        # Loop through response functions and SSPs (each gets its own page)
+        for response_idx, response_name in enumerate(response_function_names):
+            response_config = config['response_function_scalings'][response_idx]
 
             for ssp in forward_ssps:
 
-                # Create new page for this damage function × SSP combination
+                # Create new page for this response function × SSP combination
                 page_num += 1
                 fig = plt.figure(figsize=fig_size)
                 fig.suptitle(f'Step 4: Forward Model Time Series - {model_name}\n'
-                            f'SSP: {ssp.upper()} | Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                            f'SSP: {ssp.upper()} | Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
                             fontsize=16, fontweight='bold', y=0.96)
 
                 # Plot all targets on this page
@@ -268,8 +268,8 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
 
                     for t in range(ntime):
                         # Extract spatial slice for this time
-                        gdp_climate_t = gdp_climate[:, :, damage_idx, target_idx, t]
-                        gdp_weather_t = gdp_weather[:, :, damage_idx, target_idx, t]
+                        gdp_climate_t = gdp_climate[:, :, response_idx, target_idx, t]
+                        gdp_weather_t = gdp_weather[:, :, response_idx, target_idx, t]
                         baseline_t = baseline_gdp[t, :, :]  # Note: baseline is [time, lat, lon]
 
                         # Calculate global means
@@ -285,7 +285,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                     # Formatting
                     ax.set_xlabel('Year', fontsize=12)
                     ax.set_ylabel('Global Mean GDP', fontsize=12)
-                    ax.set_title(f'{target_config["target_name"]} × {damage_config["scaling_name"]} × {ssp.upper()}\n'
+                    ax.set_title(f'{target_config["target_name"]} × {response_config["scaling_name"]} × {ssp.upper()}\n'
                                 f'({target_config.get("description", "")[:60]}...)',
                                 fontsize=14, fontweight='bold')
                     ax.legend(fontsize=10)
@@ -333,7 +333,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
     forward_results : dict
         Results from Step 4 forward integration containing SSP-specific data
     config : dict
-        Configuration dictionary containing scenarios, damage functions, climate_model.model_name, and run_metadata.json_id
+        Configuration dictionary containing scenarios, response functions, climate_model.model_name, and run_metadata.json_id
     output_dir : str
         Directory for output files
     all_data : dict
@@ -373,13 +373,13 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
 
         # Loop through combinations (target innermost for 3-per-page grouping)
         for ssp in forward_ssps:
-            for damage_idx, damage_name in enumerate(response_function_names):
+            for response_idx, response_name in enumerate(response_function_names):
                 page_num += 1
 
                 # Create new page with 3 subplots (one per target)
                 fig = plt.figure(figsize=(12, 16))  # Taller figure for vertical arrangement
                 fig.suptitle(f'Step 4: GDP Ratios to Baseline - {model_name}\n'
-                           f'SSP: {ssp.upper()} | Response Function: {damage_name}',
+                           f'SSP: {ssp.upper()} | Response Function: {response_name}',
                            fontsize=16, fontweight='bold', y=0.98)
 
                 # Get SSP-specific data
@@ -403,8 +403,8 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                     ax = plt.subplot(n_targets, 1, target_idx + 1)  # Dynamic rows, 1 column
 
                     # Extract data for this combination [lat, lon, time]
-                    gdp_climate_combo = gdp_climate[:, :, damage_idx, target_idx, :]
-                    gdp_weather_combo = gdp_weather[:, :, damage_idx, target_idx, :]
+                    gdp_climate_combo = gdp_climate[:, :, response_idx, target_idx, :]
+                    gdp_weather_combo = gdp_weather[:, :, response_idx, target_idx, :]
 
                     # Calculate global means for this combination
                     climate_global = []
@@ -716,7 +716,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     n_targets = len(target_names)
     subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    # Calculate total pages (one page per damage function × SSP combination)
+    # Calculate total pages (one page per response function × SSP combination)
     total_pages = len(response_function_names) * len(forward_ssps)
 
     print(f"Creating Step 4 maps: {n_targets} targets per page across {total_pages} pages")
@@ -728,22 +728,22 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     with PdfPages(linear_pdf_path) as linear_pdf, PdfPages(log10_pdf_path) as log10_pdf:
         page_num = 0
 
-        # Loop through SSPs and damage functions (each gets its own page)
+        # Loop through SSPs and response functions (each gets its own page)
         for ssp in forward_ssps:
 
-            for damage_idx, damage_name in enumerate(response_function_names):
-                damage_config = config['response_function_scalings'][damage_idx]
+            for response_idx, response_name in enumerate(response_function_names):
+                response_config = config['response_function_scalings'][response_idx]
 
                 # Create new pages for both PDFs for this SSP × damage combination
                 page_num += 1
                 linear_fig = plt.figure(figsize=fig_size)
                 linear_fig.suptitle(f'Step 4: Forward Model Results (Linear Scale) - {model_name}\n'
-                                   f'SSP: {ssp.upper()} | Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                                   f'SSP: {ssp.upper()} | Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
                                    fontsize=16, fontweight='bold', y=0.96)
 
                 log10_fig = plt.figure(figsize=fig_size)
                 log10_fig.suptitle(f'Step 4: Forward Model Results (Log10 Scale) - {model_name}\n'
-                                  f'SSP: {ssp.upper()} | Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                                  f'SSP: {ssp.upper()} | Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
                                   fontsize=16, fontweight='bold', y=0.96)
 
                 # Plot all targets on this page
@@ -766,8 +766,8 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
 
                     # Extract data for this combination: [lat, lon, time]
-                    gdp_climate_combo = gdp_climate[:, :, damage_idx, target_idx, :]
-                    gdp_weather_combo = gdp_weather[:, :, damage_idx, target_idx, :]
+                    gdp_climate_combo = gdp_climate[:, :, response_idx, target_idx, :]
+                    gdp_weather_combo = gdp_weather[:, :, response_idx, target_idx, :]
 
                     # Calculate time indices for target period using actual time coordinates
                     time_coords = forward_results['_coordinates']['years']
@@ -827,7 +827,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     # Linear map formatting
                     linear_ax.set_xlabel('Longitude', fontsize=12)
                     linear_ax.set_ylabel('Latitude', fontsize=12)
-                    linear_ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
+                    linear_ax.set_title(f'{ssp.upper()} × {target_name} × {response_name}\n'
                                 f'Climate Impact: (GDP_climate/GDP_weather - 1)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
@@ -867,7 +867,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                             max_indices = np.where((valid_mask & np.isfinite(impact_ratio_log10)) &
                                                  (impact_ratio_log10 == log_actual_max))
                             max_lat_idx, max_lon_idx = max_indices[0][0], max_indices[1][0]
-                            print(f"    WARNING: Extreme high ratios detected for {ssp.upper()} × {target_name} × {damage_name}")
+                            print(f"    WARNING: Extreme high ratios detected for {ssp.upper()} × {target_name} × {response_name}")
                             print(f"             log10(max_ratio) = {log_actual_max:.2f} (ratio = {10**log_actual_max:.2e})")
                             print(f"             at grid cell indices: lat_idx={max_lat_idx}, lon_idx={max_lon_idx}")
                         if log_actual_min < -5:  # log10(ratio) < -5 means ratio < 0.00001
@@ -875,7 +875,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                             min_indices = np.where((valid_mask & np.isfinite(impact_ratio_log10)) &
                                                  (impact_ratio_log10 == log_actual_min))
                             min_lat_idx, min_lon_idx = min_indices[0][0], min_indices[1][0]
-                            print(f"    WARNING: Extreme low ratios detected for {ssp.upper()} × {target_name} × {damage_name}")
+                            print(f"    WARNING: Extreme low ratios detected for {ssp.upper()} × {target_name} × {response_name}")
                             print(f"             log10(min_ratio) = {log_actual_min:.2f} (ratio = {10**log_actual_min:.2e})")
                             print(f"             at grid cell indices: lat_idx={min_lat_idx}, lon_idx={min_lon_idx}")
                     else:
@@ -895,7 +895,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     # Log10 map formatting
                     log10_ax.set_xlabel('Longitude', fontsize=12)
                     log10_ax.set_ylabel('Latitude', fontsize=12)
-                    log10_ax.set_title(f'{ssp.upper()} × {target_name} × {damage_name}\n'
+                    log10_ax.set_title(f'{ssp.upper()} × {target_name} × {response_name}\n'
                                 f'Climate Impact: log10(GDP_climate/GDP_weather)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
@@ -2290,7 +2290,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     valid_mask = scaling_results['valid_mask']  # [lat, lon]
     
     # Get dimensions and coordinate info
-    nlat, nlon, n_response_func, n_target = scaling_factors.shape
+    nlat, nlon, n_response_functions_func, n_target = scaling_factors.shape
     n_scaled_params = scaled_parameters.shape[4]
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
@@ -2325,7 +2325,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     ds.scaling_factors.attrs = {
         'long_name': 'Climate response scaling factors',
         'units': 'dimensionless',
-        'description': 'Optimized scaling factors for climate damage functions per grid cell'
+        'description': 'Optimized scaling factors for climate response functions per grid cell'
     }
     
     ds.optimization_errors.attrs = {
@@ -2341,9 +2341,9 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     }
     
     ds.scaled_parameters.attrs = {
-        'long_name': 'Scaled climate damage function parameters',
+        'long_name': 'Scaled climate response function parameters',
         'units': 'various',
-        'description': 'Climate damage function parameters (scaling_factor × base_parameter) for each grid cell and combination',
+        'description': 'Climate response function parameters (scaling_factor × base_parameter) for each grid cell and combination',
         'parameter_names': ', '.join(scaled_param_names),
         'parameter_groups': 'Capital: k_tas1,k_tas2,k_pr1,k_pr2; TFP: tfp_tas1,tfp_tas2,tfp_pr1,tfp_pr2; Output: y_tas1,y_tas2,y_pr1,y_pr2',
         'climate_variables': 'tas=temperature, pr=precipitation; 1=linear, 2=quadratic'
@@ -2417,7 +2417,7 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
     # Get SSP names and dimensions from first SSP result
     ssp_names = list(forward_results.keys())
     first_ssp = forward_results[ssp_names[0]]
-    nlat, nlon, n_response_func, n_target, ntime = first_ssp['gdp_climate'].shape
+    nlat, nlon, n_response_functions_func, n_target, ntime = first_ssp['gdp_climate'].shape
 
     # Variables to process (climate and weather variants paired)
     variable_pairs = [
@@ -2526,7 +2526,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
     Generates a single-page PDF with:
     - Global maps showing spatial patterns of each target reduction type
-    - Line plot showing damage functions vs temperature (if coefficients available)
+    - Line plot showing response functions vs temperature (if coefficients available)
 
     Parameters
     ----------
@@ -2837,8 +2837,8 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
     """
     Create comprehensive PDF visualization for Step 3 scaling factor results.
 
-    Generates a multi-panel visualization with one map per damage function × target combination.
-    For typical case: 3 damage functions × 2 targets = 6 small maps on one page.
+    Generates a multi-panel visualization with one map per response function × target combination.
+    For typical case: 3 response functions × 2 targets = 6 small maps on one page.
 
     Parameters
     ----------
@@ -2881,31 +2881,31 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
     # Get dimensions
-    nlat, nlon, n_damage, n_targets = scaling_factors.shape
+    nlat, nlon, n_response_functions, n_targets = scaling_factors.shape
 
     # Calculate adaptive layout based on number of targets
     subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
-    # Calculate total pages (one page per damage function)
-    total_pages = n_damage
+    # Calculate total pages (one page per response function)
+    total_pages = n_response_functions
 
     print(f"Creating Step 3 visualization: {n_targets} targets per page across {total_pages} pages")
-    print(f"  {n_damage} damage functions")
+    print(f"  {n_response_functions} response functions")
     print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols per page")
 
     # Create PDF with multi-page layout
     with PdfPages(pdf_path) as pdf:
         page_num = 0
 
-        # Loop through damage functions (each gets its own page)
-        for damage_idx, damage_name in enumerate(response_function_names):
-            damage_config = config['response_function_scalings'][damage_idx]
+        # Loop through response functions (each gets its own page)
+        for response_idx, response_name in enumerate(response_function_names):
+            response_config = config['response_function_scalings'][response_idx]
 
-            # Create new page for this damage function
+            # Create new page for this response function
             page_num += 1
             fig = plt.figure(figsize=fig_size)
             fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp})\n'
-                        f'Response Function: {damage_config["scaling_name"]} - Page {page_num}/{total_pages}',
+                        f'Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
                         fontsize=16, fontweight='bold', y=0.96)
 
             # Plot all targets on this page
@@ -2924,7 +2924,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
                     ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                 # Extract scaling factor map for this combination
-                sf_map = scaling_factors[:, :, damage_idx, target_idx]
+                sf_map = scaling_factors[:, :, response_idx, target_idx]
 
                 # Mask invalid cells and ocean
                 sf_map_masked = np.copy(sf_map)
@@ -2950,7 +2950,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
                           levels=[0.5], colors='black', linewidths=0.5, alpha=0.3)
 
                 # Labels and formatting (larger fonts for better visibility)
-                ax.set_title(f'{damage_name}\n{target_name}', fontsize=14, fontweight='bold')
+                ax.set_title(f'{response_name}\n{target_name}', fontsize=14, fontweight='bold')
                 ax.set_xlabel('Longitude', fontsize=12)
                 ax.set_ylabel('Latitude', fontsize=12)
                 ax.tick_params(labelsize=10)
@@ -2971,7 +2971,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
                 cbar.set_label('Scaling Factor', rotation=270, labelpad=15, fontsize=12)
                 cbar.ax.tick_params(labelsize=10)
 
-            # Save this page after plotting all targets for this damage function
+            # Save this page after plotting all targets for this response function
             plt.tight_layout()
             plt.subplots_adjust(top=0.93, bottom=0.05)
             pdf.savefig(fig, bbox_inches='tight')
@@ -3030,16 +3030,16 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
     # Get dimensions
-    nlat, nlon, n_response, n_targets = optimization_errors.shape
+    nlat, nlon, n_response_functions, n_targets = optimization_errors.shape
 
     # Calculate adaptive layout based on number of targets
     subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
 
     # Calculate total pages (one page per response function)
-    total_pages = n_response
+    total_pages = n_response_functions
 
     print(f"Creating Step 3 objective function visualization: {n_targets} targets per page across {total_pages} pages")
-    print(f"  {n_response} response functions")
+    print(f"  {n_response_functions} response functions")
     print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols per page")
 
     # Create PDF with multi-page layout

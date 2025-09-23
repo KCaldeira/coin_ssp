@@ -341,7 +341,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     ds.scaling_factors.attrs = {
         'long_name': 'Climate response scaling factors',
         'units': 'dimensionless',
-        'description': 'Optimized scaling factors for climate damage functions per grid cell'
+        'description': 'Optimized scaling factors for climate response functions per grid cell'
     }
 
     ds.optimization_errors.attrs = {
@@ -357,9 +357,9 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     }
 
     ds.scaled_parameters.attrs = {
-        'long_name': 'Scaled climate damage function parameters',
+        'long_name': 'Scaled climate response function parameters',
         'units': 'various',
-        'description': 'Climate damage function parameters (scaling_factor × base_parameter) for each grid cell and combination',
+        'description': 'Climate response function parameters (scaling_factor × base_parameter) for each grid cell and combination',
         'parameter_names': ', '.join(scaled_param_names),
         'parameter_groups': 'Capital: k_tas1,k_tas2,k_pr1,k_pr2; TFP: tfp_tas1,tfp_tas2,tfp_pr1,tfp_pr2; Output: y_tas1,y_tas2,y_pr1,y_pr2',
         'climate_variables': 'tas=temperature, pr=precipitation; 1=linear, 2=quadratic'
