@@ -1107,7 +1107,10 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                 'success_rate': forward_results[ssp]['success_rate']
             } for ssp in forward_ssps
         },
-        '_coordinates': all_data['_metadata']
+        '_coordinates': {
+            **all_data['_metadata'],
+            'years': all_data['years']
+        }
     }
     
     # Write results to separate NetCDF files per SSP/variable
