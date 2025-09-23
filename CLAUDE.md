@@ -64,7 +64,7 @@ Two mandatory patterns for consistency:
 **Computational Loop Order (Steps 3-4):**
 ```python
 for target_idx in range(n_targets):           # GDP reduction target (outermost)
-    for damage_idx in range(n_damage_funcs):      # Damage function
+    for response_idx in range(n_response_funcs):      # Response function
         for lat_idx in range(nlat):                    # Latitude
             for lon_idx in range(nlon):                    # Longitude
 ```
@@ -72,7 +72,7 @@ for target_idx in range(n_targets):           # GDP reduction target (outermost)
 **Visualization Loop Order (All PDFs):**
 ```python
 for ssp in ssp_scenarios:                    # SSP scenario (outermost)
-    for damage_idx in range(n_damage_funcs):    # Damage function
+    for response_idx in range(n_response_funcs):    # Response function
         for target_idx in range(n_targets):         # GDP target (INNERMOST)
 ```
 **Critical**: Target innermost in visualizations groups all GDP reduction targets on same page

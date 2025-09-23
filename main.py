@@ -1172,7 +1172,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"Climate Model: {model_name}")
     print(f"Reference SSP: {reference_ssp}")
     print(f"Forward SSPs: {len(forward_ssps)} scenarios ({', '.join(forward_ssps)})")
-    print(f"Damage Functions: {len(response_functions)} configurations")
+    print(f"Response Functions: {len(response_functions)} configurations")
     print(f"GDP Targets: {len(gdp_targets)} patterns") 
     
     print("\n" + "-"*60)

@@ -46,7 +46,7 @@ JSON configuration files specify:
 - **Climate Model**: NetCDF file patterns and model information
 - **SSP Scenarios**: Reference SSP for calibration + forward simulation scenarios
 - **GDP Targets**: Constant, linear, or quadratic reduction patterns
-- **Damage Functions**: Climate response mechanisms (capital/TFP/output)
+- **Response Functions**: Climate response mechanisms (capital/TFP/output)
 - **Model Parameters**: Solow-Swan economic parameters
 
 ## Key Features
@@ -83,10 +83,19 @@ Results saved to timestamped directories:
 
 ## Architecture
 
+### Core Modules
 - **`coin_ssp_core.py`**: Core economic model and optimization functions
-- **`coin_ssp_utils.py`**: Data processing, visualization, and utility functions
 - **`main.py`**: Integrated 5-step processing pipeline
-- **Configuration**: JSON-based workflow control with unified schema
+- **`coin_ssp_models.py`**: Data classes and model parameter structures
+
+### Specialized Utility Modules
+- **`coin_ssp_math_utils.py`**: Mathematical utilities and helper functions
+- **`coin_ssp_io.py`**: NetCDF input/output and serialization functions
+- **`coin_ssp_target_calculations.py`**: GDP target reduction calculations
+- **`coin_ssp_utils.py`**: Visualization and remaining utility functions
+
+### Configuration
+- **JSON-based workflow control**: Unified schema with standardized file naming
 
 ## Contributing
 
