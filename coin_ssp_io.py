@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import numpy as np
@@ -6,7 +7,162 @@ import xarray as xr
 from datetime import datetime
 from typing import Dict, Any, List
 
-from coin_ssp_math_utils import create_serializable_config
+
+def create_serializable_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a JSON-serializable version of the configuration by filtering out non-serializable objects.
+
+    Parameters
+    ----------
+    config : Dict[str, Any]
+        Original configuration dictionary
+
+    Returns
+    -------
+    Dict[str, Any]
+        Filtered configuration dictionary safe for JSON serialization
+    """
+
+    # Make a deep copy to avoid modifying the original
+    filtered_config = copy.deepcopy(config)
+
+    # Remove known non-serializable objects
+    non_serializable_keys = ['model_params_factory']
+
+    def remove_non_serializable(obj, path=""):
+        if isinstance(obj, dict):
+            keys_to_remove = []
+            for key, value in obj.items():
+                current_path = f"{path}.{key}" if path else key
+                if key in non_serializable_keys:
+                    keys_to_remove.append(key)
+                else:
+                    try:
+                        # Test if the value is JSON serializable
+                        json.dumps(value)
+                    except (TypeError, ValueError):
+                        # If not serializable, try to recurse or remove
+                        if isinstance(value, dict):
+                            remove_non_serializable(value, current_path)
+                        elif isinstance(value, list):
+                            remove_non_serializable(value, current_path)
+                        else:
+                            keys_to_remove.append(key)
+
+            for key in keys_to_remove:
+                obj.pop(key)
+
+        elif isinstance(obj, list):
+            items_to_remove = []
+            for i, item in enumerate(obj):
+                try:
+                    json.dumps(item)
+                except (TypeError, ValueError):
+                    if isinstance(item, (dict, list)):
+                        remove_non_serializable(item, f"{path}[{i}]")
+                    else:
+                        items_to_remove.append(i)
+
+            for i in reversed(items_to_remove):
+                obj.pop(i)
+
+    remove_non_serializable(filtered_config)
+    return filtered_config
+
+
+def extract_year_coordinate(dataset, coord_names=None):
+    """
+    Extract actual year values from NetCDF time coordinate.
+
+    Parameters
+    ----------
+    dataset : xarray.Dataset
+        NetCDF dataset with time coordinate
+    coord_names : list, optional
+        Coordinate names to try, by default ['year', 'time', 'axis_0']
+
+    Returns
+    -------
+    tuple
+        (years, valid_mask) where years are the extracted year values
+        and valid_mask indicates which time indices are valid
+    """
+    if coord_names is None:
+        coord_names = ['year', 'time', 'axis_0']
+
+    time_coord = None
+    for coord_name in coord_names:
+        if coord_name in dataset.coords:
+            time_coord = dataset.coords[coord_name]
+            break
+
+    if time_coord is None:
+        raise ValueError(f"No time coordinate found. Tried: {coord_names}")
+
+    # Handle different time coordinate types
+    time_values = time_coord.values
+
+    # If already integers (years), return as-is
+    if np.issubdtype(time_values.dtype, np.integer):
+        return time_values.astype(int), np.ones(len(time_values), dtype=bool)
+
+    # If datetime-like objects, extract year
+    if hasattr(time_values[0], 'year'):
+        years = np.array([t.year for t in time_values])
+        return years, np.ones(len(years), dtype=bool)
+
+    # If floating point values, treat as raw years (ignore "years since" units)
+    if np.issubdtype(time_values.dtype, np.floating):
+        # Filter for reasonable year values and ignore units encoding
+        valid_mask = np.isfinite(time_values) & (time_values > 1800) & (time_values < 2200)
+        if not np.any(valid_mask):
+            raise ValueError("No valid years found in time coordinate")
+
+        valid_years = time_values[valid_mask].astype(int)
+        if np.sum(valid_mask) != len(time_values):
+            print(f"    Warning: Filtered out {len(time_values) - np.sum(valid_mask)} time values with incomplete data")
+
+        return valid_years, valid_mask
+
+    raise ValueError(f"Cannot extract years from time coordinate with dtype {time_values.dtype}")
+
+
+def interpolate_to_annual_grid(original_years, data_array, target_years):
+    """
+    Linearly interpolate data to annual time grid.
+
+    Parameters
+    ----------
+    original_years : numpy.ndarray
+        Original year values (1D array)
+    data_array : numpy.ndarray
+        Data array with time as first dimension: (time, ...)
+    target_years : numpy.ndarray
+        Target annual year values (1D array)
+
+    Returns
+    -------
+    numpy.ndarray
+        Interpolated data array with shape (len(target_years), ...)
+    """
+    # If already on target grid, return as-is
+    if len(original_years) == len(target_years) and np.allclose(original_years, target_years):
+        return data_array
+
+    # Get spatial dimensions
+    spatial_shape = data_array.shape[1:]
+
+    # Flatten spatial dimensions for vectorized interpolation
+    data_flat = data_array.reshape(len(original_years), -1)
+
+    # Interpolate each spatial point
+    interpolated_flat = np.zeros((len(target_years), data_flat.shape[1]))
+
+    for i in range(data_flat.shape[1]):
+        interpolated_flat[:, i] = np.interp(target_years, original_years, data_flat[:, i])
+
+    # Reshape back to original spatial dimensions
+    return interpolated_flat.reshape((len(target_years),) + spatial_shape)
 
 
 def load_step3_results_from_netcdf(netcdf_path: str) -> Dict[str, Any]:

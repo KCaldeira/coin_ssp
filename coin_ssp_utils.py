@@ -16,12 +16,12 @@ from coin_ssp_models import ScalingParams
 from coin_ssp_io import (
     write_all_loaded_data_netcdf, save_step4_results_netcdf_split,
     load_step3_results_from_netcdf, save_step1_results_netcdf,
-    save_step2_results_netcdf, save_step3_results_netcdf
+    save_step2_results_netcdf, save_step3_results_netcdf,
+    create_serializable_config, extract_year_coordinate, interpolate_to_annual_grid
 )
 from coin_ssp_math_utils import (
-    get_adaptive_subplot_layout, create_serializable_config, apply_time_series_filter,
-    calculate_zero_biased_range, calculate_zero_biased_axis_range, extract_year_coordinate,
-    interpolate_to_annual_grid, calculate_area_weights, calculate_time_means, calculate_global_mean
+    apply_time_series_filter, calculate_zero_biased_range, calculate_zero_biased_axis_range,
+    calculate_area_weights, calculate_time_means, calculate_global_mean
 )
 from coin_ssp_target_calculations import (
     calculate_constant_target_reduction, calculate_linear_target_reduction,

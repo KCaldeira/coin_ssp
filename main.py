@@ -1267,11 +1267,12 @@ def run_pipeline(config_path: str, step3_file: str = None) -> None:
         print("Loading all NetCDF data for entire pipeline...")
         all_data = load_all_data(config, output_dir)
         print("✅ All NetCDF data loaded - will be reused across all processing steps")
+        step_times['Data Loading'] = time.time() - data_start
 
         # Compute weather variables for all SSPs
+        weather_start = time.time()
         all_data = calculate_weather_vars(all_data, config)
-
-        step_times['Data Loading'] = time.time() - data_start
+        step_times['Weather Variables'] = time.time() - weather_start
 
         # Execute 5-step processing flow
         step1_start = time.time()
