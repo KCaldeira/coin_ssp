@@ -32,14 +32,22 @@ from coin_ssp_models import ScalingParams, ModelParams
 
 from coin_ssp_utils import (
     calculate_time_means, calculate_global_mean,
-    calculate_all_target_reductions, load_all_data, get_ssp_data, get_grid_metadata,
-    calculate_tfp_coin_ssp, save_step1_results_netcdf, save_step2_results_netcdf,
-    apply_time_series_filter, save_step3_results_netcdf, save_step4_results_netcdf_split,
+    calculate_all_target_reductions, load_all_data,
+    calculate_tfp_coin_ssp,
+    apply_time_series_filter,
+    calculate_area_weights, calculate_weather_vars
+)
+from coin_ssp_netcdf import (
+    save_step1_results_netcdf, save_step2_results_netcdf,
+    save_step3_results_netcdf, save_step4_results_netcdf_split,
+    load_step3_results_from_netcdf
+)
+from coin_ssp_reporting import (
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
     create_objective_function_visualization,
     create_forward_model_visualization, create_forward_model_maps_visualization,
-    create_forward_model_ratio_visualization, load_step3_results_from_netcdf,
-    calculate_area_weights, calculate_weather_vars
+    create_forward_model_ratio_visualization, print_gdp_weighted_scaling_summary,
+    get_ssp_data, get_grid_metadata
 )
 from coin_ssp_core import (
     optimize_climate_response_scaling, calculate_coin_ssp_forward_model,
@@ -196,33 +204,6 @@ def load_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
-def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: str) -> str:
-    """
-    Resolve NetCDF file path using naming convention: {prefix}_{model_name}_{ssp_name}.nc
-    
-    Parameters
-    ----------
-    config : Dict[str, Any]
-        Configuration dictionary
-    data_type : str
-        Type of data ('tas', 'pr', 'gdp', 'pop', 'target_reductions')
-    ssp_name : str
-        SSP scenario name (e.g., 'ssp245', 'ssp585')
-        
-    Returns
-    -------
-    str
-        Full path to NetCDF file
-    """
-    climate_model = config['climate_model']
-    model_name = climate_model['model_name']
-    input_dir = climate_model['input_directory']
-    prefix = climate_model['netcdf_file_patterns'][data_type]
-    
-    filename = f"{prefix}_{model_name}_{ssp_name}.nc"
-    filepath = os.path.join(input_dir, filename)
-    
-    return filepath
 
 
 def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, json_id: str, all_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -713,194 +694,6 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     print(f"Total combinations processed: {total_combinations} per valid grid cell")
     return scaling_results
 
-
-def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: Dict[str, Any], all_data: Dict[str, Any], output_dir: str) -> None:
-    """
-    Generate GDP-weighted summary of scaling factors and write to CSV file.
-
-    Parameters
-    ----------
-    scaling_results : Dict[str, Any]
-        Results from Step 3 containing scaling factors
-    config : Dict[str, Any]
-        Configuration dictionary
-    all_data : Dict[str, Any]
-        Pre-loaded NetCDF data containing GDP information
-    output_dir : str, optional
-        Directory to write CSV file. If None, prints to terminal.
-    """
-    print("\n" + "="*80)
-    print("STEP 3 SCALING FACTOR SUMMARY")
-    print("="*80)
-
-    # Extract data
-    response_function_names = scaling_results['response_function_names']
-    target_names = scaling_results['target_names']
-    valid_mask = scaling_results['valid_mask']
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
-    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
-
-    # Get reference SSP GDP data for weighting
-    reference_ssp = config['ssp_scenarios']['reference_ssp']
-    gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')  # [time, lat, lon]
-
-    # Calculate target period GDP for weighting (use same period as target calculation)
-    target_start = config['time_periods']['target_period']['start_year']
-    target_end = config['time_periods']['target_period']['end_year']
-    years = all_data['years']
-
-    start_idx = target_start - years[0]
-    end_idx = target_end - years[0] + 1
-
-    # Average GDP over target period for weighting
-    gdp_target_period = np.mean(gdp_data[start_idx:end_idx], axis=0)  # [lat, lon]
-
-    print(f"GDP-weighted global statistics for scaling factors (using {reference_ssp} GDP, {target_start}-{target_end}):")
-    print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
-
-    # Prepare data for CSV
-    csv_data = []
-
-    # Get coordinates from metadata
-    metadata = get_grid_metadata(all_data)
-    lat_values = metadata['lat']
-
-    # Calculate GDP-weighted global means for each combination
-    for target_idx, target_name in enumerate(target_names):
-        for resp_idx, resp_name in enumerate(response_function_names):
-            # Extract scaling factor for this combination
-            scale_data = scaling_factors[:, :, resp_idx, target_idx]  # [lat, lon]
-
-            # Use calculate_global_mean with GDP*scaling data to get proper area+GDP weighted mean
-            # Since GDP is in units per km², calculate_global_mean will properly handle the spatial weighting
-            gdp_weighted_scaling_data = gdp_target_period * scale_data
-            total_weighted_scaling = calculate_global_mean(gdp_weighted_scaling_data, lat_values, valid_mask)
-            total_gdp = calculate_global_mean(gdp_target_period, lat_values, valid_mask)
-
-            # GDP-weighted mean = area_weighted_mean(GDP * scaling) / area_weighted_mean(GDP)
-            if total_gdp > 0:
-                gdp_weighted_mean = total_weighted_scaling / total_gdp
-            else:
-                gdp_weighted_mean = np.nan
-
-            # Calculate GDP-weighted median using user's algorithm
-            # Create weights = cos(lat) * GDP and sort by scaling factor values
-            area_weights = calculate_area_weights(lat_values)
-            area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], scale_data.shape)
-
-            # Flatten arrays and apply valid mask
-            flat_scale = scale_data.flatten()
-            flat_gdp = gdp_target_period.flatten()
-            flat_area_weights = area_weights_2d.flatten()
-            flat_valid = valid_mask.flatten()
-
-            # Keep only valid entries
-            valid_indices = flat_valid & ~np.isnan(flat_scale) & ~np.isnan(flat_gdp)
-            valid_scale = flat_scale[valid_indices]
-            valid_gdp = flat_gdp[valid_indices]
-            valid_area_weights = flat_area_weights[valid_indices]
-
-            if len(valid_scale) > 0:
-                # Column 0: weights (cos(lat) * GDP), Column 1: scaling factors
-                gdp_area_weights = valid_area_weights * valid_gdp
-                combined = np.column_stack([gdp_area_weights, valid_scale])
-
-                # Sort by scaling factor values (column 1)
-                sorted_indices = np.argsort(combined[:, 1])
-                sorted_combined = combined[sorted_indices]
-
-                # Calculate cumulative sum of weights and find median
-                cumsum_weights = np.cumsum(sorted_combined[:, 0])
-                total_weight = cumsum_weights[-1]
-                half_weight = total_weight / 2.0
-
-                if half_weight <= cumsum_weights[0]:
-                    gdp_weighted_median = sorted_combined[0, 1]
-                elif half_weight >= cumsum_weights[-1]:
-                    gdp_weighted_median = sorted_combined[-1, 1]
-                else:
-                    gdp_weighted_median = np.interp(half_weight, cumsum_weights, sorted_combined[:, 1])
-            else:
-                gdp_weighted_median = np.nan
-
-            # Calculate scaling factor max/min statistics
-            valid_scaling = scale_data[valid_mask & np.isfinite(scale_data)]
-            if len(valid_scaling) > 0:
-                scaling_max = np.max(valid_scaling)
-                scaling_min = np.min(valid_scaling)
-            else:
-                scaling_max = scaling_min = np.nan
-
-            # Calculate objective function statistics
-            error_data = optimization_errors[:, :, resp_idx, target_idx]  # [lat, lon]
-            valid_errors = error_data[valid_mask & np.isfinite(error_data)]
-
-            if len(valid_errors) > 0:
-                obj_func_max = np.max(valid_errors)
-                obj_func_mean = np.mean(valid_errors)
-                obj_func_std = np.std(valid_errors)
-                obj_func_min = np.min(valid_errors)
-            else:
-                obj_func_max = obj_func_mean = obj_func_std = obj_func_min = np.nan
-
-            # Collect data for CSV
-            csv_data.append({
-                'target_name': target_name,
-                'response_function': resp_name,
-                'gdp_weighted_mean': gdp_weighted_mean,
-                'gdp_weighted_median': gdp_weighted_median,
-                'scaling_max': scaling_max,
-                'scaling_min': scaling_min,
-                'obj_func_max': obj_func_max,
-                'obj_func_mean': obj_func_mean,
-                'obj_func_std': obj_func_std,
-                'obj_func_min': obj_func_min
-            })
-
-    # Write to CSV file if output_dir provided
-    if output_dir and csv_data:
-
-        json_id = config['run_metadata']['json_id']
-        model_name = config['climate_model']['model_name']
-        reference_ssp = config['ssp_scenarios']['reference_ssp']
-        csv_filename = f"step3_{json_id}_{model_name}_{reference_ssp}_scaling_factors_summary.csv"
-        csv_path = os.path.join(output_dir, csv_filename)
-
-        # Create DataFrame and write to CSV
-        df = pd.DataFrame(csv_data)
-        df.to_csv(csv_path, index=False, float_format='%.6f')
-
-        print(f"Scaling factors summary written to: {csv_path}")
-        print()
-
-        # Also display table in terminal with updated columns
-        print("Summary Table (also saved to CSV):")
-        print(f"{'Target':<35} {'Response Function':<20} {'GDP-Wtd Mean':<13} {'GDP-Wtd Median':<15} {'Max':<10} {'Min':<10} {'ObjFunc Max':<11} {'ObjFunc Mean':<12} {'ObjFunc Std':<11} {'ObjFunc Min':<11}")
-        print("-" * 158)
-
-        for row in csv_data:
-            print(f"{row['target_name']:<35} {row['response_function']:<20} "
-                  f"{row['gdp_weighted_mean']:<13.6f} {row['gdp_weighted_median']:<15.6f} "
-                  f"{row['scaling_max']:<10.6f} {row['scaling_min']:<10.6f} "
-                  f"{row['obj_func_max']:<11.6f} {row['obj_func_mean']:<12.6f} "
-                  f"{row['obj_func_std']:<11.6f} {row['obj_func_min']:<11.6f}")
-
-        print("-" * 158)
-    else:
-        # Fallback: print to terminal only (old format)
-        print(f"{'Target':<35} {'Response Function':<20} {'GDP-Wtd Mean':<13} {'GDP-Wtd Median':<15} {'Max':<10} {'Min':<10} {'ObjFunc Max':<11} {'ObjFunc Mean':<12} {'ObjFunc Std':<11} {'ObjFunc Min':<11}")
-        print("-" * 158)
-
-        for row in csv_data:
-            print(f"{row['target_name']:<35} {row['response_function']:<20} "
-                  f"{row['gdp_weighted_mean']:<13.6f} {row['gdp_weighted_median']:<15.6f} "
-                  f"{row['scaling_max']:<10.6f} {row['scaling_min']:<10.6f} "
-                  f"{row['obj_func_max']:<11.6f} {row['obj_func_mean']:<12.6f} "
-                  f"{row['obj_func_std']:<11.6f} {row['obj_func_min']:<11.6f}")
-
-        print("-" * 158)
-
-    print()
 
 
 def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: Dict[str, Any],

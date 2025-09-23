@@ -121,8 +121,8 @@ Core Solow-Swan economic model parameters:
 - **`s`** (number): Savings rate (typically 0.3)
 - **`alpha`** (number): Capital elasticity (typically 0.3)
 - **`delta`** (number): Depreciation rate (typically 0.1)
-- **`tas0`** (number): Baseline temperature (typically 0.0)
-- **`pr0`** (number): Baseline precipitation (typically 0.0)
+
+*Note: Baseline temperature (`tas0`) and precipitation (`pr0`) are automatically computed from climate data during the reference period and do not need to be specified in the configuration.*
 
 Climate response parameters (typically 0.0 for base model):
 - **`k_tas1`** (number): Capital linear temperature response
@@ -254,9 +254,10 @@ Results saved to timestamped directories:
 
 ### Specialized Utility Modules
 - **`coin_ssp_math_utils.py`**: Mathematical utilities and helper functions
-- **`coin_ssp_io.py`**: NetCDF input/output and serialization functions
+- **`coin_ssp_netcdf.py`**: NetCDF input/output and serialization functions
 - **`coin_ssp_target_calculations.py`**: GDP target reduction calculations
-- **`coin_ssp_utils.py`**: Visualization and remaining utility functions
+- **`coin_ssp_reporting.py`**: Visualization and PDF generation functions
+- **`coin_ssp_utils.py`**: Mathematical utilities and data processing functions
 
 ### Configuration
 - **JSON-based workflow control**: Unified schema with standardized file naming
@@ -284,31 +285,31 @@ The COIN_SSP pipeline follows a structured calling hierarchy. Below shows the ma
     - `calculate_constant_target_reduction()` → Uniform spatial targets
     - `calculate_linear_target_reduction()` → Temperature-dependent targets
     - `calculate_quadratic_target_reduction()` → Quadratic temperature targets
-  - `save_step1_results_netcdf()` → **[coin_ssp_io.py]** NetCDF output
-  - `create_target_gdp_visualization()` → **[coin_ssp_utils.py]** PDF generation
+  - `save_step1_results_netcdf()` → **[coin_ssp_netcdf.py]** NetCDF output
+  - `create_target_gdp_visualization()` → **[coin_ssp_reporting.py]** PDF generation
 
 **Step 2: Baseline TFP**
 - `step2_calculate_baseline_tfp()`
   - `calculate_tfp_coin_ssp()` → **[coin_ssp_core.py]** Economic model computation
     - `calculate_coin_ssp_forward_model()` → Solow-Swan model integration
-  - `save_step2_results_netcdf()` → **[coin_ssp_io.py]** NetCDF output
-  - `create_baseline_tfp_visualization()` → **[coin_ssp_utils.py]** PDF generation
+  - `save_step2_results_netcdf()` → **[coin_ssp_netcdf.py]** NetCDF output
+  - `create_baseline_tfp_visualization()` → **[coin_ssp_reporting.py]** PDF generation
 
 **Step 3: Scaling Optimization**
 - `step3_calculate_scaling_factors_per_cell()`
   - `optimize_climate_response_scaling()` → **[coin_ssp_core.py]** Per-grid optimization
     - `calculate_coin_ssp_forward_model()` → Forward model evaluation
     - Scipy optimization routines → Constraint satisfaction
-  - `save_step3_results_netcdf()` → **[coin_ssp_io.py]** NetCDF output
-  - `create_scaling_factors_visualization()` → **[coin_ssp_utils.py]** PDF generation
+  - `save_step3_results_netcdf()` → **[coin_ssp_netcdf.py]** NetCDF output
+  - `create_scaling_factors_visualization()` → **[coin_ssp_reporting.py]** PDF generation
 
 **Step 4: Forward Integration**
 - `step4_forward_integration_all_ssps()`
   - `calculate_coin_ssp_forward_model()` → **[coin_ssp_core.py]** Climate-integrated projections
     - Economic model with calibrated response functions
-  - `save_step4_results_netcdf_split()` → **[coin_ssp_io.py]** Multi-SSP NetCDF output
-  - `create_forward_model_visualization()` → **[coin_ssp_utils.py]** Time series PDFs
-  - `create_forward_model_maps_visualization()` → **[coin_ssp_utils.py]** Spatial maps PDFs
+  - `save_step4_results_netcdf_split()` → **[coin_ssp_netcdf.py]** Multi-SSP NetCDF output
+  - `create_forward_model_visualization()` → **[coin_ssp_reporting.py]** Time series PDFs
+  - `create_forward_model_maps_visualization()` → **[coin_ssp_reporting.py]** Spatial maps PDFs
 
 **Step 5: Processing Summary**
 - `step5_processing_summary()`
@@ -321,7 +322,7 @@ The COIN_SSP pipeline follows a structured calling hierarchy. Below shows the ma
 - `calculate_zero_biased_range()` → Visualization range calculation
 - `calculate_time_means()` → Temporal averaging
 
-**Data I/O Operations** → **[coin_ssp_io.py]**
+**Data I/O Operations** → **[coin_ssp_netcdf.py]**
 - `create_serializable_config()` → JSON metadata for NetCDF
 - `extract_year_coordinate()` → Time coordinate extraction
 - `interpolate_to_annual_grid()` → Temporal interpolation

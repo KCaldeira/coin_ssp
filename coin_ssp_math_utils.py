@@ -169,9 +169,6 @@ def calculate_zero_biased_axis_range(data_values, padding_factor=0.05):
 
     return range_min, range_max
 
-
-
-
 def calculate_area_weights(lat):
     """
     Calculate area weights proportional to cosine of latitude.

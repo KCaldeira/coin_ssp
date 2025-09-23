@@ -8,6 +8,46 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 
+def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: str) -> str:
+    """
+    Resolve NetCDF file path using naming convention: {prefix}_{model_name}_{ssp_name}.nc
+
+    Parameters
+    ----------
+    config : Dict[str, Any]
+        Configuration dictionary
+    data_type : str
+        Type of data ('tas', 'pr', 'gdp', 'pop', 'target_reductions')
+    ssp_name : str
+        SSP scenario name (e.g., 'ssp245', 'ssp585')
+
+    Returns
+    -------
+    str
+        Full path to NetCDF file
+    """
+    climate_model = config['climate_model']
+    model_name = climate_model['model_name']
+    input_dir = climate_model['input_directory']
+
+    # Map data types to config keys
+    prefix_mapping = {
+        'tas': 'tas_file_prefix',
+        'pr': 'pr_file_prefix',
+        'gdp': 'gdp_file_prefix',
+        'pop': 'pop_file_prefix',
+        'target_reductions': 'target_reductions_file_prefix'
+    }
+
+    prefix_key = prefix_mapping[data_type]
+    prefix = climate_model['file_prefixes'][prefix_key]
+
+    filename = f"{prefix}_{model_name}_{ssp_name}.nc"
+    filepath = os.path.join(input_dir, filename)
+
+    return filepath
+
+
 def create_serializable_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create a JSON-serializable version of the configuration by filtering out non-serializable objects.
