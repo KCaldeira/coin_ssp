@@ -624,15 +624,10 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
         if target_type == 'variability':
 
-            if variability_reference_scaling is None:
-                # This should never happen if has_variability_targets check worked
-                raise RuntimeError("Variability reference scaling not computed but variability target encountered")
-
             # CHEAP: Apply target-specific scaling
-            print(f"\nApplying variability target: {gdp_target['target_name']} ({target_idx+1}/{n_gdp_targets})")
             results = apply_variability_target_scaling(
-                variability_reference_scaling, gdp_target, tas_data, pr_data,
-                tas0_2d, pr0_2d, target_idx, response_scalings,
+                variability_reference_scaling, gdp_target, target_idx,
+                all_data, config, response_scalings,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters
             )
 

@@ -45,7 +45,7 @@
     "historical_period": {
       "start_year": 1861,
       "end_year": 2014,
-      "description": "Historical period for variability relationship calibration"
+      "description": "Historical period for gdp-weighting in variability relationship calibration"
     },
     "target_period": {
       "start_year": 2080,
