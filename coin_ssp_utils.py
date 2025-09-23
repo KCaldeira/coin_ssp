@@ -12,6 +12,9 @@ import xarray as xr
 from datetime import datetime
 from typing import Dict, Any, List
 from coin_ssp_models import ScalingParams
+from coin_ssp_io import write_all_loaded_data_netcdf
+from coin_ssp_math_utils import create_serializable_config, calculate_global_mean
+from coin_ssp_target_calculations import calculate_all_target_reductions
 
 def get_adaptive_subplot_layout(n_targets):
     """
@@ -1887,141 +1890,6 @@ def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
     return all_data
 
 
-def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any], output_dir: str) -> str:
-    """
-    Write all loaded NetCDF data to a single output file for reference and validation.
-
-    Parameters
-    ----------
-    all_data : Dict[str, Any]
-        All loaded NetCDF data from load_all_data()
-    config : Dict[str, Any]
-        Configuration dictionary
-    output_dir : str
-        Output directory path
-
-    Returns
-    -------
-    str
-        Path to written NetCDF file
-    """
-
-    # Extract metadata
-    metadata = all_data['_metadata']
-    lat = metadata['lat']
-    lon = metadata['lon']
-    years = metadata['years']
-    valid_mask = metadata['valid_mask']
-    model_name = config['climate_model']['model_name']
-
-    # Get SSP list (excluding metadata)
-    ssp_names = [key for key in all_data.keys() if key != '_metadata']
-
-    print(f"Writing all loaded data to NetCDF file...")
-
-    # Extract configuration values for standardized naming
-    json_id = config['run_metadata']['json_id']
-    model_name = config['climate_model']['model_name']
-
-    # Create filename using standardized pattern
-    netcdf_filename = f"all_loaded_data_{json_id}_{model_name}.nc"
-    netcdf_path = os.path.join(output_dir, netcdf_filename)
-
-    # Prepare data arrays for xarray (all SSPs combined)
-    n_ssp = len(ssp_names)
-    n_time, n_lat, n_lon = len(years), len(lat), len(lon)
-
-    # Initialize arrays [ssp, time, lat, lon]
-    tas_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
-    pr_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
-    gdp_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
-    pop_all = np.full((n_ssp, n_time, n_lat, n_lon), np.nan)
-
-    # Fill arrays
-    for i, ssp_name in enumerate(ssp_names):
-        ssp_data = all_data[ssp_name]
-        tas_all[i] = ssp_data['tas']      # [time, lat, lon]
-        pr_all[i] = ssp_data['pr']  # [time, lat, lon]
-        gdp_all[i] = ssp_data['gdp']                      # [time, lat, lon]
-        pop_all[i] = ssp_data['pop']        # [time, lat, lon]
-
-    # Create xarray Dataset
-    ds = xr.Dataset(
-        {
-            'tas': (['ssp', 'time', 'lat', 'lon'], tas_all),
-            'pr': (['ssp', 'time', 'lat', 'lon'], pr_all),
-            'gdp': (['ssp', 'time', 'lat', 'lon'], gdp_all),
-            'pop': (['ssp', 'time', 'lat', 'lon'], pop_all),
-            'valid_mask': (['lat', 'lon'], valid_mask)
-        },
-        coords={
-            'ssp': ssp_names,
-            'time': years,
-            'lat': lat,
-            'lon': lon
-        }
-    )
-
-    # Add variable attributes
-    ds.tas.attrs = {
-        'long_name': 'Surface Air Temperature',
-        'units': 'degrees_celsius',
-        'description': 'Annual surface air temperature, converted from Kelvin'
-    }
-
-    ds.pr.attrs = {
-        'long_name': 'Precipitation Rate',
-        'units': 'mm/day',
-        'description': 'Annual precipitation rate'
-    }
-
-    ds.gdp.attrs = {
-        'long_name': 'GDP Density',
-        'units': 'economic_units',
-        'description': 'GDP density with exponential growth applied before prediction year'
-    }
-
-    ds.pop.attrs = {
-        'long_name': 'Population Density',
-        'units': 'people',
-        'description': 'Population density with exponential growth applied before prediction year'
-    }
-
-    ds.valid_mask.attrs = {
-        'long_name': 'Valid Economic Grid Cells',
-        'units': 'boolean',
-        'description': 'True for grid cells with positive GDP and population for all years'
-    }
-
-    # Add global attributes
-    serializable_config = create_serializable_config(config)
-    ds.attrs = {
-        'title': 'All Loaded NetCDF Data for COIN-SSP Processing',
-        'description': f'Combined dataset from {model_name} containing all SSP scenarios with harmonized temporal alignment and exponential growth applied',
-        'climate_model': model_name,
-        'creation_date': datetime.now().isoformat(),
-        'institution': 'COIN-SSP Climate Economics Model',
-        'ssp_scenarios': ', '.join(ssp_names),
-        'time_range': f'{years[0]}-{years[-1]}',
-        'grid_shape': f'{n_lat}x{n_lon}',
-        'valid_grid_cells': f'{metadata["valid_count"]}/{n_lat*n_lon} ({100*metadata["valid_count"]/(n_lat*n_lon):.1f}%)',
-        'prediction_year': config['time_periods']['prediction_period']['start_year'],
-        'exponential_growth_applied': 'GDP and population modified to exponential growth before prediction year',
-        'configuration_json': json.dumps(serializable_config, indent=2)
-    }
-
-    # Write to NetCDF
-    ds.to_netcdf(netcdf_path)
-
-    print(f"  ✅ All loaded data written to: {os.path.basename(netcdf_path)}")
-    print(f"     File size: {os.path.getsize(netcdf_path) / (1024*1024):.1f} MB")
-    print(f"     SSP scenarios: {len(ssp_names)}")
-    print(f"     Grid cells: {n_lat} × {n_lon} = {n_lat*n_lon}")
-    print(f"     Valid cells: {metadata['valid_count']} ({100*metadata['valid_count']/(n_lat*n_lon):.1f}%)")
-    print(f"     Time span: {years[0]}-{years[-1]} ({len(years)} years)")
-
-    return netcdf_path
-
 
 def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: str) -> str:
     """
@@ -3304,7 +3172,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
     metadata = tfp_results['_metadata']
     lat = metadata['lat']
     lon = metadata['lon']
-    years = metadata['years']
+    years = all_data['years']  # Years stored at top level in all_data
 
     # Get time period information
     ref_start = config['time_periods']['reference_period']['start_year']
