@@ -468,22 +468,6 @@ def analysis_tas_gdp_correlations(output_files, analysis_output_dir, config, ssp
         raise ValueError("No correlation results were generated")
 
 
-def analysis_3_placeholder(output_files, analysis_output_dir, config):
-    """
-    Placeholder for third post-processing analysis.
-
-    Parameters
-    ----------
-    output_files : dict
-        Dictionary containing paths to pipeline output files
-    analysis_output_dir : str
-        Directory where analysis results should be saved
-    config : dict
-        Configuration dictionary in main processing format (from obtain_configuration_information)
-    """
-    print("📊 Analysis 3: [Future analysis placeholder]")
-    print("    This analysis slot is ready for future implementation...")
-    print(f"    Configuration available: {config['climate_model']['model_name']} model")
 
 
 def run_all_analyses(output_files, analysis_output_dir, ssp_filter=None):
@@ -543,7 +527,6 @@ def run_all_analyses(output_files, analysis_output_dir, ssp_filter=None):
     # Define subsequent analyses (config is now available)
     analyses = [
         ("Temperature-GDP Variability Correlations", analysis_tas_gdp_correlations),
-        ("Analysis 3", analysis_3_placeholder)
     ]
 
     # Run remaining analyses with both output_files and config available

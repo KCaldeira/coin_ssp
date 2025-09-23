@@ -397,13 +397,10 @@ def optimize_climate_response_scaling(
             optimal_scale = float(res_expanded.x[0])
             final_error = float(res_expanded.fun)
 
-            # Print improvement notice (uncomment for debugging)
-            # print(f"    Bounds expansion improved result: {bound_type} bound hit, "
-            #       f"scale {old_scale:.6f} → {optimal_scale:.6f}, error {old_error:.6e} → {final_error:.6e}")
+            # Bounds expansion improved result
         else:
             # Expansion didn't help, keep original result
             pass
-            # print(f"    Bounds expansion at {bound_type} bound didn't improve result, keeping original")
 
         # Optional: Could add another round of expansion if still hitting bounds
 
@@ -795,7 +792,7 @@ def apply_variability_target_scaling(
     n_response_functions = len(response_scalings)
 
     target_name = gdp_target['target_name']
-    target_shape = gdp_target.get('target_shape', 'constant')
+    target_shape = gdp_target['target_shape']
 
     print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?) - Shape: {target_shape}")
 

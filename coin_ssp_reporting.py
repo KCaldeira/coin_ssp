@@ -1092,22 +1092,10 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                     quad_config = next(t for t in gdp_targets if t['target_name'] == target_name)
 
                     # Handle new derivative-based specification
-                    if 'derivative_at_zero_amount_temperature' in quad_config:
-                        zero_tas = quad_config['zero_amount_temperature']
-                        derivative = quad_config['derivative_at_zero_amount_temperature']
-                        ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
-                                label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.3f})')
-                    # Handle legacy reference point specification
-                    elif 'reference_temperature' in quad_config:
-                        ref_tas = quad_config['reference_temperature']
-                        ref_value = quad_config['amount_at_reference_temp']
-                        ax4.plot(ref_tas, ref_value, 'o', color=color, markersize=8,
-                                label=f'Quad calib: {ref_tas}°C = {ref_value:.3f}')
-
-                        if 'zero_amount_temperature' in quad_config:
-                            zero_tas = quad_config['zero_amount_temperature']
-                            ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
-                                    label=f'Quad zero: {zero_tas}°C = 0')
+                    zero_tas = quad_config['zero_amount_temperature']
+                    derivative = quad_config['derivative_at_zero_amount_temperature']
+                    ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
+                            label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.3f})')
 
         # Add reference lines
         ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)

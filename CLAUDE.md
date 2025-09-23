@@ -117,3 +117,5 @@ Complete 5-step integrated processing pipeline with adaptive optimization and st
 - **Variable Naming**: Consistent `tas`/`pr` climatological conventions throughout codebase
 - **Adaptive Bounds Expansion**: Step 3 optimization automatically expands search bounds by 10× when hitting limits
 - **Visualization Standardization**: All maps use `pcolormesh` with adaptive 3-per-page layouts
+- **Backward Compatibility Cleanup**: Removed all legacy field name support and optional argument defaults
+- **Variability Target Implementation**: Added support for `target_type: "variability"` with linear/quadratic target shapes

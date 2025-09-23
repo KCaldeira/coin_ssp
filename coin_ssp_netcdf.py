@@ -232,13 +232,8 @@ def load_step3_results_from_netcdf(netcdf_path: str) -> Dict[str, Any]:
     scaled_parameters = ds.scaled_parameters.values
     valid_mask = ds.valid_mask.values
 
-    # Extract coordinate labels (handle both old and new dimension names)
-    if 'response_func' in ds.coords:
-        response_function_names = [str(name) for name in ds.response_func.values]
-    elif 'damage_func' in ds.coords:
-        response_function_names = [str(name) for name in ds.damage_func.values]
-    else:
-        raise ValueError("Neither 'response_func' nor 'damage_func' dimension found in NetCDF file")
+    # Extract coordinate labels
+    response_function_names = [str(name) for name in ds.response_func.values]
 
     target_names = [str(name) for name in ds.target.values]
     scaled_param_names = [str(name) for name in ds.param.values]

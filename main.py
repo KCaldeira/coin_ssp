@@ -610,7 +610,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     pr0_2d = all_data['pr0_2d']
 
     # Check if any targets are of type 'variability'
-    has_variability_targets = any(target.get('target_type', 'damage') == 'variability' for target in gdp_targets)
+    has_variability_targets = any(target['target_type'] == 'variability' for target in gdp_targets)
     if has_variability_targets:
         print("Detected 'variability' type GDP targets. Preparing variability reference scaling...")
         # EXPENSIVE: Compute reference relationship once
@@ -620,7 +620,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Process each GDP target with conditional logic based on target type
     for target_idx, gdp_target in enumerate(gdp_targets):
-        target_type = gdp_target.get('target_type', 'damage')  # Default to 'damage' for backward compatibility
+        target_type = gdp_target['target_type']
 
         if target_type == 'variability':
 
