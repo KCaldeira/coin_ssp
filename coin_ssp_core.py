@@ -611,17 +611,42 @@ def calculate_variability_climate_response_parameters(
     all_data, config, reference_tfp, response_scalings
 ):
     """
-    Calculate baseline climate response parameters (k_tas1, k_tas2, etc.) for variability targets.
+    Calculate climate response parameters for variability targets using a 4-step calibration process.
 
-    Performs optimization across all grid cells to determine the baseline climate response
-    coefficients that will be used as a foundation for variability target calculations.
-    These parameters represent the underlying relationship between climate variables and
-    economic impacts before variability scaling is applied.
+    This function determines the climate response parameters that will be used for variability
+    scaling by establishing the relationship between weather variability and economic impacts.
 
-    For each valid grid cell:
-    1. Run optimization using dummy GDP target to establish baseline relationship
-    2. Extract optimized climate response parameters (k_tas1, k_tas2, tfp_tas1, etc.)
-    3. Store parameters for use in variability scaling calculations
+    ALGORITHM OVERVIEW:
+    ==================
+
+    Step 1: OPTIMIZATION FOR UNIFORM 10% GDP LOSS
+    ---------------------------------------------
+    - Run optimization to find scaling factors that produce uniform 10% GDP loss in target period
+    - This establishes the baseline strength of climate-economy relationship needed for target impact
+    - Uses dummy target with 10% constant reduction across all grid cells
+    - Outputs: scaling factors for each response function parameter
+
+    Step 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
+    -------------------------------------------------------
+    - Take parameters from Step 1 optimization, scaled by the found factors
+    - Run forward model simulations for each grid cell using these scaled parameters
+    - Generate economic projections over the full time period (historical + future)
+    - Outputs: time series of economic variables (GDP, capital, TFP) for each grid cell
+
+    Step 3: WEATHER VARIABILITY REGRESSION ANALYSIS
+    -----------------------------------------------
+    - For each grid cell, compute regression: log(y_weather) ~ tas_weather over historical period
+    - y_weather = weather component of GDP (detrended, LOESS-filtered economic signal)
+    - tas_weather = weather component of temperature (detrended, LOESS-filtered climate signal)
+    - Regression slope = fractional change in GDP per degree C of weather variability
+    - This quantifies the actual historical relationship between weather and economic fluctuations
+
+    Step 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
+    --------------------------------------------------
+    - Divide all climate response parameters from Step 1 by the regression slope from Step 3
+    - This normalizes parameters so they represent the correct strength per degree of variability
+    - Final parameters capture both the target impact magnitude AND the observed weather sensitivity
+    - Result: climate parameters calibrated for variability target applications
 
     Parameters
     ----------
@@ -637,16 +662,24 @@ def calculate_variability_climate_response_parameters(
     Returns
     -------
     baseline_climate_parameters : np.ndarray
-        Baseline climate response parameters [lat, lon, n_params] from optimization at each grid cell.
-        These are the k_tas1, k_tas2, tfp_tas1, tfp_tas2, y_tas1, y_tas2, etc. values.
+        Climate response parameters [lat, lon, n_params] calibrated for variability targets.
+        Parameters are normalized by weather-GDP regression slopes from historical data.
     """
 
-    print("Computing baseline climate response parameters for variability targets...")
+    print("Computing climate response parameters for variability targets...")
+    print("Using 4-step calibration process:")
+    print("  1. Optimization for uniform 10% GDP loss")
+    print("  2. Forward model simulations with scaled parameters")
+    print("  3. Weather variability regression analysis")
+    print("  4. Parameter normalization by regression slope")
+
+    # =================================================================================
+    # STEP 1: OPTIMIZATION FOR UNIFORM 10% GDP LOSS
+    # =================================================================================
+    print("\n--- Step 1: Optimization for uniform 10% GDP loss ---")
 
     # Extract data from all_data structure
-    # Get reference SSP from config
     reference_ssp = config['ssp_scenarios']['reference_ssp']
-
     tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
     pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
     pop_data = get_ssp_data(all_data, reference_ssp, 'pop')
@@ -654,92 +687,188 @@ def calculate_variability_climate_response_parameters(
     tas_weather_data = all_data[reference_ssp]['tas_weather']
     pr_weather_data = all_data[reference_ssp]['pr_weather']
     years = all_data['years']
-
-    # Get reference climate baselines from all_data
     tas0_2d = all_data['tas0_2d']
     pr0_2d = all_data['pr0_2d']
 
     # Extract TFP data
     valid_mask = reference_tfp['valid_mask']
     tfp_baseline = reference_tfp['tfp_baseline']
-
-    # Get dimensions
     nlat, nlon = valid_mask.shape
 
-    # Use first response function as reference for optimization
-    reference_response_scaling = response_scalings[0]
-    scaling_config = filter_scaling_params(reference_response_scaling)
-    scaling_params = ScalingParams(**scaling_config)
-
-    # Get historical period indices for regression
-    time_periods = config['time_periods']
-    hist_start_year = time_periods['historical_period']['start_year']
-    hist_end_year = time_periods['historical_period']['end_year']
-
-    hist_start_idx = np.where(years >= hist_start_year)[0][0]
-    hist_end_idx = np.where(years <= hist_end_year)[0][-1]
-
-    # Get reference period indices for filtering
-    ref_start_year = time_periods['reference_period']['start_year']
-    ref_end_year = time_periods['reference_period']['end_year']
-    ref_start_idx = np.where(years == ref_start_year)[0][0]
-    ref_end_idx = np.where(years == ref_end_year)[0][0]
-
-    # Create dummy GDP target for optimization with exact specifications
+    # Create dummy GDP target for optimization (uniform 10% loss)
     dummy_gdp_target = {
         'target_type': 'damage',
         'target_shape': 'constant',
-        'gdp_amount': -0.10,  # 10% reduction as reference
+        'gdp_amount': -0.10,
         'target_name': 'variability_reference'
     }
 
-    # Create dummy target_results for the reference case
-    # We need a constant reduction array for the reference optimization
-    constant_reduction = np.full((nlat, nlon), -0.10)  # 10% reduction everywhere
+    constant_reduction = np.full((nlat, nlon), -0.10)
     dummy_target_results = {
         'variability_reference': {
             'reduction_array': constant_reduction
         }
     }
 
-    # Initialize arrays for the optimization process
+    # Initialize arrays for optimization
     n_response_functions = len(response_scalings)
-    n_targets = 1  # dummy target for reference computation
-    n_params = 12  # Number of model parameters (k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2)
-
+    n_targets = 1
+    n_params = 12
     scaling_factors = np.zeros((nlat, nlon, n_response_functions, n_targets))
     optimization_errors = np.zeros((nlat, nlon, n_response_functions, n_targets))
     convergence_flags = np.zeros((nlat, nlon, n_response_functions, n_targets), dtype=bool)
     scaled_parameters = np.zeros((nlat, nlon, n_response_functions, n_targets, n_params))
-    total_grid_cells = 0
-    successful_optimizations = 0
 
-    # Run process_response_target_optimization to get scaled_parameters
-    print("Running reference optimization for variability relationship...")
+    # Run optimization to find scaling factors for uniform 10% GDP loss
     reference_results = process_response_target_optimization(
-        0,  # target_idx (dummy)
-        dummy_gdp_target,
-        dummy_target_results,
-        response_scalings,
-        tas_data, pr_data, pop_data, gdp_data,
-        reference_tfp, valid_mask, tfp_baseline, years, config,
-        scaling_factors, optimization_errors, convergence_flags, scaled_parameters,
-        total_grid_cells, successful_optimizations,
-        tas_weather_data, pr_weather_data
+        0, dummy_gdp_target, dummy_target_results, response_scalings,
+        tas_data, pr_data, pop_data, gdp_data, reference_tfp, valid_mask, tfp_baseline,
+        years, config, scaling_factors, optimization_errors, convergence_flags,
+        scaled_parameters, 0, 0, tas_weather_data, pr_weather_data
     )
 
-    # Extract baseline climate parameters for the first (reference) response function and target
-    # scaled_parameters is [lat, lon, response_idx, target_idx, param_idx]
-    baseline_climate_parameters = scaled_parameters[:, :, 0, 0, :]  # Shape: [lat, lon, n_params]
+    # Extract optimized parameters (Step 1 results)
+    step1_parameters = scaled_parameters[:, :, 0, 0, :]  # [lat, lon, n_params]
+    step1_success_mask = convergence_flags[:, :, 0, 0]
 
     valid_cells = np.sum(valid_mask)
-    processed_cells = np.sum(convergence_flags[:, :, 0, 0])
+    step1_success = np.sum(step1_success_mask)
+    print(f"Step 1 complete: {step1_success}/{valid_cells} successful optimizations")
 
-    print(f"Baseline climate parameter computation complete.")
-    print(f"  Successfully optimized: {processed_cells}/{valid_cells} valid grid cells")
-    print(f"  Baseline climate parameters shape: {baseline_climate_parameters.shape}")
+    # =================================================================================
+    # STEP 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
+    # =================================================================================
+    print("\n--- Step 2: Forward model simulations with scaled parameters ---")
 
-    return baseline_climate_parameters
+    # Get time period indices
+    time_periods = config['time_periods']
+    hist_start_year = time_periods['historical_period']['start_year']
+    hist_end_year = time_periods['historical_period']['end_year']
+    hist_start_idx = np.where(years >= hist_start_year)[0][0]
+    hist_end_idx = np.where(years <= hist_end_year)[0][-1]
+    n_hist_years = hist_end_idx - hist_start_idx + 1
+
+    # Initialize arrays for forward model results
+    gdp_forward = np.zeros((nlat, nlon, len(years)))
+
+    print(f"Running forward model for {np.sum(step1_success_mask)} grid cells...")
+
+    # Run forward model for each successfully optimized grid cell
+    for lat_idx in range(nlat):
+        for lon_idx in range(nlon):
+            if not (valid_mask[lat_idx, lon_idx] and step1_success_mask[lat_idx, lon_idx]):
+                continue
+
+            # Extract model parameters for this cell from Step 1
+            cell_params = step1_parameters[lat_idx, lon_idx, :]
+
+            # Create ModelParams object with optimized climate response parameters
+            model_params = ModelParams(
+                s=config['model_params']['s'],
+                alpha=config['model_params']['alpha'],
+                delta=config['model_params']['delta'],
+                tas0=tas0_2d[lat_idx, lon_idx],
+                pr0=pr0_2d[lat_idx, lon_idx],
+                k_tas1=cell_params[0], k_tas2=cell_params[1],
+                k_pr1=cell_params[2], k_pr2=cell_params[3],
+                tfp_tas1=cell_params[4], tfp_tas2=cell_params[5],
+                tfp_pr1=cell_params[6], tfp_pr2=cell_params[7],
+                y_tas1=cell_params[8], y_tas2=cell_params[9],
+                y_pr1=cell_params[10], y_pr2=cell_params[11]
+            )
+
+            # Extract time series for this grid cell
+            cell_tas = tas_data[:, lat_idx, lon_idx]
+            cell_pr = pr_data[:, lat_idx, lon_idx]
+            cell_pop = pop_data[:, lat_idx, lon_idx]
+            cell_gdp = gdp_data[:, lat_idx, lon_idx]
+            cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx]
+
+            # Run forward model
+            results = calculate_coin_ssp_forward_model(
+                model_params, cell_tas, cell_pr, cell_pop, cell_gdp,
+                cell_tfp_baseline, years
+            )
+
+            gdp_forward[lat_idx, lon_idx, :] = results['gdp_timeseries']
+
+    print(f"Step 2 complete: Forward model simulations generated")
+
+    # =================================================================================
+    # STEP 3: WEATHER VARIABILITY REGRESSION ANALYSIS
+    # =================================================================================
+    print("\n--- Step 3: Weather variability regression analysis ---")
+
+    # Initialize regression slope array
+    regression_slopes = np.zeros((nlat, nlon))
+    regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
+
+    print(f"Computing log(y_weather) ~ tas_weather regression for {np.sum(step1_success_mask)} cells...")
+
+    for lat_idx in range(nlat):
+        for lon_idx in range(nlon):
+            if not (valid_mask[lat_idx, lon_idx] and step1_success_mask[lat_idx, lon_idx]):
+                continue
+
+            # Extract weather variables for historical period
+            tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
+            gdp_forward_hist = gdp_forward[lat_idx, lon_idx, hist_start_idx:hist_end_idx+1]
+
+            # Compute y_weather (weather component of GDP)
+            # Use LOESS filtering approach similar to tas_weather computation
+            y_weather_hist = apply_time_series_filter(gdp_forward_hist, years[hist_start_idx:hist_end_idx+1])
+
+            # Remove any zero or negative values for log transform
+            valid_data_mask = (y_weather_hist > 0) & (np.isfinite(tas_weather_hist)) & (np.isfinite(y_weather_hist))
+
+            if np.sum(valid_data_mask) < 10:  # Need minimum data points for regression
+                continue
+
+            # Compute regression: log(y_weather) ~ tas_weather
+            log_y_weather = np.log(y_weather_hist[valid_data_mask])
+            tas_weather_valid = tas_weather_hist[valid_data_mask]
+
+            # Linear regression
+            if np.std(tas_weather_valid) > 1e-6:  # Check for sufficient variation
+                slope, intercept = np.polyfit(tas_weather_valid, log_y_weather, 1)
+                regression_slopes[lat_idx, lon_idx] = slope
+                regression_success_mask[lat_idx, lon_idx] = True
+
+    regression_success = np.sum(regression_success_mask)
+    print(f"Step 3 complete: {regression_success} successful regressions")
+
+    # =================================================================================
+    # STEP 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
+    # =================================================================================
+    print("\n--- Step 4: Parameter normalization by regression slope ---")
+
+    # Initialize final normalized parameters
+    final_parameters = np.zeros_like(step1_parameters)
+    final_success_mask = step1_success_mask & regression_success_mask
+
+    for lat_idx in range(nlat):
+        for lon_idx in range(nlon):
+            if not final_success_mask[lat_idx, lon_idx]:
+                continue
+
+            slope = regression_slopes[lat_idx, lon_idx]
+
+            # Avoid division by very small slopes
+            if abs(slope) > 1e-6:
+                final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
+            else:
+                final_success_mask[lat_idx, lon_idx] = False
+
+    final_success = np.sum(final_success_mask)
+    print(f"Step 4 complete: {final_success} final calibrated parameters")
+
+    print(f"\n4-step calibration summary:")
+    print(f"  Valid grid cells: {valid_cells}")
+    print(f"  Step 1 success: {step1_success}")
+    print(f"  Step 3 success: {regression_success}")
+    print(f"  Final success: {final_success}")
+
+    return final_parameters
 
 
 def calculate_variability_scaling_parameters(

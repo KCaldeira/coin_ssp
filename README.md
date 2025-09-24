@@ -47,7 +47,18 @@ The model now supports **temperature-dependent climate sensitivity** where econo
 - **Mathematical Form**: `v(T) = v0 + v1*T + v2*T²`
 - **Implementation**: Added v0, v1, v2 parameters to ModelParams (defaults: 1.0, 0.0, 0.0)
 - **Backward Compatibility**: Default values preserve existing behavior for damage targets
-- **Extensible**: Framework ready for variability target implementation
+
+#### Variability Calibration (NEW - December 2025)
+**Status: Implementation Complete, Ready for Testing**
+
+The `calculate_variability_climate_response_parameters` function now implements a sophisticated 4-step calibration process:
+
+1. **Optimization**: Find scaling factors for uniform 10% GDP loss in target period
+2. **Forward Simulation**: Run economic projections with calibrated parameters
+3. **Regression Analysis**: Quantify historical weather-GDP relationship (`log(y_weather) ~ tas_weather`)
+4. **Parameter Normalization**: Scale parameters by observed weather sensitivity
+
+This approach ensures variability targets are calibrated to both the desired impact magnitude AND the actual historical relationship between weather variability and economic fluctuations.
 
 ## Configuration
 
@@ -248,6 +259,9 @@ Results saved to timestamped directories:
 
 ## Recent Updates
 
+- **Variability Calibration Algorithm**: Complete 4-step implementation in `calculate_variability_climate_response_parameters` (December 2025)
+- **Weather-GDP Regression**: New regression analysis linking weather variability to economic impacts
+- **Parameter Normalization**: Climate parameters now normalized by observed historical sensitivity
 - **Weather Variables**: Centralized computation and storage in `all_data` structure
 - **Reference Baselines**: Pre-computed `tas0_2d`/`pr0_2d` climate baselines
 - **Function Signatures**: Simplified parameter lists using `all_data` and `config`

@@ -65,6 +65,32 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Backward Compatibility**: Default values ensure zero behavioral change for `target_type: "damage"`
 - **Architecture**: Clean separation between baseline climate parameters (k_tas1, etc.) and variability scaling (v0, v1, v2)
 
+#### Variability Calibration Algorithm
+**NEW IMPLEMENTATION (December 2025)**: `calculate_variability_climate_response_parameters` now uses a 4-step calibration process:
+
+**Step 1: Optimization for Uniform 10% GDP Loss**
+- Run optimization to find scaling factors that produce uniform 10% GDP loss in target period
+- Establishes baseline strength of climate-economy relationship needed for target impact
+- Uses dummy target with 10% constant reduction across all grid cells
+
+**Step 2: Forward Model Simulations with Scaled Parameters**
+- Take parameters from Step 1, scaled by found factors
+- Run forward model simulations for each grid cell using scaled parameters
+- Generate economic projections over full time period (historical + future)
+
+**Step 3: Weather Variability Regression Analysis**
+- For each grid cell: compute regression `log(y_weather) ~ tas_weather` over historical period
+- `y_weather` = weather component of GDP (detrended, LOESS-filtered economic signal)
+- `tas_weather` = weather component of temperature (detrended, LOESS-filtered climate signal)
+- Regression slope = fractional change in GDP per degree C of weather variability
+
+**Step 4: Parameter Normalization by Regression Slope**
+- Divide all climate response parameters from Step 1 by regression slope from Step 3
+- Normalizes parameters to represent correct strength per degree of variability
+- Final parameters capture both target impact magnitude AND observed weather sensitivity
+
+**Status**: Implementation complete, ready for testing
+
 #### Standard Loop Nesting Orders
 Two mandatory patterns for consistency:
 
