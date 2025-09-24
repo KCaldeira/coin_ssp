@@ -51,7 +51,7 @@ from coin_ssp_reporting import (
 )
 from coin_ssp_core import (
     optimize_climate_response_scaling, calculate_coin_ssp_forward_model,
-    calculate_reference_gdp_climate_variability, apply_variability_target_scaling, process_response_target_optimization
+    calculate_variability_climate_response_parameters, calculate_variability_scaling_parameters, process_response_target_optimization
 )
 from model_params_factory import ModelParamsFactory
 
@@ -614,7 +614,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     if has_variability_targets:
         print("Detected 'variability' type GDP targets. Preparing variability reference scaling...")
         # EXPENSIVE: Compute reference relationship once
-        variability_reference_scaling = calculate_reference_gdp_climate_variability(
+        baseline_climate_parameters = calculate_variability_climate_response_parameters(
                     all_data, config, reference_tfp, response_scalings
                 )
 
@@ -625,8 +625,8 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         if target_type == 'variability':
 
             # CHEAP: Apply target-specific scaling
-            results = apply_variability_target_scaling(
-                variability_reference_scaling, gdp_target, target_idx,
+            results = calculate_variability_scaling_parameters(
+                baseline_climate_parameters, gdp_target, target_idx,
                 all_data, config, response_scalings,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters
             )

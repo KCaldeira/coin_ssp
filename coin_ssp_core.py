@@ -39,7 +39,7 @@ from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
 from scipy import stats
-from coin_ssp_utils import apply_time_series_filter, filter_scaling_params
+from coin_ssp_utils import apply_time_series_filter, filter_scaling_params, get_ssp_data, get_grid_metadata
 
 from coin_ssp_models import ScalingParams, ModelParams
 
@@ -199,6 +199,9 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
     y_tas2 = params.y_tas2  # quadratic temperature sensitivity for output loss
     y_pr1 = params.y_pr1  # linear precipitation sensitivity for output loss
     y_pr2 = params.y_pr2  # quadratic precipitation sensitivity for output loss
+    v0 = params.v0  # variability scaling constant term
+    v1 = params.v1  # variability scaling linear term
+    v2 = params.v2  # variability scaling quadratic term
 
     # convert TFP into interannual fractional increase in TFP
     tfp_growth = tfp[1:]/tfp[:-1] # note that this is one element shorter than the other vectors
@@ -217,15 +220,19 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
 
     # compute climate effect on capital stock, tfp growth rate, and output
     #note that these are all defined so a positive number means a positive economic impact
-    
+
+    # Calculate variability scaling factors for current conditions and reference
+    v_scaling = v0 + v1 * tas + v2 * tas**2
+    v_ref_scaling = v0 + v1 * tas0 + v2 * tas0**2
+
     y_climate = 1.0
-    y_climate += ( y_tas1 * tas  + y_tas2 * tas**2 ) -  ( y_tas1 * tas0  + y_tas2 * tas0**2 ) # units of fraction of capital
-    y_climate += (y_pr1 * pr + y_pr2 * pr )**2  - (y_pr1 * pr0 + y_pr2 * pr0 )**2 # units of fraction of capital  
-    k_climate = 1.0 
-    k_climate += ( k_tas1 * tas  + k_tas2 * tas**2 ) -  ( k_tas1 * tas0  + k_tas2 * tas0**2 ) # units of fraction of capital
-    k_climate += (k_pr1 * pr + k_pr2 * pr )**2  - (k_pr1 * pr0 + k_pr2 * pr0 )**2 # units of fraction of capital  
+    y_climate += v_scaling * ( y_tas1 * tas  + y_tas2 * tas**2 ) -  v_ref_scaling * ( y_tas1 * tas0  + y_tas2 * tas0**2 ) # units of fraction of capital
+    y_climate += (y_pr1 * pr + y_pr2 * pr )**2  - (y_pr1 * pr0 + y_pr2 * pr0 )**2 # units of fraction of capital
+    k_climate = 1.0
+    k_climate += v_scaling * ( k_tas1 * tas  + k_tas2 * tas**2 ) -  v_ref_scaling * ( k_tas1 * tas0  + k_tas2 * tas0**2 ) # units of fraction of capital
+    k_climate += (k_pr1 * pr + k_pr2 * pr )**2  - (k_pr1 * pr0 + k_pr2 * pr0 )**2 # units of fraction of capital
     tfp_climate = 1.0
-    tfp_climate += ( tfp_tas1 * tas  + tfp_tas2 * tas**2 ) -  ( tfp_tas1 * tas0  + tfp_tas2 * tas0**2 ) # units of fraction of capital
+    tfp_climate += v_scaling * ( tfp_tas1 * tas  + tfp_tas2 * tas**2 ) -  v_ref_scaling * ( tfp_tas1 * tas0  + tfp_tas2 * tas0**2 ) # units of fraction of capital
     tfp_climate += (tfp_pr1 * pr + tfp_pr2 * pr )**2  - (tfp_pr1 * pr0 + tfp_pr2 * pr0 )**2 # units of fraction of capital  
 
 
@@ -382,7 +389,7 @@ def optimize_climate_response_scaling(
 
         # Retry optimization with expanded bounds
         res_expanded = minimize(
-            objective_func,
+            objective_damage,
             x0=[optimal_scale],  # Start from previous result
             bounds=[expanded_bounds],
             method="L-BFGS-B",
@@ -578,8 +585,6 @@ def calculate_reference_climate_baselines(all_data, config):
         Reference baselines as 2D arrays [lat, lon]
     """
     # Extract data from all_data structure
-    from coin_ssp_utils import get_ssp_data, get_grid_metadata
-
     # Get reference SSP from config
     reference_ssp = config['ssp_scenarios']['reference_ssp']
 
@@ -602,20 +607,21 @@ def calculate_reference_climate_baselines(all_data, config):
     return tas0_2d, pr0_2d
 
 
-def calculate_reference_gdp_climate_variability(
+def calculate_variability_climate_response_parameters(
     all_data, config, reference_tfp, response_scalings
 ):
     """
-    Compute reference relationship between climate variability and GDP variability.
+    Calculate baseline climate response parameters (k_tas1, k_tas2, etc.) for variability targets.
 
-    Performs lat-lon loop with optimization to establish the reference relationship:
-    y_weather ~ tas_weather linear regression for each grid cell.
+    Performs optimization across all grid cells to determine the baseline climate response
+    coefficients that will be used as a foundation for variability target calculations.
+    These parameters represent the underlying relationship between climate variables and
+    economic impacts before variability scaling is applied.
 
     For each valid grid cell:
-    1. Run optimization to get scaling factors (using first response function as reference)
-    2. Compute y_weather time series using optimal scaling
-    3. Compute linear regression: y_weather ~ tas_weather over historical period
-    4. Store slope as reference relationship
+    1. Run optimization using dummy GDP target to establish baseline relationship
+    2. Extract optimized climate response parameters (k_tas1, k_tas2, tfp_tas1, etc.)
+    3. Store parameters for use in variability scaling calculations
 
     Parameters
     ----------
@@ -630,15 +636,14 @@ def calculate_reference_gdp_climate_variability(
 
     Returns
     -------
-    reference_scaled_parameters : np.ndarray
-        Reference scaled parameters [lat, lon, n_params] from optimization at each grid cell
+    baseline_climate_parameters : np.ndarray
+        Baseline climate response parameters [lat, lon, n_params] from optimization at each grid cell.
+        These are the k_tas1, k_tas2, tfp_tas1, tfp_tas2, y_tas1, y_tas2, etc. values.
     """
 
-    print("Computing reference GDP-climate variability relationship...")
+    print("Computing baseline climate response parameters for variability targets...")
 
     # Extract data from all_data structure
-    from coin_ssp_utils import get_ssp_data, get_grid_metadata
-
     # Get reference SSP from config
     reference_ssp = config['ssp_scenarios']['reference_ssp']
 
@@ -723,35 +728,41 @@ def calculate_reference_gdp_climate_variability(
         tas_weather_data, pr_weather_data
     )
 
-    # Extract scaled parameters for the first (reference) response function and target
+    # Extract baseline climate parameters for the first (reference) response function and target
     # scaled_parameters is [lat, lon, response_idx, target_idx, param_idx]
-    reference_scaled_parameters = scaled_parameters[:, :, 0, 0, :]  # Shape: [lat, lon, n_params]
+    baseline_climate_parameters = scaled_parameters[:, :, 0, 0, :]  # Shape: [lat, lon, n_params]
 
     valid_cells = np.sum(valid_mask)
     processed_cells = np.sum(convergence_flags[:, :, 0, 0])
 
-    print(f"Reference optimization complete.")
+    print(f"Baseline climate parameter computation complete.")
     print(f"  Successfully optimized: {processed_cells}/{valid_cells} valid grid cells")
-    print(f"  Reference scaled parameters shape: {reference_scaled_parameters.shape}")
+    print(f"  Baseline climate parameters shape: {baseline_climate_parameters.shape}")
 
-    return reference_scaled_parameters
+    return baseline_climate_parameters
 
 
-def apply_variability_target_scaling(
-    reference_scaled_parameters, gdp_target, target_idx,
+def calculate_variability_scaling_parameters(
+    baseline_climate_parameters, gdp_target, target_idx,
     all_data, config, response_scalings,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters
 ):
     """
-    Apply variability target scaling using reference relationship with target shape calculations.
+    Calculate variability scaling parameters (v0, v1, v2) for variability targets.
 
-    Computes variability scaling factors based on target shape (constant, linear, quadratic)
-    and applies the appropriate relationship to avoid expensive optimization.
+    Computes the v0, v1, v2 parameters that define how climate sensitivity varies with
+    local temperature according to the target shape (constant, linear, quadratic).
+    These parameters are used in the forward model as: v(T) = v0 + v1*T + v2*T²
+
+    For different target shapes:
+    - constant: v0 = target_amount, v1 = 0, v2 = 0
+    - linear: v0, v1 computed from global_mean_amount and amount_at_reference_temp
+    - quadratic: v0, v1, v2 computed from global_mean_amount, zero_amount_temperature, etc.
 
     Parameters
     ----------
-    reference_scaled_parameters : np.ndarray
-        Reference scaled parameters [lat, lon, n_params] from calculate_reference_gdp_climate_variability
+    baseline_climate_parameters : np.ndarray
+        Baseline climate parameters [lat, lon, n_params] from calculate_variability_climate_response_parameters
     gdp_target : dict
         Target configuration with variability parameters and target_shape
     target_idx : int
@@ -768,10 +779,13 @@ def apply_variability_target_scaling(
     Returns
     -------
     dict
-        Results summary matching process_response_target_optimization structure
+        Dictionary containing:
+        - 'v0_array': np.ndarray [lat, lon] - v0 values for each grid cell
+        - 'v1_array': np.ndarray [lat, lon] - v1 values for each grid cell
+        - 'v2_array': np.ndarray [lat, lon] - v2 values for each grid cell
+        - 'total_grid_cells': int - number of processed grid cells
+        - 'successful_optimizations': int - number of successful calculations
     """
-    from coin_ssp_utils import get_ssp_data
-
     # Extract data from all_data and config
     reference_ssp = config['ssp_scenarios']['reference_ssp']
     time_periods = config['time_periods']
@@ -799,15 +813,18 @@ def apply_variability_target_scaling(
     # Step 1: Calculate mean GDP by grid cell over historical period
     mean_gdp_per_cell = np.mean(gdp_data[hist_start_idx:hist_end_idx+1, :, :], axis=0)  # [lat, lon]
 
-    # Calculate target scaling factors based on target shape
+    # Calculate variability scaling parameters (v0, v1, v2) based on target shape
     if target_shape == 'constant':
-        # For constant targets, use the simple scaling
-        target_scaling_param = gdp_target.get('gdp_amount', 1.0)
-        print(f"  Constant scaling parameter: {target_scaling_param}")
-        target_scaling_factors_array = np.full((nlat, nlon), target_scaling_param)
+        # For constant targets: v(T) = v0, v1 = 0, v2 = 0
+        v0_value = gdp_target.get('gdp_amount', 1.0)
+        print(f"  Constant variability scaling: v0={v0_value}")
+
+        v0_array = np.full((nlat, nlon), v0_value)
+        v1_array = np.zeros((nlat, nlon))
+        v2_array = np.zeros((nlat, nlon))
 
     elif target_shape == 'linear':
-        # Step 2: Linear case - find a0, a1 such that y = a0 + a1 * tas
+        # Linear case: v(T) = a0 + a1 * T, so v0 = a0, v1 = a1, v2 = 0
         global_mean_amount = gdp_target['global_mean_amount']
         reference_temperature = gdp_target['reference_temperature']
         amount_at_reference_temp = gdp_target['amount_at_reference_temp']
@@ -818,18 +835,19 @@ def apply_variability_target_scaling(
         total_gdp = np.sum(mean_gdp_per_cell[mean_gdp_per_cell > 0])
         gdp_weighted_tas = np.sum(mean_gdp_per_cell * tas0_2d) / total_gdp
 
-        # Calculate coefficients for linear relationship
+        # Calculate coefficients for linear relationship: v(T) = a0 + a1 * T
         a1 = (amount_at_reference_temp - global_mean_amount) / (reference_temperature - gdp_weighted_tas)
         a0 = global_mean_amount - a1 * gdp_weighted_tas
 
-        print(f"  Linear coefficients: a0={a0:.6f}, a1={a1:.6f}")
+        print(f"  Linear coefficients: v0={a0:.6f}, v1={a1:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
 
-        # Apply linear relationship: y = a0 + a1 * tas
-        target_scaling_factors_array = a0 + a1 * tas0_2d
+        v0_array = np.full((nlat, nlon), a0)
+        v1_array = np.full((nlat, nlon), a1)
+        v2_array = np.zeros((nlat, nlon))
 
     elif target_shape == 'quadratic':
-        # Step 3: Quadratic case - find a0, a1, a2 such that y = a0 + a1*tas + a2*tas^2
+        # Quadratic case: v(T) = a0 + a1*T + a2*T^2, so v0 = a0, v1 = a1, v2 = a2
         global_mean_amount = gdp_target['global_mean_amount']
         zero_amount_temperature = gdp_target['zero_amount_temperature']
         derivative_at_zero_amount_temperature = gdp_target['derivative_at_zero_amount_temperature']
@@ -864,16 +882,20 @@ def apply_variability_target_scaling(
         a2 = (derivative_at_zero_amount_temperature * (T_mean - T0) - global_mean_amount * 1) / det
         a0 = -a1 * T0 - a2 * T0**2
 
-        print(f"  Quadratic coefficients: a0={a0:.6f}, a1={a1:.6f}, a2={a2:.6f}")
+        print(f"  Quadratic coefficients: v0={a0:.6f}, v1={a1:.6f}, v2={a2:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
 
-        # Apply quadratic relationship: y = a0 + a1*tas + a2*tas^2
-        target_scaling_factors_array = a0 + a1 * tas0_2d + a2 * tas0_2d**2
+        v0_array = np.full((nlat, nlon), a0)
+        v1_array = np.full((nlat, nlon), a1)
+        v2_array = np.full((nlat, nlon), a2)
 
     else:
         raise ValueError(f"Unknown target_shape: {target_shape}")
 
-    print(f"  Target scaling factors range: {np.nanmin(target_scaling_factors_array):.6f} to {np.nanmax(target_scaling_factors_array):.6f}")
+    # For backward compatibility, create target_scaling_factors_array for existing code
+    target_scaling_factors_array = v0_array + v1_array * tas0_2d + v2_array * tas0_2d**2
+
+    print(f"  Variability scaling at reference temperature range: {np.nanmin(target_scaling_factors_array):.6f} to {np.nanmax(target_scaling_factors_array):.6f}")
 
     # Initialize counters to match process_response_target_optimization return structure
     total_grid_cells = 0
@@ -890,7 +912,7 @@ def apply_variability_target_scaling(
 
             for lon_idx in range(nlon):
                 # Count valid cells where we have finite scaling factors
-                if np.isfinite(target_scaling_factors_array[lat_idx, lon_idx]) and np.isfinite(reference_scaled_parameters[lat_idx, lon_idx, 0]):
+                if np.isfinite(target_scaling_factors_array[lat_idx, lon_idx]) and np.isfinite(baseline_climate_parameters[lat_idx, lon_idx, 0]):
                     total_grid_cells += 1
                     successful_optimizations += 1
 
@@ -901,24 +923,24 @@ def apply_variability_target_scaling(
         # For variability targets, set optimization error to zero (no optimization performed)
         optimization_errors[:, :, response_idx, target_idx] = 0.0
 
-        # Mark as converged where we have valid reference parameters and finite scaling factors
+        # Mark as converged where we have valid baseline parameters and finite scaling factors
         convergence_flags[:, :, response_idx, target_idx] = (
-            np.isfinite(reference_scaled_parameters[:, :, 0]) &
+            np.isfinite(baseline_climate_parameters[:, :, 0]) &
             np.isfinite(target_scaling_factors_array)
         )
 
-        # Store scaled parameters by applying target scaling to reference parameters
-        # For variability targets, we scale the reference parameters by the target scaling factor
-        for param_idx in range(reference_scaled_parameters.shape[2]):
+        # Store scaled parameters by applying target scaling to baseline parameters
+        # For variability targets, we scale the baseline parameters by the target scaling factor
+        for param_idx in range(baseline_climate_parameters.shape[2]):
             scaled_parameters[:, :, response_idx, target_idx, param_idx] = (
-                reference_scaled_parameters[:, :, param_idx] * target_scaling_factors_array
+                baseline_climate_parameters[:, :, param_idx] * target_scaling_factors_array
             )
 
         # Newline after each response function completes its latitude bands
         print()
 
     # Summary statistics
-    valid_cells = np.sum(np.isfinite(reference_scaled_parameters[:, :, 0]))
+    valid_cells = np.sum(np.isfinite(baseline_climate_parameters[:, :, 0]))
     applied_cells = np.sum(np.isfinite(target_scaling_factors_array))
 
     print(f"  Applied to {applied_cells}/{valid_cells} valid grid cells")
@@ -927,6 +949,9 @@ def apply_variability_target_scaling(
         print(f"  Scaling factors range: {np.min(scaling_range):.6f} to {np.max(scaling_range):.6f}")
 
     return {
+        'v0_array': v0_array,
+        'v1_array': v1_array,
+        'v2_array': v2_array,
         'total_grid_cells': total_grid_cells,
         'successful_optimizations': successful_optimizations
     }
