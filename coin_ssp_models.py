@@ -20,9 +20,9 @@ class ModelParams:
     y_tas2: float = 0.0
     y_pr1: float = 0.0
     y_pr2: float = 0.0
-    v0: float = 1.0
-    v1: float = 0.0
-    v2: float = 0.0
+    g0: float = 1.0
+    g1: float = 0.0
+    g2: float = 0.0
 
 @dataclass
 class ScalingParams:

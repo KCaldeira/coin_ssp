@@ -59,11 +59,11 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Memory Efficiency**: Process large grids with chunking, write outputs after each step completion
 
 ### Variability Scaling Framework
-- **Mathematical Form**: Climate sensitivity varies with local temperature as `v(T) = v0 + v1*T + v2*T²`
-- **Parameter Integration**: Variability parameters (v0, v1, v2) added to ModelParams with defaults (1.0, 0.0, 0.0)
-- **Forward Model**: Updated `calculate_coin_ssp_forward_model` to apply variability scaling: `f(T) = v(T) * (f1*T + f2*T²) - v(T_ref) * (f1*T_ref + f2*T_ref²)`
+- **Mathematical Form**: Climate sensitivity varies with local temperature as `g(T) = g0 + g1*T + g2*T²`
+- **Parameter Integration**: GDP variability parameters (g0, g1, g2) added to ModelParams with defaults (1.0, 0.0, 0.0)
+- **Forward Model**: Updated `calculate_coin_ssp_forward_model` to apply GDP variability scaling: `f(T) = g(T) * (f1*T + f2*T²) - g(T_ref) * (f1*T_ref + f2*T_ref²)`
 - **Backward Compatibility**: Default values ensure zero behavioral change for `target_type: "damage"`
-- **Architecture**: Clean separation between baseline climate parameters (k_tas1, etc.) and variability scaling (v0, v1, v2)
+- **Architecture**: Clean separation between baseline climate parameters (k_tas1, etc.) and GDP variability scaling (g0, g1, g2)
 
 #### Variability Calibration Algorithm
 **NEW IMPLEMENTATION (December 2025)**: `calculate_variability_climate_response_parameters` now uses a 4-step calibration process:
@@ -151,5 +151,5 @@ Complete 5-step integrated processing pipeline with adaptive optimization and st
 - **Adaptive Bounds Expansion**: Step 3 optimization automatically expands search bounds by 10× when hitting limits
 - **Visualization Standardization**: All maps use `pcolormesh` with adaptive 3-per-page layouts
 - **Backward Compatibility Cleanup**: Removed all legacy field name support and optional argument defaults
-- **Variability Scaling Framework**: Complete implementation of temperature-dependent climate sensitivity with v0, v1, v2 parameters
+- **Variability Scaling Framework**: Complete implementation of temperature-dependent climate sensitivity with g0, g1, g2 parameters
 - **Function Reorganization**: Renamed and restructured variability functions for clarity (`calculate_variability_climate_response_parameters`, `calculate_variability_scaling_parameters`)

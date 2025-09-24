@@ -9,7 +9,7 @@ COIN_SSP processes gridded NetCDF climate and economic data to quantify how clim
 ### Core Model
 - **Economic Framework**: Solow-Swan growth model with DICE-derived parameters
 - **Climate Integration**: Temperature and precipitation response functions (linear/quadratic)
-- **Variability Scaling**: Temperature-dependent climate sensitivity with v(T) = v0 + v1*T + v2*T²
+- **Variability Scaling**: Temperature-dependent climate sensitivity with g(T) = g0 + g1*T + g2*T²
 - **Spatial Processing**: Grid cell-level optimization and forward modeling
 - **Scenario Support**: Multiple SSP economic scenarios and climate projections
 
@@ -44,8 +44,8 @@ python main.py coin_ssp_config_0008.json --step3-file previous_step3_results.nc
 ### Variability Scaling
 The model now supports **temperature-dependent climate sensitivity** where economic impacts scale with local temperature:
 
-- **Mathematical Form**: `v(T) = v0 + v1*T + v2*T²`
-- **Implementation**: Added v0, v1, v2 parameters to ModelParams (defaults: 1.0, 0.0, 0.0)
+- **Mathematical Form**: `g(T) = g0 + g1*T + g2*T²`
+- **Implementation**: Added g0, g1, g2 parameters to ModelParams (defaults: 1.0, 0.0, 0.0)
 - **Backward Compatibility**: Default values preserve existing behavior for damage targets
 
 #### Variability Calibration (NEW - December 2025)

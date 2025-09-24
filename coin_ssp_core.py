@@ -40,6 +40,7 @@ import copy
 from scipy.optimize import minimize
 from scipy import stats
 from coin_ssp_utils import apply_time_series_filter, filter_scaling_params, get_ssp_data, get_grid_metadata
+from coin_ssp_math_utils import apply_loess_divide
 
 from coin_ssp_models import ScalingParams, ModelParams
 
@@ -199,9 +200,9 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
     y_tas2 = params.y_tas2  # quadratic temperature sensitivity for output loss
     y_pr1 = params.y_pr1  # linear precipitation sensitivity for output loss
     y_pr2 = params.y_pr2  # quadratic precipitation sensitivity for output loss
-    v0 = params.v0  # variability scaling constant term
-    v1 = params.v1  # variability scaling linear term
-    v2 = params.v2  # variability scaling quadratic term
+    g0 = params.g0  # GDP variability scaling constant term
+    g1 = params.g1  # GDP variability scaling linear term
+    g2 = params.g2  # GDP variability scaling quadratic term
 
     # convert TFP into interannual fractional increase in TFP
     tfp_growth = tfp[1:]/tfp[:-1] # note that this is one element shorter than the other vectors
@@ -222,17 +223,17 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
     #note that these are all defined so a positive number means a positive economic impact
 
     # Calculate variability scaling factors for current conditions and reference
-    v_scaling = v0 + v1 * tas + v2 * tas**2
-    v_ref_scaling = v0 + v1 * tas0 + v2 * tas0**2
+    g_scaling = g0 + g1 * tas + g2 * tas**2
+    g_ref_scaling = g0 + g1 * tas0 + g2 * tas0**2
 
     y_climate = 1.0
-    y_climate += v_scaling * ( y_tas1 * tas  + y_tas2 * tas**2 ) -  v_ref_scaling * ( y_tas1 * tas0  + y_tas2 * tas0**2 ) # units of fraction of capital
+    y_climate += g_scaling * ( y_tas1 * tas  + y_tas2 * tas**2 ) -  g_ref_scaling * ( y_tas1 * tas0  + y_tas2 * tas0**2 ) # units of fraction of capital
     y_climate += (y_pr1 * pr + y_pr2 * pr )**2  - (y_pr1 * pr0 + y_pr2 * pr0 )**2 # units of fraction of capital
     k_climate = 1.0
-    k_climate += v_scaling * ( k_tas1 * tas  + k_tas2 * tas**2 ) -  v_ref_scaling * ( k_tas1 * tas0  + k_tas2 * tas0**2 ) # units of fraction of capital
+    k_climate += g_scaling * ( k_tas1 * tas  + k_tas2 * tas**2 ) -  g_ref_scaling * ( k_tas1 * tas0  + k_tas2 * tas0**2 ) # units of fraction of capital
     k_climate += (k_pr1 * pr + k_pr2 * pr )**2  - (k_pr1 * pr0 + k_pr2 * pr0 )**2 # units of fraction of capital
     tfp_climate = 1.0
-    tfp_climate += v_scaling * ( tfp_tas1 * tas  + tfp_tas2 * tas**2 ) -  v_ref_scaling * ( tfp_tas1 * tas0  + tfp_tas2 * tas0**2 ) # units of fraction of capital
+    tfp_climate += g_scaling * ( tfp_tas1 * tas  + tfp_tas2 * tas**2 ) -  g_ref_scaling * ( tfp_tas1 * tas0  + tfp_tas2 * tas0**2 ) # units of fraction of capital
     tfp_climate += (tfp_pr1 * pr + tfp_pr2 * pr )**2  - (tfp_pr1 * pr0 + tfp_pr2 * pr0 )**2 # units of fraction of capital  
 
 
@@ -629,14 +630,16 @@ def calculate_variability_climate_response_parameters(
     Step 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
     -------------------------------------------------------
     - Take parameters from Step 1 optimization, scaled by the found factors
-    - Run forward model simulations for each grid cell using these scaled parameters
+    - Run forward model simulations using WEATHER COMPONENTS (tas_weather, pr_weather)
+    - This isolates weather variability effects from long-term climate trends
     - Generate economic projections over the full time period (historical + future)
     - Outputs: time series of economic variables (GDP, capital, TFP) for each grid cell
 
     Step 3: WEATHER VARIABILITY REGRESSION ANALYSIS
     -----------------------------------------------
-    - For each grid cell, compute regression: log(y_weather) ~ tas_weather over historical period
-    - y_weather = weather component of GDP (detrended, LOESS-filtered economic signal)
+    - For each grid cell, compute regression: (GDP / LOESS_smoothed_GDP) ~ tas_weather over historical period
+    - GDP = actual GDP from forward model simulation
+    - LOESS_smoothed_GDP = 30-year LOESS smoothed trend of GDP
     - tas_weather = weather component of temperature (detrended, LOESS-filtered climate signal)
     - Regression slope = fractional change in GDP per degree C of weather variability
     - This quantifies the actual historical relationship between weather and economic fluctuations
@@ -720,6 +723,7 @@ def calculate_variability_climate_response_parameters(
     scaled_parameters = np.zeros((nlat, nlon, n_response_functions, n_targets, n_params))
 
     # Run optimization to find scaling factors for uniform 10% GDP loss
+    # Uses full climate data (tas_data, pr_data) for optimization
     reference_results = process_response_target_optimization(
         0, dummy_gdp_target, dummy_target_results, response_scalings,
         tas_data, pr_data, pop_data, gdp_data, reference_tfp, valid_mask, tfp_baseline,
@@ -749,7 +753,7 @@ def calculate_variability_climate_response_parameters(
     n_hist_years = hist_end_idx - hist_start_idx + 1
 
     # Initialize arrays for forward model results
-    gdp_forward = np.zeros((nlat, nlon, len(years)))
+    gdp_forward = np.zeros((len(years), nlat, nlon))
 
     print(f"Running forward model for {np.sum(step1_success_mask)} grid cells...")
 
@@ -778,19 +782,20 @@ def calculate_variability_climate_response_parameters(
             )
 
             # Extract time series for this grid cell
-            cell_tas = tas_data[:, lat_idx, lon_idx]
-            cell_pr = pr_data[:, lat_idx, lon_idx]
+            # Use WEATHER COMPONENTS for forward simulation to isolate variability effects
+            cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
+            cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
             cell_pop = pop_data[:, lat_idx, lon_idx]
             cell_gdp = gdp_data[:, lat_idx, lon_idx]
             cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx]
 
-            # Run forward model
+            # Run forward model with weather components
             results = calculate_coin_ssp_forward_model(
-                model_params, cell_tas, cell_pr, cell_pop, cell_gdp,
+                model_params, cell_tas_weather, cell_pr_weather, cell_pop, cell_gdp,
                 cell_tfp_baseline, years
             )
 
-            gdp_forward[lat_idx, lon_idx, :] = results['gdp_timeseries']
+            gdp_forward[:, lat_idx, lon_idx] = results['gdp_timeseries']
 
     print(f"Step 2 complete: Forward model simulations generated")
 
@@ -803,7 +808,7 @@ def calculate_variability_climate_response_parameters(
     regression_slopes = np.zeros((nlat, nlon))
     regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
 
-    print(f"Computing log(y_weather) ~ tas_weather regression for {np.sum(step1_success_mask)} cells...")
+    print(f"Computing y_weather ~ tas_weather regression for {np.sum(step1_success_mask)} cells...")
 
     for lat_idx in range(nlat):
         for lon_idx in range(nlon):
@@ -812,25 +817,22 @@ def calculate_variability_climate_response_parameters(
 
             # Extract weather variables for historical period
             tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
-            gdp_forward_hist = gdp_forward[lat_idx, lon_idx, hist_start_idx:hist_end_idx+1]
+            gdp_forward_hist = gdp_forward[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
 
-            # Compute y_weather (weather component of GDP)
-            # Use LOESS filtering approach similar to tas_weather computation
-            y_weather_hist = apply_time_series_filter(gdp_forward_hist, years[hist_start_idx:hist_end_idx+1])
+            # Compute GDP ratio: actual GDP divided by 30-year LOESS smoothed GDP trend
+            # Use the new apply_loess_divide function for clean, mnemonic operation
+            gdp_ratio = apply_loess_divide(gdp_forward_hist, 30)
 
-            # Remove any zero or negative values for log transform
-            valid_data_mask = (y_weather_hist > 0) & (np.isfinite(tas_weather_hist)) & (np.isfinite(y_weather_hist))
+            # Remove any invalid values
+            valid_data_mask = np.isfinite(gdp_ratio) & np.isfinite(tas_weather_hist)
 
-            if np.sum(valid_data_mask) < 10:  # Need minimum data points for regression
-                continue
-
-            # Compute regression: log(y_weather) ~ tas_weather
-            log_y_weather = np.log(y_weather_hist[valid_data_mask])
+            # Compute regression: (GDP / LOESS_smoothed_GDP) ~ tas_weather
+            gdp_ratio_valid = gdp_ratio[valid_data_mask]
             tas_weather_valid = tas_weather_hist[valid_data_mask]
 
             # Linear regression
             if np.std(tas_weather_valid) > 1e-6:  # Check for sufficient variation
-                slope, intercept = np.polyfit(tas_weather_valid, log_y_weather, 1)
+                slope, intercept = np.polyfit(tas_weather_valid, gdp_ratio_valid, 1)
                 regression_slopes[lat_idx, lon_idx] = slope
                 regression_success_mask[lat_idx, lon_idx] = True
 
@@ -853,11 +855,7 @@ def calculate_variability_climate_response_parameters(
 
             slope = regression_slopes[lat_idx, lon_idx]
 
-            # Avoid division by very small slopes
-            if abs(slope) > 1e-6:
-                final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
-            else:
-                final_success_mask[lat_idx, lon_idx] = False
+            final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
 
     final_success = np.sum(final_success_mask)
     print(f"Step 4 complete: {final_success} final calibrated parameters")
@@ -877,16 +875,16 @@ def calculate_variability_scaling_parameters(
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters
 ):
     """
-    Calculate variability scaling parameters (v0, v1, v2) for variability targets.
+    Calculate GDP variability scaling parameters (g0, g1, g2) for variability targets.
 
-    Computes the v0, v1, v2 parameters that define how climate sensitivity varies with
+    Computes the g0, g1, g2 parameters that define how GDP climate sensitivity varies with
     local temperature according to the target shape (constant, linear, quadratic).
-    These parameters are used in the forward model as: v(T) = v0 + v1*T + v2*T²
+    These parameters are used in the forward model as: g(T) = g0 + g1*T + g2*T²
 
     For different target shapes:
-    - constant: v0 = target_amount, v1 = 0, v2 = 0
-    - linear: v0, v1 computed from global_mean_amount and amount_at_reference_temp
-    - quadratic: v0, v1, v2 computed from global_mean_amount, zero_amount_temperature, etc.
+    - constant: g0 = target_amount, g1 = 0, g2 = 0
+    - linear: g0, g1 computed from global_mean_amount and amount_at_reference_temp
+    - quadratic: g0, g1, g2 computed from global_mean_amount, zero_amount_temperature, etc.
 
     Parameters
     ----------
@@ -909,9 +907,9 @@ def calculate_variability_scaling_parameters(
     -------
     dict
         Dictionary containing:
-        - 'v0_array': np.ndarray [lat, lon] - v0 values for each grid cell
-        - 'v1_array': np.ndarray [lat, lon] - v1 values for each grid cell
-        - 'v2_array': np.ndarray [lat, lon] - v2 values for each grid cell
+        - 'g0_array': np.ndarray [lat, lon] - g0 values for each grid cell
+        - 'g1_array': np.ndarray [lat, lon] - g1 values for each grid cell
+        - 'g2_array': np.ndarray [lat, lon] - g2 values for each grid cell
         - 'total_grid_cells': int - number of processed grid cells
         - 'successful_optimizations': int - number of successful calculations
     """
@@ -942,18 +940,18 @@ def calculate_variability_scaling_parameters(
     # Step 1: Calculate mean GDP by grid cell over historical period
     mean_gdp_per_cell = np.mean(gdp_data[hist_start_idx:hist_end_idx+1, :, :], axis=0)  # [lat, lon]
 
-    # Calculate variability scaling parameters (v0, v1, v2) based on target shape
+    # Calculate GDP variability scaling parameters (g0, g1, g2) based on target shape
     if target_shape == 'constant':
-        # For constant targets: v(T) = v0, v1 = 0, v2 = 0
-        v0_value = gdp_target.get('gdp_amount', 1.0)
-        print(f"  Constant variability scaling: v0={v0_value}")
+        # For constant targets: g(T) = g0, g1 = 0, g2 = 0
+        g0_value = gdp_target.get('gdp_amount', 1.0)
+        print(f"  Constant GDP variability scaling: g0={g0_value}")
 
-        v0_array = np.full((nlat, nlon), v0_value)
-        v1_array = np.zeros((nlat, nlon))
-        v2_array = np.zeros((nlat, nlon))
+        g0_array = np.full((nlat, nlon), g0_value)
+        g1_array = np.zeros((nlat, nlon))
+        g2_array = np.zeros((nlat, nlon))
 
     elif target_shape == 'linear':
-        # Linear case: v(T) = a0 + a1 * T, so v0 = a0, v1 = a1, v2 = 0
+        # Linear case: g(T) = a0 + a1 * T, so g0 = a0, g1 = a1, g2 = 0
         global_mean_amount = gdp_target['global_mean_amount']
         reference_temperature = gdp_target['reference_temperature']
         amount_at_reference_temp = gdp_target['amount_at_reference_temp']
@@ -964,19 +962,19 @@ def calculate_variability_scaling_parameters(
         total_gdp = np.sum(mean_gdp_per_cell[mean_gdp_per_cell > 0])
         gdp_weighted_tas = np.sum(mean_gdp_per_cell * tas0_2d) / total_gdp
 
-        # Calculate coefficients for linear relationship: v(T) = a0 + a1 * T
+        # Calculate coefficients for linear relationship: g(T) = a0 + a1 * T
         a1 = (amount_at_reference_temp - global_mean_amount) / (reference_temperature - gdp_weighted_tas)
         a0 = global_mean_amount - a1 * gdp_weighted_tas
 
-        print(f"  Linear coefficients: v0={a0:.6f}, v1={a1:.6f}")
+        print(f"  Linear coefficients: g0={a0:.6f}, g1={a1:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
 
-        v0_array = np.full((nlat, nlon), a0)
-        v1_array = np.full((nlat, nlon), a1)
-        v2_array = np.zeros((nlat, nlon))
+        g0_array = np.full((nlat, nlon), a0)
+        g1_array = np.full((nlat, nlon), a1)
+        g2_array = np.zeros((nlat, nlon))
 
     elif target_shape == 'quadratic':
-        # Quadratic case: v(T) = a0 + a1*T + a2*T^2, so v0 = a0, v1 = a1, v2 = a2
+        # Quadratic case: g(T) = a0 + a1*T + a2*T^2, so g0 = a0, g1 = a1, g2 = a2
         global_mean_amount = gdp_target['global_mean_amount']
         zero_amount_temperature = gdp_target['zero_amount_temperature']
         derivative_at_zero_amount_temperature = gdp_target['derivative_at_zero_amount_temperature']
@@ -1011,18 +1009,18 @@ def calculate_variability_scaling_parameters(
         a2 = (derivative_at_zero_amount_temperature * (T_mean - T0) - global_mean_amount * 1) / det
         a0 = -a1 * T0 - a2 * T0**2
 
-        print(f"  Quadratic coefficients: v0={a0:.6f}, v1={a1:.6f}, v2={a2:.6f}")
+        print(f"  Quadratic coefficients: g0={a0:.6f}, g1={a1:.6f}, g2={a2:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
 
-        v0_array = np.full((nlat, nlon), a0)
-        v1_array = np.full((nlat, nlon), a1)
-        v2_array = np.full((nlat, nlon), a2)
+        g0_array = np.full((nlat, nlon), a0)
+        g1_array = np.full((nlat, nlon), a1)
+        g2_array = np.full((nlat, nlon), a2)
 
     else:
         raise ValueError(f"Unknown target_shape: {target_shape}")
 
-    # For backward compatibility, create target_scaling_factors_array for existing code
-    target_scaling_factors_array = v0_array + v1_array * tas0_2d + v2_array * tas0_2d**2
+    # Compute GDP variability scaling factors at reference temperature for each grid cell
+    target_scaling_factors_array = g0_array + g1_array * tas0_2d + g2_array * tas0_2d**2
 
     print(f"  Variability scaling at reference temperature range: {np.nanmin(target_scaling_factors_array):.6f} to {np.nanmax(target_scaling_factors_array):.6f}")
 
@@ -1078,9 +1076,9 @@ def calculate_variability_scaling_parameters(
         print(f"  Scaling factors range: {np.min(scaling_range):.6f} to {np.max(scaling_range):.6f}")
 
     return {
-        'v0_array': v0_array,
-        'v1_array': v1_array,
-        'v2_array': v2_array,
+        'g0_array': g0_array,
+        'g1_array': g1_array,
+        'g2_array': g2_array,
         'total_grid_cells': total_grid_cells,
         'successful_optimizations': successful_optimizations
     }

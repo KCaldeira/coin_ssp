@@ -50,6 +50,103 @@ def apply_time_series_filter(time_series, filter_width, ref_start_idx, ref_end_i
     return result
 
 
+def _apply_loess_smoothing(time_series, filter_width):
+    """
+    Core LOESS smoothing function.
+
+    Parameters
+    ----------
+    time_series : array-like
+        Annual time series values
+    filter_width : int
+        Width parameter (approx. number of years to smooth over)
+
+    Returns
+    -------
+    numpy.ndarray
+        LOESS smoothed time series
+    """
+    ts = np.array(time_series, dtype=float)
+    n = len(ts)
+    t = np.arange(n, dtype=float)
+
+    # Map filter_width (years) to fraction of total series
+    frac = min(1.0, filter_width / n)
+
+    # Run LOESS smoothing
+    smoothed_series = sm.nonparametric.lowess(ts, t, frac=frac,
+                                              it=1, return_sorted=False)
+    return smoothed_series
+
+
+def apply_loess_subtract(time_series, filter_width, ref_start_idx, ref_end_idx):
+    """
+    Apply LOESS smoothing and subtract trend, adding back reference period mean.
+
+    This is the standard approach for extracting weather variability components
+    from climate variables like temperature and precipitation.
+
+    Parameters
+    ----------
+    time_series : array-like
+        Annual time series values
+    filter_width : int
+        Width parameter (approx. number of years to smooth over)
+    ref_start_idx : int
+        Start index of reference period (0-indexed)
+    ref_end_idx : int
+        End index of reference period (0-indexed, inclusive)
+
+    Returns
+    -------
+    numpy.ndarray
+        Time series with trend subtracted and reference period mean added back
+    """
+    ts = np.array(time_series, dtype=float)
+
+    # Calculate reference period mean
+    mean_of_reference_period = np.mean(ts[ref_start_idx:ref_end_idx+1])
+
+    # Get LOESS smoothed trend
+    smoothed_series = _apply_loess_smoothing(ts, filter_width)
+
+    # Subtract trend and add reference period mean
+    result = ts - smoothed_series + mean_of_reference_period
+
+    return result
+
+
+def apply_loess_divide(time_series, filter_width):
+    """
+    Apply LOESS smoothing and divide original series by smoothed trend.
+
+    This approach is used to get fractional deviations from the long-term trend,
+    particularly useful for economic variables where we want to analyze
+    proportional changes rather than absolute deviations.
+
+    Parameters
+    ----------
+    time_series : array-like
+        Annual time series values
+    filter_width : int
+        Width parameter (approx. number of years to smooth over)
+
+    Returns
+    -------
+    numpy.ndarray
+        Time series divided by LOESS smoothed trend (ratio values)
+    """
+    ts = np.array(time_series, dtype=float)
+
+    # Get LOESS smoothed trend
+    smoothed_series = _apply_loess_smoothing(ts, filter_width)
+
+    # Divide original by smoothed trend
+    result = ts / smoothed_series
+
+    return result
+
+
 def calculate_zero_biased_range(data_values, percentile_low=2.5, percentile_high=97.5):
     """
     Calculate visualization range that includes zero when appropriate.
