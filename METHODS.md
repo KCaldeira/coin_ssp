@@ -181,6 +181,16 @@ For variability targets, the calibration uses a sophisticated four-step process:
 - Normalizes parameters to represent correct strength per degree of variability
 - Final parameters capture both target impact magnitude AND observed weather sensitivity
 
+### 7.4 Approach to Developing Parameter Values for Response Functions Involving More Than One Variable
+
+All of the optimizations in this code optimize on a single variable for each grid cell, typically to achieve some specified climate response in the target period or some specified relationship between GDP and temperature variability in the historical period.
+
+To construct our cases involving more than one pathway (i.e., output, capital stock, and/or growth rate in total factor productivity) or polynomial term (i.e., linear or quadratic), we first run a set of simulations finding the value for each parameter that would produce some specified amount of climate damage under SSP2-4.5 in that grid cell (typically 10%). We then use the GDP-weighted global mean of these parameter values to represent the value that typically generates around 10% climate damage.
+
+For "damage" simulations we use the target period for the GDP weighting; for the "variability" simulations we use the historical period for the GDP weightings.
+
+In cases where we want to specify approximate levels of different amounts of climate response through different pathways, we use these GDP-weighted values of the model parameters to define the ratios between different coefficients in the climate response function.
+
 As described below, for each model grid cell, we have data specifying the temperature in the historical cases (T_hist) and for each of the Shared Socioeconomic Pathway cases (T_SSP).
 
 For each specification of climate response parameters (y_tas1, y_tas2, k_tas1, k_tas2, tfp_tas1, tfp_tas2, etc.) and T_ref, we then perform a simulation of the historical case using the forward model equations, yielding a time series of Y_hist for each model grid point. This is the data used to train the various econometric methods.
