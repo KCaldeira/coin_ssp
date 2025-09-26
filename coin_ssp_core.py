@@ -226,15 +226,20 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
     g_scaling = g0 + g1 * tas + g2 * tas**2
     g_ref_scaling = g0 + g1 * tas0 + g2 * tas0**2
 
-    y_climate = 1.0
-    y_climate += g_scaling * ( y_tas1 * tas  + y_tas2 * tas**2 ) -  g_ref_scaling * ( y_tas1 * tas0  + y_tas2 * tas0**2 ) # units of fraction of capital
-    y_climate += (y_pr1 * pr + y_pr2 * pr )**2  - (y_pr1 * pr0 + y_pr2 * pr0 )**2 # units of fraction of capital
-    k_climate = 1.0
-    k_climate += g_scaling * ( k_tas1 * tas  + k_tas2 * tas**2 ) -  g_ref_scaling * ( k_tas1 * tas0  + k_tas2 * tas0**2 ) # units of fraction of capital
-    k_climate += (k_pr1 * pr + k_pr2 * pr )**2  - (k_pr1 * pr0 + k_pr2 * pr0 )**2 # units of fraction of capital
-    tfp_climate = 1.0
-    tfp_climate += g_scaling * ( tfp_tas1 * tas  + tfp_tas2 * tas**2 ) -  g_ref_scaling * ( tfp_tas1 * tas0  + tfp_tas2 * tas0**2 ) # units of fraction of capital
-    tfp_climate += (tfp_pr1 * pr + tfp_pr2 * pr )**2  - (tfp_pr1 * pr0 + tfp_pr2 * pr0 )**2 # units of fraction of capital  
+    # Define climate response functions f_y, f_k, f_tfp
+    def f_y(T, P):
+        return (y_tas1 * T + y_tas2 * T**2) + (y_pr1 * P + y_pr2 * P**2)
+
+    def f_k(T, P):
+        return (k_tas1 * T + k_tas2 * T**2) + (k_pr1 * P + k_pr2 * P**2)
+
+    def f_tfp(T, P):
+        return (tfp_tas1 * T + tfp_tas2 * T**2) + (tfp_pr1 * P + tfp_pr2 * P**2)
+
+    # Calculate climate response factors using cleaner formulation
+    y_climate = 1.0 + g_scaling * f_y(tas, pr) - g_ref_scaling * f_y(tas0, pr0)
+    k_climate = 1.0 + g_scaling * f_k(tas, pr) - g_ref_scaling * f_k(tas0, pr0)
+    tfp_climate = 1.0 + g_scaling * f_tfp(tas, pr) - g_ref_scaling * f_tfp(tas0, pr0)  
 
 
     a[0] = a0 * tfp_climate[0] # initial TFP adjusted for climate in year 0

@@ -109,24 +109,35 @@ For any experimental case, exp, where exp might be a climate-change case, or a w
 The climate response factors are calculated as:
 
 ```
-y_climate = 1.0 + g(T) * (y_tas1 * T + y_tas2 * T²) - g(T_ref) * (y_tas1 * T_ref + y_tas2 * T_ref²)
-          + (y_pr1 * P + y_pr2 * P²) - (y_pr1 * P_ref + y_pr2 * P_ref²)     (12)
+y_climate = 1.0 + g(T) * f_y(T, P) - g(T_ref) * f_y(T_ref, P_ref)     (12)
 ```
 
 ```
-k_climate = 1.0 + g(T) * (k_tas1 * T + k_tas2 * T²) - g(T_ref) * (k_tas1 * T_ref + k_tas2 * T_ref²)
-          + (k_pr1 * P + k_pr2 * P²) - (k_pr1 * P_ref + k_pr2 * P_ref²)     (13)
+k_climate = 1.0 + g(T) * f_k(T, P) - g(T_ref) * f_k(T_ref, P_ref)     (13)
 ```
 
 ```
-tfp_climate = 1.0 + g(T) * (tfp_tas1 * T + tfp_tas2 * T²) - g(T_ref) * (tfp_tas1 * T_ref + tfp_tas2 * T_ref²)
-            + (tfp_pr1 * P + tfp_pr2 * P²) - (tfp_pr1 * P_ref + tfp_pr2 * P_ref²)     (14)
+tfp_climate = 1.0 + g(T) * f_tfp(T, P) - g(T_ref) * f_tfp(T_ref, P_ref)     (14)
+```
+
+where the climate response functions f_y, f_k, and f_tfp are defined as:
+
+```
+f_y(T, P) = (y_tas1 * T + y_tas2 * T²) + (y_pr1 * P + y_pr2 * P²)     (15)
+```
+
+```
+f_k(T, P) = (k_tas1 * T + k_tas2 * T²) + (k_pr1 * P + k_pr2 * P²)     (16)
+```
+
+```
+f_tfp(T, P) = (tfp_tas1 * T + tfp_tas2 * T²) + (tfp_pr1 * P + tfp_pr2 * P²)     (17)
 ```
 
 where g(T) is a scaling function:
 
 ```
-g(T(t)) = g0 + g1*T(t) + g2*T(t)²     (17)
+g(T(t)) = g0 + g1*T(t) + g2*T(t)²     (18)
 ```
 
 This user-defined climate response scaling factor function, g(T), has units of fraction of output per degree Celsius. It indicates as a function of temperature the desired slope of an ordinary least squares fit of Y_weather as a function of T_weather; this slope is the correlation coefficient times the ratio of the standard deviations. The parameters g0, g1 and g2 may be chosen to examine various cases of interest. Positive values of g(T) would indicate a positive correlation between Y_weather and T_weather (i.e., climate benefit) and negative values would indicate a negative correlation (i.e., climate losses).
