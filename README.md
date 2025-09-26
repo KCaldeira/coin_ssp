@@ -26,12 +26,27 @@ pip install -r requirements.txt
 ## Usage
 
 ### Complete Processing Pipeline
+
+**Single Configuration Run:**
 ```bash
 # Run full 5-step integrated workflow
 python main.py coin_ssp_config_0008.json
 
 # Skip Step 3 optimization (faster development)
 python main.py coin_ssp_config_0008.json --step3-file previous_step3_results.nc
+```
+
+**Multi-Stage Workflow (NEW):**
+```bash
+# Full 3-stage workflow: parameter assessment → analysis → multi-variable simulation
+python workflow_manager.py
+
+# Start from specific stage
+python workflow_manager.py --start-stage 2 --stage1-output ./output_integrated_CanESM5_20231201/
+python workflow_manager.py --start-stage 3 --stage2-config ./configs/stage2_generated_config.json
+
+# Custom configurations
+python workflow_manager.py --stage1-config custom_sensitivity.json --config-dir ./my_configs
 ```
 
 ### Processing Steps
@@ -273,6 +288,7 @@ Results saved to timestamped directories:
 ### Core Modules
 - **`coin_ssp_core.py`**: Core economic model and optimization functions
 - **`main.py`**: Integrated 5-step processing pipeline
+- **`workflow_manager.py`**: Multi-stage workflow orchestration for parameter sensitivity analysis (NEW)
 - **`coin_ssp_models.py`**: Data classes and model parameter structures
 
 ### Specialized Utility Modules
@@ -289,9 +305,17 @@ Results saved to timestamped directories:
 
 The COIN_SSP pipeline follows a structured calling hierarchy. Below shows the main functions called by `main.py` and the key functions they call (2 levels deep):
 
-### Pipeline Entry Point
-**`main.py`**
+### Pipeline Entry Points
+
+**`main.py`** - Single configuration execution
 - `run_pipeline()` → Main execution orchestrator
+
+**`workflow_manager.py`** - Multi-stage workflow orchestration (NEW)
+- `WorkflowManager` → Three-stage pipeline manager
+  - `run_stage1()` → Individual response function assessments
+  - `analyze_stage1_results()` → Extract GDP-weighted parameter means
+  - `generate_stage2_config()` → Create multi-variable configuration
+  - `run_stage3()` → Execute final simulations
   - `load_config()` → Configuration validation and setup
   - `setup_output_directory()` → Output directory creation
   - `load_all_data()` → **[coin_ssp_utils.py]** NetCDF data loading
@@ -384,6 +408,52 @@ python main_postprocess.py output_dir/ --ssps ssp245 ssp585
 - **CSV exports**: Detailed numerical results for further analysis
 
 The post-processing framework is designed to be modular and extensible, allowing researchers to add custom analysis functions for specific research questions.
+
+## Multi-Stage Workflow Analysis
+
+**`workflow_manager.py`** provides a sophisticated three-stage pipeline for parameter sensitivity analysis and multi-variable response function development.
+
+### Workflow Stages
+
+**Stage 1: Parameter Sensitivity Assessment**
+- Runs individual response function configurations (e.g., y_tas1, k_tas2, tfp_tas1 separately)
+- Uses `coin_ssp_config_parameter_sensitivity.json` as the default configuration
+- Generates individual parameter assessments for each grid cell
+- Outputs: Individual response function results for each economic pathway
+
+**Stage 2: Analysis and Configuration Generation**
+- Analyzes Stage 1 results to extract GDP-weighted global parameter means
+- Calculates optimal parameter ratios based on target economic impacts
+- Generates new configuration file for multi-variable simulations
+- Implements the approach described in METHODS.md Section 7.4
+- Outputs: Stage 2 configuration file with multi-variable response functions
+
+**Stage 3: Multi-Variable Simulations**
+- Executes final simulations using generated configuration from Stage 2
+- Combines multiple response pathways (output, capital, TFP) with optimal ratios
+- Produces results for complex multi-variable climate response scenarios
+- Outputs: Complete economic projections with combined response functions
+
+### Key Features
+- **Flexible execution**: Start from any stage, skip completed stages
+- **Automatic file management**: Handles directory creation and file passing between stages
+- **GDP-weighted analysis**: Uses economic data to weight parameter averaging
+- **Reproducible workflows**: All generated configurations are saved for transparency
+- **Error handling**: Robust subprocess management and validation
+
+### Usage Patterns
+```bash
+# Development workflow - test individual parameters first
+python workflow_manager.py --stage1-config test_sensitivity.json
+
+# Production workflow - generate multi-variable scenarios
+python workflow_manager.py --stage1-config production_sensitivity.json
+
+# Analysis workflow - analyze existing results
+python workflow_manager.py --start-stage 2 --stage1-output ./results/sensitivity_run_20231201/
+```
+
+This multi-stage approach enables systematic development of complex response function combinations based on individual parameter assessments, following the methodological framework described in the academic methods documentation.
 
 ## Documentation
 

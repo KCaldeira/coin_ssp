@@ -8,6 +8,8 @@ We tuned this model so that it could approximate both historical GDP growth and 
 
 Various econometric methods have been applied to GDP and weather variability in the real world, and used to project the economic response. In further work, we will apply some of these methods to the COIN-SSP results for the historical period, and test their predictive skill at estimating the climate response in the target period (typically, years 2080 to 2100).
 
+The implementation includes a multi-stage workflow system (`workflow_manager.py`) that systematically applies the approach described in Section 7.4 for developing multi-variable response functions through: (1) individual parameter assessment, (2) GDP-weighted analysis of results, and (3) generation and execution of combined response function configurations.
+
 ## 2. The COIN-SSP Model
 
 The core of the COIN-SSP model is a variant Solow-Swann growth model with a Cobb-Douglas production function, with flexible climate response specification that can be applied to output, capital stock, and/or the growth rate in total factor productivity.
@@ -190,7 +192,7 @@ For variability targets, the calibration uses a sophisticated four-step process:
 - Regression slope = fractional change in GDP per degree C of weather variability
 
 **Step 4: Parameter Normalization by Regression Slope**
-- Divide all climate response parameters from Step 1 by regression slope from Step 3
+- Divide all climate response parameters from Phase 1 by regression slope from Phase 3
 - Normalizes parameters to represent correct strength per degree of variability
 - Final parameters capture both target impact magnitude AND observed weather sensitivity
 

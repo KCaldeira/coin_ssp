@@ -669,9 +669,15 @@ def calculate_weather_vars(all_data, config):
 
     filter_width = 30  # years (consistent with existing code)
 
-    # Process each SSP scenario
+    # Process each SSP scenario - include reference_ssp and all forward_simulation_ssps
     ssp_scenarios = config['ssp_scenarios']
-    for ssp_name in ssp_scenarios['forward_simulation_ssps']:
+    reference_ssp = ssp_scenarios['reference_ssp']
+    forward_ssps = ssp_scenarios['forward_simulation_ssps']
+
+    # Take union to ensure reference_ssp is always included
+    all_ssps_for_weather = list(set([reference_ssp] + forward_ssps))
+
+    for ssp_name in all_ssps_for_weather:
 
         ssp_data = all_data[ssp_name]
 
@@ -741,3 +747,52 @@ def calculate_weather_vars(all_data, config):
 
     print("✅ Reference climate baselines computed and stored")
     return all_data
+
+
+def get_ssp_data(all_data: Dict[str, Any], ssp_name: str, data_type: str) -> np.ndarray:
+    """
+    Extract specific data array from loaded NetCDF data structure.
+
+    Parameters
+    ----------
+    all_data : Dict[str, Any]
+        Result from load_all_data()
+    ssp_name : str
+        SSP scenario name (e.g., 'ssp245')
+    data_type : str
+        Data type ('tas', 'pr', 'gdp', 'pop')
+
+    Returns
+    -------
+    np.ndarray
+        Data array with shape [time, lat, lon]
+    """
+    if ssp_name not in all_data:
+        raise KeyError(f"SSP scenario '{ssp_name}' not found in loaded data. Available: {all_data['_metadata']['ssp_list']}")
+
+    if data_type not in all_data[ssp_name]:
+        raise KeyError(f"Data type '{data_type}' not found for {ssp_name}. Available: {list(all_data[ssp_name].keys())}")
+
+    return all_data[ssp_name][data_type]
+
+
+def get_grid_metadata(all_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract grid metadata from loaded NetCDF data structure.
+
+    Parameters
+    ----------
+    all_data : Dict[str, Any]
+        Result from load_all_data()
+
+    Returns
+    -------
+    Dict[str, Any]
+        Metadata dictionary containing coordinates and dimensions
+    """
+    return {
+        'lat': all_data['_metadata']['lat'],
+        'lon': all_data['_metadata']['lon'],
+        'nlat': len(all_data['_metadata']['lat']),
+        'nlon': len(all_data['_metadata']['lon']),
+    }

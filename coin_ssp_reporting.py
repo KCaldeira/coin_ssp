@@ -35,28 +35,8 @@ from coin_ssp_math_utils import (
     apply_time_series_filter, calculate_zero_biased_range, calculate_zero_biased_axis_range,
     calculate_area_weights, calculate_time_means, calculate_global_mean
 )
+from coin_ssp_utils import get_ssp_data, get_grid_metadata
 
-# Import get_grid_metadata function
-def get_grid_metadata(all_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract grid metadata from loaded NetCDF data structure.
-
-    Parameters
-    ----------
-    all_data : Dict[str, Any]
-        Result from load_all_data()
-
-    Returns
-    -------
-    Dict[str, Any]
-        Metadata dictionary containing coordinates and dimensions
-    """
-    return {
-        'lat': all_data['_metadata']['lat'],
-        'lon': all_data['_metadata']['lon'],
-        'nlat': len(all_data['_metadata']['lat']),
-        'nlon': len(all_data['_metadata']['lon']),
-    }
 
 
 def get_adaptive_subplot_layout(n_targets):
@@ -87,31 +67,6 @@ def get_adaptive_subplot_layout(n_targets):
         return (rows, cols, (16, height))
 
 
-def get_ssp_data(all_data: Dict[str, Any], ssp_name: str, data_type: str) -> np.ndarray:
-    """
-    Extract specific data array from loaded NetCDF data structure.
-
-    Parameters
-    ----------
-    all_data : Dict[str, Any]
-        Result from load_all_data()
-    ssp_name : str
-        SSP scenario name (e.g., 'ssp245')
-    data_type : str
-        Data type ('tas', 'pr', 'gdp', 'pop')
-
-    Returns
-    -------
-    np.ndarray
-        Data array with shape [lat, lon, time]
-    """
-    if ssp_name not in all_data:
-        raise KeyError(f"SSP scenario '{ssp_name}' not found in loaded data. Available: {all_data['_metadata']['ssp_list']}")
-
-    if data_type not in all_data[ssp_name]:
-        raise KeyError(f"Data type '{data_type}' not found for {ssp_name}. Available: {list(all_data[ssp_name].keys())}")
-
-    return all_data[ssp_name][data_type]
 
 
 def create_forward_model_visualization(forward_results, config, output_dir, all_data):
@@ -822,8 +777,27 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             else:
                 obj_func_max = obj_func_mean = obj_func_std = obj_func_min = np.nan
 
+            # Get response function configuration for this scaling
+            response_config = config['response_function_scalings'][resp_idx]
+
+            # Extract the 12 scaling parameters, defaulting to 0.0 if not present
+            scaling_params = {
+                'y_tas1': response_config.get('y_tas1', 0.0),
+                'y_tas2': response_config.get('y_tas2', 0.0),
+                'k_tas1': response_config.get('k_tas1', 0.0),
+                'k_tas2': response_config.get('k_tas2', 0.0),
+                'tfp_tas1': response_config.get('tfp_tas1', 0.0),
+                'tfp_tas2': response_config.get('tfp_tas2', 0.0),
+                'y_pr1': response_config.get('y_pr1', 0.0),
+                'y_pr2': response_config.get('y_pr2', 0.0),
+                'k_pr1': response_config.get('k_pr1', 0.0),
+                'k_pr2': response_config.get('k_pr2', 0.0),
+                'tfp_pr1': response_config.get('tfp_pr1', 0.0),
+                'tfp_pr2': response_config.get('tfp_pr2', 0.0)
+            }
+
             # Collect data for CSV
-            csv_data.append({
+            csv_row = {
                 'target_name': target_name,
                 'response_function': resp_name,
                 'gdp_weighted_mean': gdp_weighted_mean,
@@ -834,7 +808,12 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                 'obj_func_mean': obj_func_mean,
                 'obj_func_std': obj_func_std,
                 'obj_func_min': obj_func_min
-            })
+            }
+
+            # Add the 12 scaling parameters
+            csv_row.update(scaling_params)
+
+            csv_data.append(csv_row)
 
     # Write to CSV file if output_dir provided
     if output_dir and csv_data:

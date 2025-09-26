@@ -85,7 +85,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - Regression slope = fractional change in GDP per degree C of weather variability
 
 **Step 4: Parameter Normalization by Regression Slope**
-- Divide all climate response parameters from Step 1 by regression slope from Step 3
+- Divide all climate response parameters from Phase 1 by regression slope from Phase 3
 - Normalizes parameters to represent correct strength per degree of variability
 - Final parameters capture both target impact magnitude AND observed weather sensitivity
 
@@ -149,7 +149,18 @@ Complete academic methods documentation in `METHODS.md` aligned with actual code
 - Implementation specifics for forward simulation methodology
 - Data source requirements and processing standards
 
+### ✅ **Multi-Stage Workflow System**
+New `workflow_manager.py` provides systematic approach for parameter sensitivity analysis:
+- **Stage 1**: Individual response function assessments using parameter sensitivity configurations
+- **Stage 2**: GDP-weighted analysis and multi-variable configuration generation
+- **Stage 3**: Combined response function simulations with optimal parameter ratios
+- Flexible execution from any stage with automatic file management and error handling
+
 ### Recent Key Enhancements
+- **Multi-Stage Workflow Manager**: New `workflow_manager.py` for systematic parameter sensitivity analysis and multi-variable response function development
+- **Nomenclature Clarification**: Clear hierarchy: Stages (workflow levels) → Steps (main.py pipeline) → Phases (sub-processes within steps)
+- **Climate Response Formulation**: Cleaner mathematical formulation with helper functions f_y(T,P), f_k(T,P), f_tfp(T,P) and fixed precipitation scaling bug
+- **Methods Documentation**: Complete alignment between `METHODS.md` and code implementation, including actual parameter names and calibration procedures
 - **Weather Variables**: Centralized computation and storage in `all_data` structure
 - **Reference Baselines**: Pre-computed `tas0_2d`/`pr0_2d` climate baselines stored in `all_data`
 - **Function Signatures**: Simplified parameter lists using `all_data` and `config` patterns
@@ -157,6 +168,4 @@ Complete academic methods documentation in `METHODS.md` aligned with actual code
 - **Variable Naming**: Consistent `tas`/`pr` climatological conventions throughout codebase
 - **Adaptive Bounds Expansion**: Step 3 optimization automatically expands search bounds by 10× when hitting limits
 - **Visualization Standardization**: All maps use `pcolormesh` with adaptive 3-per-page layouts
-- **Backward Compatibility Cleanup**: Removed all legacy field name support and optional argument defaults
 - **Variability Scaling Framework**: Complete implementation of temperature-dependent climate sensitivity with g0, g1, g2 parameters
-- **Function Reorganization**: Renamed and restructured variability functions for clarity (`calculate_variability_climate_response_parameters`, `calculate_variability_scaling_parameters`)

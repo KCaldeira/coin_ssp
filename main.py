@@ -367,11 +367,17 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
     print("="*80)
     
     forward_ssps = config['ssp_scenarios']['forward_simulation_ssps']
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
     model_name = config['climate_model']['model_name']
     model_params = config['model_params']
-    
+
+    # Take union of reference_ssp and forward_simulation_ssps to ensure reference is always included
+    all_ssps_for_step2 = list(set([reference_ssp] + forward_ssps))
+
     print(f"Climate model: {model_name}")
-    print(f"Processing {len(forward_ssps)} SSP scenarios: {forward_ssps}")
+    print(f"Processing {len(all_ssps_for_step2)} SSP scenarios: {all_ssps_for_step2}")
+    print(f"  Reference SSP: {reference_ssp}")
+    print(f"  Forward simulation SSPs: {forward_ssps}")
     
     # Use pre-loaded data
     print("Using pre-loaded NetCDF data...")
@@ -381,10 +387,10 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
     params = config['model_params_factory'].create_base()
     
     tfp_results = {}
-    
-    for i, ssp_name in enumerate(forward_ssps):
-        print(f"\nProcessing SSP scenario: {ssp_name} ({i+1}/{len(forward_ssps)})")
-        
+
+    for i, ssp_name in enumerate(all_ssps_for_step2):
+        print(f"\nProcessing SSP scenario: {ssp_name} ({i+1}/{len(all_ssps_for_step2)})")
+
         # Get SSP-specific data using centralized accessor
         print(f"  Extracting gridded GDP and population data for {ssp_name}...")
         gdp_data = get_ssp_data(all_data, ssp_name, 'gdp')  # [time, lat, lon]
@@ -726,7 +732,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     n_response_functions = len(config['response_function_scalings'])
     n_gdp_targets = len(config['gdp_targets'])
     total_combinations = n_response_functions * n_gdp_targets
-    
+
     print(f"Processing {len(forward_ssps)} SSP scenarios")
     print(f"Using {total_combinations} scaling factor combinations per grid cell")
     print(f"Total processing: {len(forward_ssps)} SSPs × {total_combinations} combinations")
@@ -901,24 +907,30 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         }
     }
     
-    # Write results to separate NetCDF files per SSP/variable
-    model_name = config['climate_model']['model_name']
-    saved_files = save_step4_results_netcdf_split(step4_results, output_dir, config)
-    print(f"Step 4 NetCDF files saved: {len(saved_files)} files")
+    # Only save results and create visualizations if there are SSPs to process
+    if len(forward_ssps) > 0:
+        # Write results to separate NetCDF files per SSP/variable
+        model_name = config['climate_model']['model_name']
+        saved_files = save_step4_results_netcdf_split(step4_results, output_dir, config)
+        print(f"Step 4 NetCDF files saved: {len(saved_files)} files")
 
-    # Create PDF visualizations
-    print("Creating Step 4 PDF visualizations...")
+        # Create PDF visualizations
+        print("Creating Step 4 PDF visualizations...")
 
-    # Line plots visualization
-    pdf_path = create_forward_model_visualization(step4_results, config, output_dir, all_data)
-    print(f"Step 4 line plots saved to: {pdf_path}")
+        # Line plots visualization
+        pdf_path = create_forward_model_visualization(step4_results, config, output_dir, all_data)
+        print(f"Step 4 line plots saved to: {pdf_path}")
 
-    # Ratio plots visualization
-    ratio_pdf_path = create_forward_model_ratio_visualization(step4_results, config, output_dir, all_data)
-    print(f"Step 4 ratio plots saved to: {ratio_pdf_path}")
-
-    # Maps visualization (generates both linear and log10 scale PDFs)
-    linear_maps_path, log10_maps_path = create_forward_model_maps_visualization(step4_results, config, output_dir, all_data)
+        # Ratio plots visualization
+        ratio_pdf_path = create_forward_model_ratio_visualization(step4_results, config, output_dir, all_data)
+        print(f"Step 4 ratio plots saved to: {ratio_pdf_path}")
+        # Maps visualization (generates both linear and log10 scale PDFs)
+        linear_maps_path, log10_maps_path = create_forward_model_maps_visualization(step4_results, config, output_dir, all_data)
+        print(f"Step 4 maps saved to:")
+        print(f"  Linear scale: {linear_maps_path}")
+        print(f"  Log10 scale: {log10_maps_path}")
+    else:
+        print("⚠️  No forward simulation SSPs specified - skipping Step 4 NetCDF output and visualizations")
 
     print(f"\nStep 4 completed: Forward integration for {len(forward_results)} SSP scenarios")
     return step4_results

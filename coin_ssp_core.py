@@ -653,7 +653,7 @@ def calculate_variability_climate_response_parameters(
 
     Step 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
     --------------------------------------------------
-    - Divide all climate response parameters from Step 1 by the regression slope from Step 3
+    - Divide all climate response parameters from Phase 1 by the regression slope from Phase 3
     - This normalizes parameters so they represent the correct strength per degree of variability
     - Final parameters capture both the target impact magnitude AND the observed weather sensitivity
     - Result: climate parameters calibrated for variability target applications
@@ -744,12 +744,12 @@ def calculate_variability_climate_response_parameters(
 
     valid_cells = np.sum(valid_mask)
     step1_success = np.sum(step1_success_mask)
-    print(f"Step 1 complete: {step1_success}/{valid_cells} successful optimizations")
+    print(f"Phase 1 complete: {step1_success}/{valid_cells} successful optimizations")
 
     # =================================================================================
-    # STEP 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
+    # PHASE 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
     # =================================================================================
-    print("\n--- Step 2: Forward model simulations with scaled parameters ---")
+    print("\n--- Phase 2: Forward model simulations with scaled parameters ---")
 
     # Get time period indices
     time_periods = config['time_periods']
@@ -804,12 +804,12 @@ def calculate_variability_climate_response_parameters(
 
             gdp_forward[:, lat_idx, lon_idx] = results['gdp_timeseries']
 
-    print(f"Step 2 complete: Forward model simulations generated")
+    print(f"Phase 2 complete: Forward model simulations generated")
 
     # =================================================================================
-    # STEP 3: WEATHER VARIABILITY REGRESSION ANALYSIS
+    # PHASE 3: WEATHER VARIABILITY REGRESSION ANALYSIS
     # =================================================================================
-    print("\n--- Step 3: Weather variability regression analysis ---")
+    print("\n--- Phase 3: Weather variability regression analysis ---")
 
     # Initialize regression slope array
     regression_slopes = np.zeros((nlat, nlon))
@@ -844,12 +844,12 @@ def calculate_variability_climate_response_parameters(
                 regression_success_mask[lat_idx, lon_idx] = True
 
     regression_success = np.sum(regression_success_mask)
-    print(f"Step 3 complete: {regression_success} successful regressions")
+    print(f"Phase 3 complete: {regression_success} successful regressions")
 
     # =================================================================================
-    # STEP 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
+    # PHASE 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
     # =================================================================================
-    print("\n--- Step 4: Parameter normalization by regression slope ---")
+    print("\n--- Phase 4: Parameter normalization by regression slope ---")
 
     # Initialize final normalized parameters
     final_parameters = np.zeros_like(step1_parameters)
@@ -865,12 +865,12 @@ def calculate_variability_climate_response_parameters(
             final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
 
     final_success = np.sum(final_success_mask)
-    print(f"Step 4 complete: {final_success} final calibrated parameters")
+    print(f"Phase 4 complete: {final_success} final calibrated parameters")
 
-    print(f"\n4-step calibration summary:")
+    print(f"\n4-phase calibration summary:")
     print(f"  Valid grid cells: {valid_cells}")
-    print(f"  Step 1 success: {step1_success}")
-    print(f"  Step 3 success: {regression_success}")
+    print(f"  Phase 1 success: {step1_success}")
+    print(f"  Phase 3 success: {regression_success}")
     print(f"  Final success: {final_success}")
 
     return final_parameters
