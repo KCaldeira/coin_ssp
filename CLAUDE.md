@@ -142,6 +142,13 @@ if not is_valid_economic_grid_cell(gdp_cell, pop_cell):
 ### ✅ **Production Ready**
 Complete 5-step integrated processing pipeline with adaptive optimization and standardized visualization.
 
+### ✅ **Methods Documentation**
+Complete academic methods documentation in `METHODS.md` aligned with actual code implementation, covering:
+- Mathematical formulation of the Solow-Swan economic model with climate response functions
+- Detailed calibration procedures for damage and variability targets
+- Implementation specifics for forward simulation methodology
+- Data source requirements and processing standards
+
 ### Recent Key Enhancements
 - **Weather Variables**: Centralized computation and storage in `all_data` structure
 - **Reference Baselines**: Pre-computed `tas0_2d`/`pr0_2d` climate baselines stored in `all_data`

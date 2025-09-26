@@ -4,7 +4,7 @@ A spatially-explicit implementation of the Solow-Swan growth model for assessing
 
 ## Overview
 
-COIN_SSP processes gridded NetCDF climate and economic data to quantify how climate change affects economic growth through response functions applied to capital stock, productivity, and output.
+COIN_SSP processes gridded NetCDF climate and economic data to quantify how climate change affects economic growth through response functions applied to capital stock, productivity, and output. The complete mathematical framework and implementation details are documented in `METHODS.md`.
 
 ### Core Model
 - **Economic Framework**: Solow-Swan growth model with DICE-derived parameters
@@ -384,6 +384,17 @@ python main_postprocess.py output_dir/ --ssps ssp245 ssp585
 - **CSV exports**: Detailed numerical results for further analysis
 
 The post-processing framework is designed to be modular and extensible, allowing researchers to add custom analysis functions for specific research questions.
+
+## Documentation
+
+### Methods Documentation
+The complete methodological approach is documented in `METHODS.md`, which provides:
+- Detailed mathematical formulation of the Solow-Swan economic model
+- Climate response function specifications and implementation
+- Model calibration procedures for both damage and variability targets
+- Data source requirements and processing standards
+
+This methods documentation is aligned with the actual code implementation and serves as the foundation for academic publication of the COIN-SSP model.
 
 ## Contributing
 
