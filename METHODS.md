@@ -142,6 +142,8 @@ g(T(t)) = g0 + g1*T(t) + g2*T(t)²     (18)
 
 This user-defined climate response scaling factor function, g(T), has units of fraction of output per degree Celsius. It indicates as a function of temperature the desired slope of an ordinary least squares fit of Y_weather as a function of T_weather; this slope is the correlation coefficient times the ratio of the standard deviations. The parameters g0, g1 and g2 may be chosen to examine various cases of interest. Positive values of g(T) would indicate a positive correlation between Y_weather and T_weather (i.e., climate benefit) and negative values would indicate a negative correlation (i.e., climate losses).
 
+**Note**: For "damage" target simulations, g(T) = 1.0 (i.e., g0 = 1.0, g1 = 0.0, g2 = 0.0), meaning the climate response functions are applied uniformly without temperature-dependent scaling. The g(T) scaling is only used for "variability" target simulations where the goal is to scale historical GDP-weather variability relationships as a function of temperature.
+
 The climate response parameters in the implementation are:
 - **Output responses**: y_tas1, y_tas2 (linear and quadratic temperature), y_pr1, y_pr2 (linear and quadratic precipitation)
 - **Capital responses**: k_tas1, k_tas2 (linear and quadratic temperature), k_pr1, k_pr2 (linear and quadratic precipitation)

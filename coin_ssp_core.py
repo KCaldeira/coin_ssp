@@ -223,6 +223,8 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
     #note that these are all defined so a positive number means a positive economic impact
 
     # Calculate variability scaling factors for current conditions and reference
+    # Note: For "damage" targets, g0=1.0, g1=0.0, g2=0.0, so g_scaling = g_ref_scaling = 1.0
+    # The g(T) scaling is only used for "variability" targets to scale GDP-weather relationships by temperature
     g_scaling = g0 + g1 * tas + g2 * tas**2
     g_ref_scaling = g0 + g1 * tas0 + g2 * tas0**2
 
