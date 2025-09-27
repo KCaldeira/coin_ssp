@@ -138,16 +138,14 @@ Defines economic impact targets for optimization. Each target object contains:
 - **`target_type`** (string): Impact mechanism type
   - `"damage"`: Direct economic damage in target period
   - `"variability"`: GDP variability scaling with climate variability
-- **`gdp_amount`** (number): Target reduction amount (negative for damage, e.g., -0.05 for 5% reduction)
+- **`global_mean_amount`** (number): Target global mean amount (negative for damage, e.g., -0.05 for 5% reduction; for variability targets, fractional change per °C)
 - **`description`** (string): Human-readable description
 
 For linear targets, additional parameters:
-- **`global_mean_amount`** (number): Global mean reduction amount
 - **`reference_temperature`** (number): Reference temperature for scaling
 - **`amount_at_reference_temp`** (number): GDP amount at reference temperature
 
 For quadratic targets, additional parameters:
-- **`global_mean_amount`** (number): Global mean reduction amount
 - **`zero_amount_temperature`** (number): Temperature where impact is zero
 - **`derivative_at_zero_amount_temperature`** (number): Slope at zero temperature
 
@@ -242,7 +240,7 @@ Output file naming and organization:
       "target_name": "const_5%",
       "target_shape": "constant",
       "target_type": "damage",
-      "gdp_amount": -0.05
+      "global_mean_amount": -0.05
     }
   ]
 }

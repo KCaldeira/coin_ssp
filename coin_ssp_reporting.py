@@ -978,16 +978,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             # Format target name for display
             display_name = target_name.replace('_', ' ').title()
 
-            # Infer target type from configuration
+            # Get target type from configuration
             target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
-            if 'gdp_amount' in target_config:
-                target_shape = 'constant'
-            elif 'zero_amount_temperature' in target_config:
-                target_shape = 'quadratic'
-            elif 'global_mean_amount' in target_config:
-                target_shape = 'linear'
-            else:
-                target_shape = 'unknown'
+            target_shape = target_config.get('target_shape', 'unknown')
 
             ax.set_title(f'{display_name} ({target_shape})\n'
                         f'Range: {data_range["min"]:.4f} to {data_range["max"]:.4f}\n'
@@ -1014,22 +1007,15 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             target_info = target_results[target_name]
             color = colors[i % len(colors)]
 
-            # Infer target type from configuration
+            # Get target type from configuration
             target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
-            if 'gdp_amount' in target_config:
-                target_shape = 'constant'
-            elif 'zero_amount_temperature' in target_config:
-                target_shape = 'quadratic'
-            elif 'global_mean_amount' in target_config:
-                target_shape = 'linear'
-            else:
-                target_shape = 'unknown'
+            target_shape = target_config.get('target_shape', 'unknown')
 
             if target_shape == 'constant':
                 # Constant function
                 gdp_targets = config['gdp_targets']
                 const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                constant_value = const_config['gdp_amount']
+                constant_value = const_config['global_mean_amount']
                 function_values = np.full_like(tas_range, constant_value)
                 label = f'Constant: {constant_value:.3f}'
 
@@ -1094,21 +1080,14 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         for target_name in target_names:
             target_info = target_results[target_name]
 
-            # Infer target type from configuration
+            # Get target type from configuration
             target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
-            if 'gdp_amount' in target_config:
-                target_shape = 'constant'
-            elif 'zero_amount_temperature' in target_config:
-                target_shape = 'quadratic'
-            elif 'global_mean_amount' in target_config:
-                target_shape = 'linear'
-            else:
-                target_shape = 'unknown'
+            target_shape = target_config.get('target_shape', 'unknown')
 
             if target_shape == 'constant':
                 gdp_targets = config['gdp_targets']
                 const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                constant_value = const_config['gdp_amount']
+                constant_value = const_config['global_mean_amount']
                 all_y_values.extend([constant_value])
 
             elif target_shape in ['linear', 'quadratic'] and target_info['coefficients']:

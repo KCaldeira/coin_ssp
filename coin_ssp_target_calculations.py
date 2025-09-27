@@ -215,7 +215,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
         List of target configuration dictionaries, each containing:
         - 'target_name': Unique identifier
         - Type-specific parameters (determines calculation method):
-          * Constant: 'gdp_amount'
+          * Constant: 'global_mean_amount'
           * Linear: 'global_mean_amount' (without zero point)
           * Quadratic: 'zero_amount_temperature'
     gridded_data : dict
@@ -249,7 +249,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
         if target_shape == 'constant':
             # Constant reduction
             reduction_array = calculate_constant_target_reduction(
-                target_config['gdp_amount'], tas_ref.shape
+                target_config['global_mean_amount'], tas_ref.shape
             )
             result = {
                 'target_shape': target_shape,
@@ -257,7 +257,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
                 'coefficients': None,
                 'constraint_verification': None,
                 'global_statistics': {
-                    'gdp_weighted_mean': target_config['gdp_amount']
+                    'gdp_weighted_mean': target_config['global_mean_amount']
                 }
             }
 

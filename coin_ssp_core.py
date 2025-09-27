@@ -204,6 +204,10 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
     g1 = params.g1  # GDP variability scaling linear term
     g2 = params.g2  # GDP variability scaling quadratic term
 
+    # Clipping bounds to prevent extreme values and overflow
+    clip_low = 0
+    clip_high = 1e12
+
     # convert TFP into interannual fractional increase in TFP
     tfp_growth = tfp[1:]/tfp[:-1] # note that this is one element shorter than the other vectors
 
@@ -257,15 +261,27 @@ def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
         # and before investment occurs
         y[t] = a[t] * np.maximum(0, k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
 
+        # Clip output to prevent extreme values
+        y[t] = np.clip(y[t], clip_low, clip_high)
+
         # capital stock is then updated based on savings, depereciation, and climate damage
-        k[t+1] = (k[t] * k_climate[t]) + s * y[t] - delta * k[t] 
+        k[t+1] = (k[t] * k_climate[t]) + s * y[t] - delta * k[t]
+
+        # Clip capital to prevent extreme values
+        k[t+1] = np.clip(k[t+1], clip_low, clip_high) 
 
         # apply climate effect to tfp growth rate
         a[t+1] = a[t] * tfp_growth[t] * tfp_climate[t+1]  # tfp is during the year t to t+1
 
+        # Clip TFP to prevent extreme values
+        a[t+1] = np.clip(a[t+1], clip_low, clip_high)
+
     # compute the last year's output
     t = len(y)-1
     y[t] = a[t] * np.maximum(0, k[t]*k_climate[t])**alpha * l[t]**(1-alpha) * y_climate[t]
+
+    # Clip final output to prevent extreme values
+    y[t] = np.clip(y[t], clip_low, clip_high)
 
     return y, a, k, y_climate, tfp_climate, k_climate
 
@@ -355,9 +371,14 @@ def optimize_climate_response_scaling(
         ratios = y_climate[target_indices] / (y_weather[target_indices] + RATIO_EPSILON)
         mean_ratio = np.mean(ratios)
 
-        target = 1.0 + gdp_target['gdp_amount']
-        objective_value = (mean_ratio - target) ** 2
-        return objective_value
+        # Clip extreme ratios to prevent overflow in optimization
+        clipped_ratio = np.clip(mean_ratio, -1e6, 1e6)
+
+        target = 1.0 + gdp_target['global_mean_amount']
+        objective_value = (clipped_ratio - target) ** 2
+
+        # Additional safety: cap objective function at large finite value
+        return min(objective_value, 1e20)
 
 
     # Initial optimization with original bounds
@@ -709,7 +730,7 @@ def calculate_variability_climate_response_parameters(
     dummy_gdp_target = {
         'target_type': 'damage',
         'target_shape': 'constant',
-        'gdp_amount': -0.10,
+        'global_mean_amount': -0.10,
         'target_name': 'variability_reference'
     }
 
@@ -794,7 +815,7 @@ def calculate_variability_climate_response_parameters(
             cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
             cell_pop = pop_data[:, lat_idx, lon_idx]
             cell_gdp = gdp_data[:, lat_idx, lon_idx]
-            cell_tfp_baseline = tfp_baseline[lat_idx, lon_idx]
+            cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
 
             # Run forward model with weather components
             results = calculate_coin_ssp_forward_model(
@@ -950,7 +971,7 @@ def calculate_variability_scaling_parameters(
     # Calculate GDP variability scaling parameters (g0, g1, g2) based on target shape
     if target_shape == 'constant':
         # For constant targets: g(T) = g0, g1 = 0, g2 = 0
-        g0_value = gdp_target.get('gdp_amount', 1.0)
+        g0_value = gdp_target.get('global_mean_amount', 1.0)
         print(f"  Constant GDP variability scaling: g0={g0_value}")
 
         g0_array = np.full((nlat, nlon), g0_value)
