@@ -9,13 +9,13 @@ This script orchestrates a three-stage workflow:
 
 Usage examples:
     # Full workflow from stage 1
-    python workflow_manager.py --config-dir ./configs --stage1-config initial.json
+    python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json
 
     # Start from stage 2 (if stage 1 already completed)
-    python workflow_manager.py --start-stage 2 --stage1-output ./results/stage1_20231201/
+    python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 2 --stage1-output ./results/stage1_20231201/
 
     # Only run stage 3
-    python workflow_manager.py --start-stage 3 --stage2-config ./configs/generated_config.json
+    python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 3 --stage2-config ./configs/generated_config.json
 """
 
 import argparse
@@ -27,6 +27,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 import numpy as np
+
+# Import stage2_config_generator functions
+from stage2_config_generator import load_stage1_results, load_template_config, generate_stage3_config
 
 # Configure logging
 logging.basicConfig(
@@ -94,7 +97,7 @@ class WorkflowManager:
 
     def _find_latest_output_directory(self) -> Optional[Path]:
         """Find the most recently created output directory from main.py."""
-        output_pattern = "output_integrated_*"
+        output_pattern = "data/output/output_*"
         output_dirs = list(Path.cwd().glob(output_pattern))
         if output_dirs:
             return max(output_dirs, key=lambda p: p.stat().st_mtime)
@@ -132,65 +135,49 @@ class WorkflowManager:
 
         return analysis_results
 
-    def generate_stage2_config(self, analysis_results: Dict[str, Any],
-                              template_config_path: Path = None,
+    def generate_stage2_config(self, stage1_output_dir: Path,
+                              template_config_path: Path,
                               output_config_path: Path = None) -> Path:
         """
-        Generate Stage 2 configuration file based on Stage 1 analysis.
+        Generate Stage 2 configuration file based on Stage 1 results.
 
         Args:
-            analysis_results: Results from analyze_stage1_results
-            template_config_path: Optional template config to base Stage 2 config on
+            stage1_output_dir: Directory containing Stage 1 results
+            template_config_path: Required template config to base Stage 2 config on
             output_config_path: Optional override for output config path
 
         Returns:
             Path to generated Stage 2 config file
         """
         if output_config_path is None:
-            output_config_path = self.config_dir / f"stage2_generated_{self.timestamp}.json"
+            output_config_path = self.config_dir / f"coin_ssp_config_stage2_generated_{self.timestamp}.json"
 
         output_config_path = Path(output_config_path)
         output_config_path.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Generating Stage 2 config: {output_config_path}")
 
-        # Load template config or create a basic structure
-        if template_config_path and Path(template_config_path).exists():
-            with open(template_config_path, 'r') as f:
-                stage2_config = json.load(f)
-        else:
-            # Create a basic config structure - you'll need to customize this
-            stage2_config = {
-                "run_metadata": {
-                    "json_id": f"stage2_{self.timestamp}",
-                    "run_name": f"Stage2_MultiVariable_{self.timestamp}",
-                    "description": f"Multi-variable response functions based on Stage 1 analysis",
-                    "created_date": datetime.now().strftime('%Y-%m-%d'),
-                    "stage1_source": analysis_results.get('stage1_output_dir', 'unknown')
-                }
-            }
+        if not template_config_path or not Path(template_config_path).exists():
+            raise ValueError(f"Template config file is required and must exist: {template_config_path}")
 
-        # Update config with GDP-weighted parameter ratios from analysis
-        gdp_means = analysis_results['gdp_weighted_means']
+        # Load Stage 1 results using the proper algorithm
+        stage1_medians = load_stage1_results(str(stage1_output_dir))
 
-        # Example: Create scaling configurations based on GDP-weighted means
-        # This is where you'd implement your specific logic for setting parameter ratios
-        if 'response_function_scalings' not in stage2_config:
-            stage2_config['response_function_scalings'] = []
+        # Load template configuration
+        template_config = load_template_config(str(template_config_path))
 
-        # Add a combined scaling configuration using the ratios
-        combined_scaling = {
-            "scaling_name": "combined_gdp_weighted",
-            "description": f"Combined response using GDP-weighted ratios from Stage 1",
-            "y_tas1": gdp_means.get('y_tas1_mean', 0.0),
-            "k_tas1": gdp_means.get('k_tas1_mean', 0.0),
-            "tfp_tas1": gdp_means.get('tfp_tas1_mean', 0.0)
-        }
-        stage2_config['response_function_scalings'].append(combined_scaling)
+        # Find a base config file (use the original Stage 1 config)
+        base_config_candidates = list(Path(stage1_output_dir).glob("coin_ssp_config_*.json"))
+        if not base_config_candidates:
+            raise ValueError(f"No base config file found in {stage1_output_dir}")
+        base_config_path = base_config_candidates[0]
+
+        # Generate Stage 3 configuration using the proper algorithm
+        stage3_config = generate_stage3_config(stage1_medians, template_config, str(base_config_path))
 
         # Save the generated config
         with open(output_config_path, 'w') as f:
-            json.dump(stage2_config, f, indent=2)
+            json.dump(stage3_config, f, indent=2)
 
         logger.info(f"Stage 2 config generated successfully: {output_config_path}")
         return output_config_path
@@ -262,9 +249,8 @@ class WorkflowManager:
         stage1_output = self.run_stage1(stage1_config)
         results['stage1_output'] = stage1_output
 
-        # Stage 2: Analysis and config generation
-        analysis_results = self.analyze_stage1_results(stage1_output)
-        stage2_config = self.generate_stage2_config(analysis_results, template_config)
+        # Stage 2: Config generation from Stage 1 results
+        stage2_config = self.generate_stage2_config(stage1_output, template_config)
         results['stage2_config'] = stage2_config
 
         # Stage 3: Final simulations
@@ -285,7 +271,13 @@ def main():
         epilog=__doc__
     )
 
-    # General arguments
+    # Required positional arguments
+    parser.add_argument('stage1_config', type=Path,
+                       help='Configuration file for Stage 1 (e.g., coin_ssp_config_parameter_sensitivity.json)')
+    parser.add_argument('template_config', type=Path,
+                       help='Template configuration file for Stage 2 (e.g., coin_ssp_config_response_functions_template.json)')
+
+    # Optional arguments
     parser.add_argument('--config-dir', type=Path, default='./configs',
                        help='Directory for configuration files (default: ./configs)')
     parser.add_argument('--output-dir', type=Path, default='./workflow_outputs',
@@ -296,13 +288,8 @@ def main():
                        help='Enable verbose logging')
 
     # Stage-specific arguments
-    parser.add_argument('--stage1-config', type=Path,
-                       default='coin_ssp_config_parameter_sensitivity.json',
-                       help='Configuration file for Stage 1 (default: coin_ssp_config_parameter_sensitivity.json)')
     parser.add_argument('--stage1-output', type=Path,
                        help='Stage 1 output directory (required if starting from stage 2+)')
-    parser.add_argument('--template-config', type=Path,
-                       help='Template configuration for Stage 2 generation')
     parser.add_argument('--stage2-config', type=Path,
                        help='Stage 2 generated config file (required if starting from stage 3)')
 
@@ -312,8 +299,10 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Validation
-    if args.start_stage == 1 and not args.stage1_config.exists():
+    if not args.stage1_config.exists():
         parser.error(f"Stage 1 config file not found: {args.stage1_config}")
+    if not args.template_config.exists():
+        parser.error(f"Template config file not found: {args.template_config}")
     if args.start_stage >= 2 and not args.stage1_output:
         parser.error("--stage1-output is required when starting from stage 2 or later")
     if args.start_stage == 3 and not args.stage2_config:
@@ -329,8 +318,7 @@ def main():
 
         elif args.start_stage == 2:
             # Start from stage 2
-            analysis_results = workflow.analyze_stage1_results(args.stage1_output)
-            stage2_config = workflow.generate_stage2_config(analysis_results, args.template_config)
+            stage2_config = workflow.generate_stage2_config(args.stage1_output, args.template_config)
             stage3_output = workflow.run_stage3(stage2_config)
             results = {
                 'stage1_output': args.stage1_output,

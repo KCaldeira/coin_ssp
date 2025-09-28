@@ -196,15 +196,50 @@ For variability targets, the calibration uses a sophisticated four-step process:
 - Normalizes parameters to represent correct strength per degree of variability
 - Final parameters capture both target impact magnitude AND observed weather sensitivity
 
-### 7.4 Approach to Developing Parameter Values for Response Functions Involving More Than One Variable
+### 7.4 Multi-Stage Workflow for Developing Multi-Variable Response Functions
 
-All of the optimizations in this code optimize on a single variable for each grid cell, typically to achieve some specified climate response in the target period or some specified relationship between GDP and temperature variability in the historical period.
+The implementation includes a systematic three-stage workflow for developing response functions involving multiple climate-economy pathways. This approach allows for principled combination of individual parameter effects while maintaining target impact levels.
 
-To construct our cases involving more than one pathway (i.e., output, capital stock, and/or growth rate in total factor productivity) or polynomial term (i.e., linear or quadratic), we first run a set of simulations finding the value for each parameter that would produce some specified amount of climate damage under SSP2-4.5 in that grid cell (typically 10%). We then use the GDP-weighted global mean of these parameter values to represent the value that typically generates around 10% climate damage.
+#### Stage 1: Individual Parameter Assessment
 
-For "damage" simulations we use the target period for the GDP weighting; for the "variability" simulations we use the historical period for the GDP weightings.
+All initial optimizations operate on single parameters for each grid cell, determining the scaling factor required to achieve a specified climate response (typically 10% GDP reduction in the target period).
 
-In cases where we want to specify approximate levels of different amounts of climate response through different pathways, we use these GDP-weighted values of the model parameters to define the ratios between different coefficients in the climate response function.
+For each of the 12 core climate response parameters (y_tas1, y_tas2, k_tas1, k_tas2, tfp_tas1, tfp_tas2, y_pr1, y_pr2, k_pr1, k_pr2, tfp_pr1, tfp_pr2), we run individual optimization simulations to find the parameter value that produces the target economic impact in each grid cell.
+
+The Stage 1 results provide GDP-weighted global median values for each parameter, representing the typical parameter magnitude needed to generate the target climate damage. For "damage" simulations we use the target period for GDP weighting; for "variability" simulations we use the historical period for GDP weightings.
+
+#### Stage 2: Multi-Variable Response Function Generation
+
+Stage 2 combines individual parameter baselines from Stage 1 with user-specified response function templates to generate multi-variable parameter combinations.
+
+The algorithm operates as follows:
+
+1. **Load Stage 1 baselines**: Extract GDP-weighted median scaling factors for each of the 12 parameters from Stage 1 results
+2. **Apply template ratios**: For each response function specification in `coin_ssp_config_response_functions_template.json`, multiply the template ratio by the corresponding Stage 1 baseline and convert sign convention:
+   ```
+   raw_value[i] = template_ratio[i] × stage1_baseline[i] × (-1)
+   ```
+   The sign conversion transforms negative scaling factors from Stage 1 optimization into positive parameter values representing the magnitude of climate response for intuitive interpretation. A positive climate response indicates that GDP increases with temperature.
+3. **Normalize by sum**: Divide each raw value by the sum of all non-zero raw values to maintain target impact magnitude:
+   ```
+   final_value[i] = raw_value[i] / sum(raw_values)
+   ```
+
+This normalization ensures that multi-variable response functions produce approximately the same target economic impact (10% GDP reduction) while respecting the relative importance ratios specified in the template.
+
+#### Stage 3: Multi-Variable Simulations
+
+Stage 3 executes the complete COIN-SSP pipeline using the multi-variable response functions generated in Stage 2, producing final economic projections that incorporate the combined effects of multiple climate-economy pathways.
+
+#### Template-Based Response Function Design
+
+The template file `coin_ssp_config_response_functions_template.json` allows researchers to specify relative importance ratios between different climate response pathways. For example:
+
+- **Output-focused**: `y_tas1: 2.0, k_tas1: 1.0, tfp_tas1: 0.0` emphasizes temperature effects on output over capital or TFP
+- **Balanced linear**: `y_tas1: 1.0, k_tas1: 1.0, tfp_tas1: 1.0` gives equal weight to all linear temperature effects
+- **Comprehensive**: Non-zero values across multiple pathways and polynomial terms for complex response functions
+
+This systematic approach enables exploration of different hypotheses about climate-economy interaction mechanisms while maintaining consistent impact magnitudes for comparative analysis.
 
 As described below, for each model grid cell, we have data specifying the temperature in the historical cases (T_hist) and for each of the Shared Socioeconomic Pathway cases (T_SSP).
 

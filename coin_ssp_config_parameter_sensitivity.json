@@ -1,8 +1,8 @@
 {
   "run_metadata": {
-    "json_id": "template",
-    "run_name": "CanESM5-template-test",
-    "description": "Run at 5%, 10%, 20%, and 40% linear damage through three pathways: output, capital, and TFP. Using CanESM5 climate data.",
+    "json_id": "parameter-sensitivity",
+    "run_name": "CanESM5_scale-linear-impacts-test",
+    "description": "Run each parameter one at a time to see scaling that gives a 10% uniform loss of gdp in the target period.",
     "created_date": "2025-09-21"
   },
 
@@ -31,7 +31,7 @@
   "ssp_scenarios": {
     "_processing_step": "Data Loading & Step Selection",
     "reference_ssp": "ssp245",
-    "forward_simulation_ssps": ["ssp245", "ssp585"],
+    "forward_simulation_ssps": [],
     "description": "Reference SSP used for scaling factor calibration, forward simulation SSPs for TFP and projections"
   },
 
@@ -60,13 +60,6 @@
   },
 
   "gdp_targets": [
-      {
-        "target_name": "const_5%",
-        "target_shape": "constant",
-        "target_type": "damage",
-        "global_mean_amount": -0.05,
-        "description": "Uniform 5% GDP reduction across all grid cells"
-      },
       {
         "target_name": "const_10%",
         "target_shape": "constant",
@@ -113,6 +106,22 @@
         "scaling_name": "tfp_linear",
         "description": "Linear temperature sensitivity for TFP",
         "tfp_tas1": 1.0
+      },
+      
+      {
+        "scaling_name": "output_quadratic",
+        "description": "Linear temperature sensitivity for output",
+        "y_tas2": 1.0
+      },
+      {
+        "scaling_name": "capital_quadratic",
+        "description": "Linear temperature sensitivity for capital stock",
+        "k_tas2": 1.0
+      },
+    {
+        "scaling_name": "tfp_quadratic",
+        "description": "Linear temperature sensitivity for TFP",
+        "tfp_tas2": 2.0
       }
   ],
 

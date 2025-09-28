@@ -39,14 +39,14 @@ python main.py coin_ssp_config_0008.json --step3-file previous_step3_results.nc
 **Multi-Stage Workflow (NEW):**
 ```bash
 # Full 3-stage workflow: parameter assessment → analysis → multi-variable simulation
-python workflow_manager.py
+python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json
 
 # Start from specific stage
-python workflow_manager.py --start-stage 2 --stage1-output ./output_integrated_CanESM5_20231201/
-python workflow_manager.py --start-stage 3 --stage2-config ./configs/stage2_generated_config.json
+python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 2 --stage1-output ./output_integrated_CanESM5_20231201/
+python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 3 --stage2-config ./configs/stage2_generated_config.json
 
 # Custom configurations
-python workflow_manager.py --stage1-config custom_sensitivity.json --config-dir ./my_configs
+python workflow_manager.py custom_sensitivity.json custom_template.json --config-dir ./my_configs
 ```
 
 ### Processing Steps
@@ -442,14 +442,51 @@ The post-processing framework is designed to be modular and extensible, allowing
 ### Usage Patterns
 ```bash
 # Development workflow - test individual parameters first
-python workflow_manager.py --stage1-config test_sensitivity.json
+python workflow_manager.py test_sensitivity.json coin_ssp_config_response_functions_template.json
 
 # Production workflow - generate multi-variable scenarios
-python workflow_manager.py --stage1-config production_sensitivity.json
+python workflow_manager.py production_sensitivity.json coin_ssp_config_response_functions_template.json
 
 # Analysis workflow - analyze existing results
-python workflow_manager.py --start-stage 2 --stage1-output ./results/sensitivity_run_20231201/
+python workflow_manager.py production_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 2 --stage1-output ./results/sensitivity_run_20231201/
 ```
+
+### Running Stage 2 in Isolation
+
+Stage 2 can be run independently to generate multi-variable configurations from existing Stage 1 results:
+
+```bash
+# Run Stage 2 configuration generator
+python stage2_config_generator.py
+```
+
+**Prerequisites:**
+- Completed Stage 1 results with `step3_*_scaling_factors_summary.csv` file
+- Template configuration file: `coin_ssp_config_response_functions_template.json`
+- Base configuration file for copying non-scaling settings
+
+**Key Files:**
+- **Input**: Stage 1 output directory containing CSV results
+- **Template**: `coin_ssp_config_response_functions_template.json` (defines response function ratios)
+- **Output**: `coin_ssp_config_stage3_generated.json` (ready for Stage 3 execution)
+
+**Workflow:**
+1. Loads GDP-weighted median parameters from Stage 1 CSV results
+2. Applies template ratios to baseline values with sign conversion
+3. Normalizes parameters to maintain target impact magnitude (~10% GDP loss)
+4. Generates complete Stage 3 configuration file
+
+**Example Template Entry:**
+```json
+{
+  "scaling_name": "y+k_linear",
+  "description": "Linear temperature sensitivity for output and capital",
+  "y_tas1": 1.0,
+  "k_tas1": 1.0
+}
+```
+
+This creates a response function with proportional weights based on Stage 1 empirical results (e.g., ~70% output, ~30% capital for equal template ratios).
 
 This multi-stage approach enables systematic development of complex response function combinations based on individual parameter assessments, following the methodological framework described in the academic methods documentation.
 

@@ -59,7 +59,7 @@
         "target_name": "const_10%",
         "target_shape": "constant",
         "target_type": "damage",
-        "gdp_amount": -0.016666666666667,
+        "global_mean_amount": -0.016666666666667,
         "description": "Uniform 10% GDP reduction across all grid cells"
       },
       {

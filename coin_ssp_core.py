@@ -818,12 +818,11 @@ def calculate_variability_climate_response_parameters(
             cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
 
             # Run forward model with weather components
-            results = calculate_coin_ssp_forward_model(
-                model_params, cell_tas_weather, cell_pr_weather, cell_pop, cell_gdp,
-                cell_tfp_baseline, years
+            y_forward, a_forward, k_forward, y_climate, tfp_climate, k_climate = calculate_coin_ssp_forward_model(
+                cell_tfp_baseline, cell_pop, cell_tas_weather, cell_pr_weather, model_params
             )
 
-            gdp_forward[:, lat_idx, lon_idx] = results['gdp_timeseries']
+            gdp_forward[:, lat_idx, lon_idx] = y_forward
 
     print(f"Phase 2 complete: Forward model simulations generated")
 

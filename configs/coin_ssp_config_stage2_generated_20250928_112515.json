@@ -1,13 +1,11 @@
 {
   "run_metadata": {
-    "json_id": "0008",
-    "run_name": "CanESM5_scale-linear-impacts-test",
+    "json_id": "template",
+    "run_name": "CanESM5-template-test",
     "description": "Run at 5%, 10%, 20%, and 40% linear damage through three pathways: output, capital, and TFP. Using CanESM5 climate data.",
     "created_date": "2025-09-21"
   },
-
   "_comment_processing_order": "Configuration sections organized by processing step order in main.py",
-
   "climate_model": {
     "_processing_step": "Data Loading (All Steps)",
     "model_name": "CanESM5",
@@ -27,14 +25,15 @@
     },
     "description": "File patterns: {prefix}_{model_name}_historical.nc + {prefix}_{model_name}_{ssp}.nc for tas/pr/pop; {prefix}_{model_name}_{short_ssp}.nc for gdp"
   },
-
   "ssp_scenarios": {
     "_processing_step": "Data Loading & Step Selection",
     "reference_ssp": "ssp245",
-    "forward_simulation_ssps": ["ssp245", "ssp585"],
+    "forward_simulation_ssps": [
+      "ssp245",
+      "ssp585"
+    ],
     "description": "Reference SSP used for scaling factor calibration, forward simulation SSPs for TFP and projections"
   },
-
   "time_periods": {
     "_processing_step": "Step 1 - Target GDP Changes",
     "reference_period": {
@@ -58,24 +57,30 @@
       "description": "Year before which population and GDP is assumed to grow exponentially"
     }
   },
-
-  "gdp_targets": [
-      {
-        "target_name": "const_5%",
-        "target_shape": "constant",
-        "target_type": "damage",
-        "global_mean_amount": -0.05,
-        "description": "Uniform 5% GDP reduction across all grid cells"
-      },
-      {
-        "target_name": "const_10%",
-        "target_shape": "constant",
-        "target_type": "damage",
-        "global_mean_amount": -0.10,
-        "description": "Uniform 10% GDP reduction across all grid cells"
-      }
+  "gdp_reduction_targets": [
+    {
+      "target_name": "const_10%",
+      "target_type": "constant",
+      "gdp_reduction": -0.1,
+      "description": "Uniform 10% GDP reduction across all grid cells"
+    },
+    {
+      "target_name": "lin_10%_20%@30C",
+      "target_type": "linear",
+      "global_mean_reduction": -0.1,
+      "reference_temperature": 30.0,
+      "reduction_at_reference_temp": -0.2,
+      "description": "Linear temperature-dependent reduction, -20% at 30\u00b0C, -10% GDP-weighted global mean"
+    },
+    {
+      "target_name": "quad_10%_0%@13.5C_20%@22C",
+      "target_type": "quadratic",
+      "global_mean_reduction": -0.1,
+      "derivative_at_zero_reduction_temperature": -0.005,
+      "zero_reduction_temperature": 13.5,
+      "description": "Quadratic temperature-dependent reduction, -10% GDP-weighted global mean, 0% at 13.5\u00b0C, -0.5%/\u00b0C at 0% zero-reduction temperature"
+    }
   ],
-
   "model_params": {
     "_processing_step": "Step 2 - Baseline TFP & Step 3 - Scaling Factors",
     "_description": "Core economic model parameters (Solow-Swan growth model)",
@@ -97,25 +102,93 @@
     "y_pr1": 0.0,
     "y_pr2": 0.0
   },
-
   "response_function_scalings": [
-      {
-        "scaling_name": "output_linear",
-        "description": "Linear temperature sensitivity for output",
-        "y_tas1": 1.0
-      },
-      {
-        "scaling_name": "capital_linear",
-        "description": "Linear temperature sensitivity for capital stock",
-        "k_tas1": 1.0
-      },
     {
-        "scaling_name": "tfp_linear",
-        "description": "Linear temperature sensitivity for TFP",
-        "tfp_tas1": 1.0
-      }
+      "scaling_name": "output_linear",
+      "description": "Linear temperature sensitivity for output",
+      "y_tas1": 1.0
+    },
+    {
+      "scaling_name": "output_quadratic",
+      "description": "Quadratic temperature sensitivity for output",
+      "y_tas1": 1.0,
+      "y_tas2": 1.0
+    },
+    {
+      "scaling_name": "capital_linear",
+      "description": "Linear temperature sensitivity for capital stock",
+      "k_tas1": 1.0
+    },
+    {
+      "scaling_name": "capital_quadratic",
+      "description": "Quadratic temperature sensitivity for capital stock",
+      "k_tas1": 1.0,
+      "k_tas2": 1.0
+    },
+    {
+      "scaling_name": "tfp_linear",
+      "description": "Linear temperature sensitivity for TFP",
+      "tfp_tas1": 1.0
+    },
+    {
+      "scaling_name": "tfp_quadratic",
+      "description": "Quadratic temperature sensitivity for TFP",
+      "tfp_tas1": 1.0,
+      "tfp_tas2": 1.0
+    },
+    {
+      "scaling_name": "y+k_linear",
+      "description": "Linear temperature sensitivity for output and capital",
+      "y_tas1": 1.0,
+      "k_tas1": 1.0
+    },
+    {
+      "scaling_name": "y+k_quadratic",
+      "description": "Quadratic temperature sensitivity for output and capital",
+      "y_tas1": 1.0,
+      "y_tas2": 1.0,
+      "k_tas1": 1.0,
+      "k_tas2": 1.0
+    },
+    {
+      "scaling_name": "y+tfp_linear",
+      "description": "Linear temperature sensitivity for output and TFP",
+      "y_tas1": 1.0,
+      "tfp_tas1": 1.0
+    },
+    {
+      "scaling_name": "y+tfp_quadratic",
+      "description": "Quadratic temperature sensitivity for output and TFP",
+      "y_tas1": 1.0,
+      "y_tas2": 1.0,
+      "tfp_tas1": 1.0,
+      "tfp_tas2": 1.0
+    },
+    {
+      "scaling_name": "y+k+tfp_linear",
+      "description": "Linear temperature sensitivity for output, capital, and TFP",
+      "y_tas1": 1.0,
+      "k_tas1": 1.0,
+      "tfp_tas1": 1.0
+    },
+    {
+      "scaling_name": "y+k+tfp_quadratic",
+      "description": "Quadratic temperature sensitivity for output, capital, and TFP",
+      "y_tas1": 1.0,
+      "y_tas2": 1.0,
+      "k_tas1": 1.0,
+      "k_tas2": 1.0,
+      "tfp_tas1": 1.0,
+      "tfp_tas2": 1.0
+    },
+    {
+      "scaling_name": "combined_gdp_weighted",
+      "description": "Combined response using GDP-weighted ratios from Stage 1",
+      "y_tas1": 0.0,
+      "k_tas1": 0.0,
+      "tfp_tas1": 0.0
+    }
   ],
-
   "processing_options": {
     "_processing_step": "All Steps - Processing Control",
     "grid_cell_processing": {
@@ -135,7 +208,6 @@
       "temperature_damage_relationship": true
     }
   },
-
   "output_configuration": {
     "_processing_step": "Step 5 - Output Generation",
     "output_directory": "data/output",
