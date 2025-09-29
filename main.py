@@ -112,7 +112,10 @@ def setup_output_directory(config: Dict[str, Any]) -> str:
     model_name = config['climate_model']['model_name']
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_output_dir = Path("./data/output")
-    output_dir = base_output_dir / f"output_{json_id}_{model_name}_{timestamp}"
+
+    # Create hierarchical structure: output_{model_name}_{timestamp}/{json_id}_{timestamp}
+    model_dir = base_output_dir / f"output_{model_name}_{timestamp}"
+    output_dir = model_dir / f"{json_id}_{timestamp}"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created output directory: {output_dir}")
@@ -1022,7 +1025,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"  • Step 4: step4_forward_results_{model_name}.nc")
 
 
-def run_pipeline(config_path: str, step3_file: str = None) -> None:
+def run_pipeline(config_path: str, step3_file: str = None, output_dir: str = None) -> None:
     """
     Execute the complete integrated processing pipeline following README Section 3.
     
@@ -1054,7 +1057,12 @@ def run_pipeline(config_path: str, step3_file: str = None) -> None:
         json_id = config['run_metadata']['json_id']
 
         # Setup output directory
-        output_dir = setup_output_directory(config)
+        if output_dir is None:
+            output_dir = setup_output_directory(config)
+        else:
+            # Use provided output directory, ensure it exists
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            print(f"Using provided output directory: {output_dir}")
 
         # Copy config file to output directory for reproducibility
         config_filename = os.path.basename(config_path)
@@ -1164,10 +1172,11 @@ Key feature: Per-grid-cell scaling factor optimization using optimize_climate_re
 
     parser.add_argument('config', help='Path to configuration JSON file')
     parser.add_argument('--step3-file', help='Path to existing Step 3 NetCDF file to load instead of running optimization')
+    parser.add_argument('--output-dir', help='Override output directory path (default: auto-generated timestamped directory)')
 
     args = parser.parse_args()
 
-    run_pipeline(args.config, step3_file=args.step3_file)
+    run_pipeline(args.config, step3_file=args.step3_file, output_dir=args.output_dir)
 
 
 if __name__ == "__main__":

@@ -46,29 +46,39 @@ class WorkflowManager:
         self.output_base_dir = output_base_dir or Path('./workflow_outputs')
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    def run_stage1(self, stage1_config: Path, output_dir: Path = None) -> Path:
+    def run_stage1(self, stage1_config: Path, model_name: str = None, json_id: str = None) -> Path:
         """
         Run Stage 1: Individual response function assessments.
 
         Args:
             stage1_config: Path to initial configuration file
-            output_dir: Optional override for output directory
+            model_name: Climate model name (extracted from config if not provided)
+            json_id: JSON ID (extracted from config if not provided)
 
         Returns:
             Path to stage 1 output directory
         """
-        if output_dir is None:
-            output_dir = self.output_base_dir / f"stage1_{self.timestamp}"
+        # Load config to extract model_name and json_id if not provided
+        if model_name is None or json_id is None:
+            with open(stage1_config, 'r') as f:
+                config = json.load(f)
+            if model_name is None:
+                model_name = config['climate_model']['model_name']
+            if json_id is None:
+                json_id = config['run_metadata']['json_id']
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Create hierarchical output directory structure
+        # data/output/output_{model_name}_{timestamp}/{json_id}_{timestamp}
+        base_output_dir = Path("./data/output")
+        model_dir = base_output_dir / f"output_{model_name}_{self.timestamp}"
+        output_dir = model_dir / f"{json_id}_{self.timestamp}"
 
         logger.info(f"Starting Stage 1: Running main.py with config {stage1_config}")
         logger.info(f"Stage 1 output directory: {output_dir}")
 
         try:
-            # Run main.py with the stage 1 config
-            cmd = ['python', 'main.py', str(stage1_config)]
+            # Run main.py with the stage 1 config and explicit output directory
+            cmd = ['python', 'main.py', str(stage1_config), '--output-dir', str(output_dir)]
             result = subprocess.run(
                 cmd,
                 cwd=Path.cwd(),
@@ -79,29 +89,13 @@ class WorkflowManager:
 
             logger.info("Stage 1 completed successfully")
             logger.debug(f"Stage 1 stdout: {result.stdout}")
-
-            # The main.py output will be in a timestamped directory
-            # We need to find the most recent output directory
-            actual_output_dir = self._find_latest_output_directory()
-            if actual_output_dir:
-                logger.info(f"Stage 1 actual output directory: {actual_output_dir}")
-                return actual_output_dir
-            else:
-                logger.warning("Could not locate Stage 1 output directory, using expected path")
-                return output_dir
+            return output_dir
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Stage 1 failed with exit code {e.returncode}")
             logger.error(f"Stage 1 stderr: {e.stderr}")
             raise
 
-    def _find_latest_output_directory(self) -> Optional[Path]:
-        """Find the most recently created output directory from main.py."""
-        output_pattern = "data/output/output_*"
-        output_dirs = list(Path.cwd().glob(output_pattern))
-        if output_dirs:
-            return max(output_dirs, key=lambda p: p.stat().st_mtime)
-        return None
 
     def analyze_stage1_results(self, stage1_output_dir: Path) -> Dict[str, Any]:
         """
@@ -182,29 +176,34 @@ class WorkflowManager:
         logger.info(f"Stage 2 config generated successfully: {output_config_path}")
         return output_config_path
 
-    def run_stage3(self, stage2_config: Path, output_dir: Path = None) -> Path:
+    def run_stage3(self, stage2_config: Path) -> Path:
         """
         Run Stage 3: Execute final simulations with generated config.
 
         Args:
             stage2_config: Path to Stage 2 generated config file
-            output_dir: Optional override for output directory
 
         Returns:
             Path to stage 3 output directory
         """
-        if output_dir is None:
-            output_dir = self.output_base_dir / f"stage3_{self.timestamp}"
+        # Load config to extract model_name and json_id
+        with open(stage2_config, 'r') as f:
+            config = json.load(f)
+        model_name = config['climate_model']['model_name']
+        json_id = config['run_metadata']['json_id']
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Create hierarchical output directory structure for Stage 3
+        # data/output/output_{model_name}_{timestamp}/{json_id}_{timestamp}
+        base_output_dir = Path("./data/output")
+        model_dir = base_output_dir / f"output_{model_name}_{self.timestamp}"
+        output_dir = model_dir / f"{json_id}_{self.timestamp}"
 
         logger.info(f"Starting Stage 3: Running main.py with generated config {stage2_config}")
         logger.info(f"Stage 3 output directory: {output_dir}")
 
         try:
-            # Run main.py with the stage 2 config
-            cmd = ['python', 'main.py', str(stage2_config)]
+            # Run main.py with the stage 2 config and explicit output directory
+            cmd = ['python', 'main.py', str(stage2_config), '--output-dir', str(output_dir)]
             result = subprocess.run(
                 cmd,
                 cwd=Path.cwd(),
@@ -215,14 +214,7 @@ class WorkflowManager:
 
             logger.info("Stage 3 completed successfully")
             logger.debug(f"Stage 3 stdout: {result.stdout}")
-
-            # Find the actual output directory
-            actual_output_dir = self._find_latest_output_directory()
-            if actual_output_dir:
-                logger.info(f"Stage 3 actual output directory: {actual_output_dir}")
-                return actual_output_dir
-            else:
-                return output_dir
+            return output_dir
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Stage 3 failed with exit code {e.returncode}")

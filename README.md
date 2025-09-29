@@ -257,11 +257,103 @@ Output file naming and organization:
 
 ## Output Files
 
-Results saved to timestamped directories:
-- **NetCDF Data**: Complete step-by-step processing results
-- **PDF Visualizations**: Maps, time series, and diagnostic plots
-- **CSV Summaries**: GDP-weighted statistics and analysis
-- **Configuration Archive**: Complete reproducibility information
+Results are organized in a hierarchical directory structure:
+```
+data/output/
+└── output_{model_name}_{timestamp}/
+    └── {json_id}_{timestamp}/
+        ├── Configuration and Input Data
+        ├── Step 1: Target GDP Patterns
+        ├── Step 2: Baseline Economic Variables
+        ├── Step 3: Scaling Factor Optimization
+        └── Step 4: Forward Model Projections (if forward SSPs configured)
+```
+
+### Configuration and Input Data
+
+**`coin_ssp_config_{json_id}.json`** (4-6 KB)
+- Copy of the input configuration file used for this run
+- Ensures complete reproducibility of results
+- Contains all model parameters, SSP scenarios, target definitions, and processing options
+
+**`all_loaded_data_{json_id}_{model_name}.nc`** (~60 MB)
+- Complete gridded input dataset for the entire workflow
+- **Dimensions**: `[ssp, time, lat, lon]` where time=240 years (1861-2100), lat=64, lon=128
+- **Variables**:
+  - `tas(ssp,time,lat,lon)`: Surface air temperature [°C]
+  - `pr(ssp,time,lat,lon)`: Precipitation rate [mm/day]
+  - `gdp(ssp,time,lat,lon)`: GDP density [economic units]
+  - `pop(ssp,time,lat,lon)`: Population density [people]
+  - `valid_mask(lat,lon)`: Boolean mask for economic grid cells (GDP>0 and Pop>0)
+- Pre-processed with exponential growth assumptions and weather variables (LOESS-filtered)
+
+### Step 1: Target GDP Patterns
+
+**`step1_{json_id}_{model_name}_{ssp}_target_gdp.nc`** (~220 KB)
+- Spatial patterns of target GDP reductions for optimization constraints
+- **Dimensions**: `[target_name, lat, lon]`
+- **Variables**:
+  - `target_gdp_amounts(target_name,lat,lon)`: Target reduction patterns [fractional reduction]
+  - `tas_ref(lat,lon)`: Reference period temperature [°C]
+  - `gdp_target(lat,lon)`: Target period GDP [economic units]
+- **Global Attributes**: Reference/target periods, global means, complete configuration JSON
+
+**`step1_{json_id}_{model_name}_{ssp}_target_gdp_visualization.pdf`** (~125 KB)
+- **Pages**: 1 page per GDP target pattern
+- **Content**: Global maps showing spatial distribution of target GDP reductions
+- Color scale: Red=negative impacts, Blue=positive, White=zero
+- Includes GDP-weighted statistics and temperature relationship plots
+
+### Step 2: Baseline Economic Variables
+
+**`step2_{json_id}_{model_name}_{ssp}_baseline_tfp.nc`** (~30 MB)
+- Baseline economic variables without climate effects (Solow-Swan model)
+- **Dimensions**: `[ssp, time, lat, lon]` where time=240 years (1861-2100)
+- **Variables**:
+  - `tfp_baseline(ssp,time,lat,lon)`: Total Factor Productivity [normalized to year 0]
+  - `k_baseline(ssp,time,lat,lon)`: Capital stock [normalized to year 0]
+  - `valid_mask(ssp,lat,lon)`: Valid economic grid cells
+- Used as counterfactual baseline for climate impact assessment
+
+### Step 3: Scaling Factor Optimization
+
+**`step3_{json_id}_{model_name}_{ssp}_scaling_factors.nc`** (~5.6 MB)
+- Per-grid-cell optimization results for climate response scaling factors
+- **Dimensions**: `[response_func, target, lat, lon, param]` where response_func=6, target=1, param=12
+- **Variables**:
+  - `scaling_factors(response_func,target,lat,lon)`: Optimized scaling factors [dimensionless]
+  - `optimization_errors(response_func,target,lat,lon)`: Final objective function values
+  - `convergence_flags(response_func,target,lat,lon)`: Boolean optimization success flags
+  - `scaled_parameters(response_func,target,param,lat,lon)`: Final climate response parameters
+- **Parameter names**: k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2
+
+**`step3_{json_id}_{model_name}_{ssp}_scaling_factors_summary.csv`** (~1.5 KB)
+- GDP-weighted global statistics for each response function × target combination
+- **Columns**: target_name, response_function, gdp_weighted_mean, gdp_weighted_median, scaling_max, scaling_min, obj_func_statistics, 12 parameter columns
+- Used for Stage 2 multi-variable configuration generation
+
+**`step3_{json_id}_{model_name}_{ssp}_scaling_factors_visualization.pdf`** (~720 KB)
+- **Pages**: 1 page per response function (6 pages for parameter sensitivity)
+- **Content**: Global maps of optimized scaling factors for each response function
+- Shows spatial heterogeneity in climate sensitivity required to achieve target impacts
+
+**`step3_{json_id}_{model_name}_{ssp}_objective_function_visualization.pdf`** (~680 KB)
+- **Pages**: 1 page per response function (6 pages for parameter sensitivity)
+- **Content**: Global maps of final optimization objective function values
+- Lower values indicate better constraint satisfaction (closer to target GDP patterns)
+
+### Step 4: Forward Model Projections (Optional)
+
+Generated only when `forward_simulation_ssps` are specified in configuration:
+
+**`step4_{json_id}_{model_name}_forward_results.nc`**
+- Economic projections under climate change for all forward SSP scenarios
+- **Dimensions**: `[ssp, response_func, target, time, lat, lon]`
+- **Variables**: GDP, capital, TFP time series with climate effects applied
+
+**`step4_{json_id}_{model_name}_*_visualization.pdf`**
+- Time series plots and maps showing economic projections
+- Separate PDFs for different visualization types (maps, ratios, linear/log scales)
 
 ## Data Requirements
 
