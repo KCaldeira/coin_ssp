@@ -313,7 +313,7 @@ data/output/
   - `tfp_baseline(ssp,time,lat,lon)`: Total Factor Productivity [normalized to year 0]
   - `k_baseline(ssp,time,lat,lon)`: Capital stock [normalized to year 0]
   - `valid_mask(ssp,lat,lon)`: Valid economic grid cells
-- Used as counterfactual baseline for climate impact assessment
+- Used as baseline for what economic growth would be in the absence of weather variability or climate change
 
 ### Step 3: Scaling Factor Optimization
 
@@ -354,6 +354,60 @@ Generated only when `forward_simulation_ssps` are specified in configuration:
 **`step4_{json_id}_{model_name}_*_visualization.pdf`**
 - Time series plots and maps showing economic projections
 - Separate PDFs for different visualization types (maps, ratios, linear/log scales)
+
+## Multi-Variable Workflow Output (Stage 3)
+
+When using the 3-stage workflow manager, Stage 3 generates **multi-variable response functions** by combining individual parameter estimates from Stage 1. The output structure is identical to individual runs but with key differences:
+
+### Configuration
+
+**`coin_ssp_config_stage2_generated_{timestamp}.json`** (~6.5 KB)
+- **Generated configuration** combining Stage 1 results with template specifications
+- **Multi-variable response functions** (12 combinations instead of 6 individual)
+- **Response function examples**:
+  - `output_linear`: Pure linear temperature effects on output (`y_tas1: 1.0`)
+  - `output_quadratic`: Combined linear+quadratic (`y_tas1: 0.975, y_tas2: 0.025`)
+  - `y+k_linear`: Linear effects on both output and capital (`y_tas1: 0.708, k_tas1: 0.292`)
+  - `y+k+tfp_quadratic`: Complex multi-pathway response with both linear and quadratic terms
+- **Forward SSP scenarios**: Typically includes both SSP245 and SSP585 for projections
+
+### Enhanced Step 2 Outputs
+
+**`step2_{json_id}_{model_name}_baseline_tfp_visualization.pdf`** (~470 KB)
+- **Baseline TFP visualization** (not generated in individual runs)
+- Time series and spatial patterns of economic variables without climate effects
+
+**`step2_{json_id}_{model_name}_{ssp}_baseline_tfp_extremes.csv`** (~28 KB each)
+- **Statistical summaries** of baseline economic variables
+- Generated for each forward SSP scenario
+- Extreme value analysis for model validation
+
+### Complete Step 4 Forward Projections
+
+**`step4_{json_id}_{model_name}_{ssp}_forward_{variable}.nc`** (~65-70 MB each)
+- **Economic projections** for each SSP scenario and variable type
+- **Variables**: `gdp`, `capital`, `tfp` (3 files per SSP)
+- **Dimensions**: `[target, response_func, time, lat, lon]` where response_func=12, time=240
+- **Contents**:
+  - `{variable}_climate(target,response_func,time,lat,lon)`: Full climate effects
+  - `{variable}_weather(target,response_func,time,lat,lon)`: Weather variability only
+  - Complete time series from 1861-2100 for all 12 multi-variable response functions
+
+**`step4_{json_id}_{model_name}_forward_model_*.pdf`** (Multiple visualization files)
+- **`forward_model_lineplots.pdf`** (~125 KB): Time series plots of economic variables
+- **`forward_model_maps.pdf`** (~2.6 MB): Spatial maps of economic impacts (linear scale)
+- **`forward_model_maps_log10.pdf`** (~2.7 MB): Spatial maps using log10 scale for extreme values
+- **`forward_model_ratios.pdf`** (~180 KB): Ratio maps comparing scenarios
+
+### Key Differences from Individual Runs
+
+| Aspect | Individual Runs (Stage 1) | Multi-Variable Runs (Stage 3) |
+|--------|---------------------------|-------------------------------|
+| **Response Functions** | 6 individual pathways | 12 combined pathways |
+| **Configuration** | User-defined parameters | Generated from Stage 1 results |
+| **Step 4 Outputs** | Usually skipped (no forward SSPs) | Complete forward projections |
+| **File Sizes** | Smaller (~5-30 MB NetCDF) | Larger (~65-125 MB NetCDF) |
+| **Purpose** | Parameter sensitivity analysis | Integrated impact assessment |
 
 ## Data Requirements
 
