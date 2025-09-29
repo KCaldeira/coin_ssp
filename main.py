@@ -691,7 +691,24 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir)
     print(f"✅ Objective function visualization saved: {obj_func_path}")
 
-    # Display GDP-weighted scaling factor summary
+    # Calculate weather-GDP regression slopes for all response functions
+    print("\nCalculating weather-GDP regression slopes...")
+    from coin_ssp_core import calculate_weather_gdp_regression_slopes
+    regression_results = calculate_weather_gdp_regression_slopes(
+        all_data, config, response_scalings, tfp_results, scaling_results
+    )
+
+    # Add regression results to scaling_results for downstream use
+    scaling_results['regression_slopes'] = regression_results
+
+    # Generate regression slopes visualization
+    print("Generating regression slopes visualization...")
+    from coin_ssp_reporting import create_regression_slopes_visualization
+    regression_viz_path = create_regression_slopes_visualization(scaling_results, config, output_dir)
+    if regression_viz_path:
+        print(f"✅ Regression slopes visualization saved: {regression_viz_path}")
+
+    # Display GDP-weighted scaling factor summary (now includes regression slopes)
     print_gdp_weighted_scaling_summary(scaling_results, config, all_data, output_dir)
 
     print(f"\nStep 3 completed: Scaling factors calculated for each grid cell")

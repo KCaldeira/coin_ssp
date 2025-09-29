@@ -636,6 +636,176 @@ def calculate_reference_climate_baselines(all_data, config):
     return tas0_2d, pr0_2d
 
 
+def calculate_weather_gdp_regression_slopes(
+    all_data, config, response_scalings, reference_tfp, scaling_results
+):
+    """
+    Calculate regression slopes of GDP variability vs temperature variability over historical period.
+
+    This analysis runs forward economic projections for each response function and computes
+    the regression slope of (GDP_ratio ~ tas_weather) over the historical period, where:
+    - GDP_ratio = actual_GDP / LOESS_smoothed_GDP_trend
+    - tas_weather = weather component of temperature (LOESS-filtered)
+
+    Parameters
+    ----------
+    all_data : Dict[str, Any]
+        Pre-loaded data containing climate and economic variables
+    config : Dict[str, Any]
+        Configuration dictionary with time periods and model parameters
+    response_scalings : List[Dict]
+        Response function scaling configurations
+    reference_tfp : Dict[str, np.ndarray]
+        Baseline TFP results from Step 2
+    scaling_results : Dict[str, Any]
+        Scaling factor results from Step 3
+
+    Returns
+    -------
+    Dict[str, np.ndarray]
+        Dictionary containing regression slopes for each response function and target:
+        - slopes[response_name][target_name]: 2D array [lat, lon] of regression slopes
+        - success_mask[response_name][target_name]: 2D boolean array of successful regressions
+        - gdp_weighted_means[response_name][target_name]: GDP-weighted mean slope
+    """
+    from coin_ssp_math_utils import apply_loess_divide
+
+    print("\n=== Weather-GDP Regression Analysis ===")
+    print("Computing regression slopes: GDP_variability ~ temperature_variability")
+
+    # Extract time period indices
+    hist_period = config['time_periods']['historical_period']
+    hist_start_year = hist_period['start_year']
+    hist_end_year = hist_period['end_year']
+
+    # Extract data arrays using get_ssp_data helper
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    # Get data using helper function
+    from coin_ssp_utils import get_ssp_data
+    tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
+    pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
+    gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')
+
+    # Get time indices for historical period
+    years = all_data['years']
+    hist_start_idx = np.where(years == hist_start_year)[0][0]
+    hist_end_idx = np.where(years == hist_end_year)[0][0]
+
+    nlat, nlon = tas_data.shape[1], tas_data.shape[2]
+    valid_mask = all_data['valid_mask']
+
+    # Extract weather data (already computed in all_data)
+    tas_weather_data = all_data['weather_variables'][reference_ssp]['tas_weather']
+
+    # Get model parameters
+    model_params = ModelParams.from_dict(config['model_params'])
+
+    # Initialize results storage
+    regression_results = {
+        'slopes': {},
+        'success_mask': {},
+        'gdp_weighted_means': {}
+    }
+
+    # Get target names and response function names
+    target_names = [target['target_name'] for target in config['gdp_targets']]
+    response_names = [scaling['scaling_name'] for scaling in response_scalings]
+
+    # Process each response function
+    for response_idx, response_config in enumerate(response_scalings):
+        response_name = response_config['scaling_name']
+        print(f"Processing response function: {response_name} ({response_idx+1}/{len(response_scalings)})")
+
+        regression_results['slopes'][response_name] = {}
+        regression_results['success_mask'][response_name] = {}
+        regression_results['gdp_weighted_means'][response_name] = {}
+
+        # Process each target
+        for target_idx, target_name in enumerate(target_names):
+            print(f"  Target: {target_name}")
+
+            # Initialize arrays for this response-target combination
+            regression_slopes = np.zeros((nlat, nlon))
+            regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
+
+            # Extract scaling factors for this response-target combination
+            scaling_factors = scaling_results['scaling_factors'][response_idx, target_idx, :, :]
+
+            # Process each grid cell
+            successful_regressions = 0
+            for lat_idx in range(nlat):
+                for lon_idx in range(nlon):
+                    if not valid_mask[lat_idx, lon_idx]:
+                        continue
+
+                    scaling_factor = scaling_factors[lat_idx, lon_idx]
+                    if not np.isfinite(scaling_factor):
+                        continue
+
+                    # Create scaled parameters for this grid cell
+                    scaled_params = create_scaled_params(model_params, response_config, scaling_factor)
+
+                    # Extract baseline TFP for this cell
+                    cell_tfp_baseline = reference_tfp[reference_ssp][:, lat_idx, lon_idx]
+                    cell_pop = gdp_data[:, lat_idx, lon_idx]  # Population from GDP data
+                    cell_tas = tas_data[:, lat_idx, lon_idx]
+                    cell_pr = pr_data[:, lat_idx, lon_idx]
+
+                    # Run forward model to get GDP projections
+                    try:
+                        forward_results = calculate_coin_ssp_forward_model(
+                            cell_tfp_baseline, cell_pop, cell_tas, cell_pr, scaled_params
+                        )
+                        gdp_forward, _, _ = forward_results
+
+                        # Extract historical period data
+                        tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
+                        gdp_forward_hist = gdp_forward[hist_start_idx:hist_end_idx+1]
+
+                        # Compute GDP ratio: actual GDP / LOESS smoothed trend
+                        gdp_ratio = apply_loess_divide(gdp_forward_hist, 30)
+
+                        # Remove invalid values
+                        valid_data_mask = np.isfinite(gdp_ratio) & np.isfinite(tas_weather_hist)
+
+                        if np.sum(valid_data_mask) < 10:  # Need sufficient data points
+                            continue
+
+                        gdp_ratio_valid = gdp_ratio[valid_data_mask]
+                        tas_weather_valid = tas_weather_hist[valid_data_mask]
+
+                        # Linear regression: GDP_ratio ~ tas_weather
+                        if np.std(tas_weather_valid) > 1e-6:  # Check for sufficient variation
+                            slope, intercept = np.polyfit(tas_weather_valid, gdp_ratio_valid, 1)
+                            regression_slopes[lat_idx, lon_idx] = slope
+                            regression_success_mask[lat_idx, lon_idx] = True
+                            successful_regressions += 1
+
+                    except Exception as e:
+                        # Skip cells where forward model fails
+                        continue
+
+            print(f"    Successful regressions: {successful_regressions}/{np.sum(valid_mask)}")
+
+            # Calculate GDP-weighted mean slope
+            if successful_regressions > 0:
+                gdp_weights = gdp_data[hist_start_idx:hist_end_idx+1, :, :].mean(axis=0)
+                weighted_slopes = regression_slopes * regression_success_mask * gdp_weights
+                total_weight = np.sum(gdp_weights * regression_success_mask)
+                gdp_weighted_mean = np.sum(weighted_slopes) / total_weight if total_weight > 0 else 0.0
+            else:
+                gdp_weighted_mean = 0.0
+
+            # Store results
+            regression_results['slopes'][response_name][target_name] = regression_slopes
+            regression_results['success_mask'][response_name][target_name] = regression_success_mask
+            regression_results['gdp_weighted_means'][response_name][target_name] = gdp_weighted_mean
+
+    print(f"Weather-GDP regression analysis complete")
+    return regression_results
+
+
 def calculate_variability_climate_response_parameters(
     all_data, config, reference_tfp, response_scalings
 ):

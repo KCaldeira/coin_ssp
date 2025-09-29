@@ -813,6 +813,16 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             # Add the 12 scaling parameters
             csv_row.update(scaling_params)
 
+            # Add regression slope if available
+            regression_slope = np.nan
+            if 'regression_slopes' in scaling_results:
+                regression_data = scaling_results['regression_slopes']
+                if resp_name in regression_data['gdp_weighted_means']:
+                    if target_name in regression_data['gdp_weighted_means'][resp_name]:
+                        regression_slope = regression_data['gdp_weighted_means'][resp_name][target_name]
+
+            csv_row['gdp_weather_slope'] = regression_slope
+
             csv_data.append(csv_row)
 
     # Write to CSV file if output_dir provided
@@ -1430,6 +1440,149 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
     return pdf_path
 
 
+def create_regression_slopes_visualization(scaling_results, config, output_dir):
+    """
+    Create comprehensive PDF visualization of weather-GDP regression slopes.
+
+    Generates one page per response function showing maps of regression slopes
+    from GDP_variability ~ temperature_variability analysis over historical period.
+
+    Parameters
+    ----------
+    scaling_results : Dict[str, Any]
+        Results from Step 3 containing regression slope data
+    config : Dict[str, Any]
+        Configuration dictionary containing model information
+    output_dir : str
+        Output directory path
+
+    Returns
+    -------
+    str
+        Path to generated PDF file
+    """
+    if 'regression_slopes' not in scaling_results:
+        print("⚠️  No regression slope data available - skipping visualization")
+        return None
+
+    # Extract configuration values for standardized naming
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    # Generate output filename
+    pdf_filename = f"step3_{json_id}_{model_name}_{reference_ssp}_regression_slopes_visualization.pdf"
+    pdf_path = os.path.join(output_dir, pdf_filename)
+
+    # Extract regression data
+    regression_data = scaling_results['regression_slopes']
+    response_function_names = scaling_results['response_function_names']
+    target_names = scaling_results['target_names']
+    valid_mask = scaling_results['valid_mask']
+
+    # Get grid coordinates from scaling results
+    coordinates = scaling_results['_coordinates']
+    lat = coordinates['lat']
+    lon = coordinates['lon']
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+    # Calculate color scale from all regression slope data
+    all_slope_values = []
+    for response_name in response_function_names:
+        if response_name in regression_data['slopes']:
+            for target_name in target_names:
+                if target_name in regression_data['slopes'][response_name]:
+                    slope_data = regression_data['slopes'][response_name][target_name]
+                    success_mask = regression_data['success_mask'][response_name][target_name]
+                    valid_slopes = slope_data[valid_mask & success_mask]
+                    if len(valid_slopes) > 0:
+                        all_slope_values.extend(valid_slopes.flatten())
+
+    if len(all_slope_values) > 0:
+        # Use zero-biased range for regression slopes (can be positive or negative)
+        vmin, vmax = calculate_zero_biased_range(all_slope_values)
+    else:
+        vmin, vmax = -0.1, 0.1  # Fallback range
+
+    # Use RdBu_r colormap (red=negative, blue=positive, white=zero)
+    cmap = plt.cm.RdBu_r
+    norm = TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
+
+    # Create the PDF
+    with PdfPages(pdf_path) as pdf_pages:
+        # Process each target (outer loop for page organization)
+        for target_idx, target_name in enumerate(target_names):
+            print(f"Creating regression slopes visualization: target {target_name}")
+
+            # Calculate number of response functions for this target
+            available_responses = []
+            for response_name in response_function_names:
+                if response_name in regression_data['slopes']:
+                    if target_name in regression_data['slopes'][response_name]:
+                        available_responses.append(response_name)
+
+            n_response_funcs = len(available_responses)
+            if n_response_funcs == 0:
+                continue
+
+            # Create page layout: 3 per page max, arranged vertically
+            max_per_page = 3
+            n_pages = (n_response_funcs + max_per_page - 1) // max_per_page
+
+            for page_idx in range(n_pages):
+                fig = plt.figure(figsize=(16, 5 * max_per_page))
+                fig.suptitle(f'Weather-GDP Regression Slopes - {model_name.upper()} {reference_ssp.upper()}\n'
+                           f'Target: {target_name} | Historical Period Regression Analysis',
+                           fontsize=14, fontweight='bold')
+
+                start_idx = page_idx * max_per_page
+                end_idx = min(start_idx + max_per_page, n_response_funcs)
+                n_plots = end_idx - start_idx
+
+                for plot_idx in range(n_plots):
+                    response_idx = start_idx + plot_idx
+                    response_name = available_responses[response_idx]
+
+                    # Extract regression slope data
+                    slope_data = regression_data['slopes'][response_name][target_name]
+                    success_mask = regression_data['success_mask'][response_name][target_name]
+                    gdp_weighted_mean = regression_data['gdp_weighted_means'][response_name][target_name]
+
+                    # Create subplot
+                    ax = fig.add_subplot(n_plots, 1, plot_idx + 1)
+
+                    # Create plot data (set invalid/unsuccessful cells to NaN for white color)
+                    plot_data = np.full_like(slope_data, np.nan)
+                    plot_data[valid_mask & success_mask] = slope_data[valid_mask & success_mask]
+
+                    # Create the map
+                    mesh = ax.pcolormesh(lon_grid, lat_grid, plot_data, cmap=cmap, norm=norm, shading='auto')
+
+                    # Formatting
+                    ax.set_xlabel('Longitude')
+                    ax.set_ylabel('Latitude')
+
+                    # Calculate valid range for title
+                    valid_slopes = slope_data[valid_mask & success_mask]
+                    if len(valid_slopes) > 0:
+                        data_min, data_max = np.min(valid_slopes), np.max(valid_slopes)
+                        range_str = f"Range: {data_min:.4f} to {data_max:.4f}"
+                    else:
+                        range_str = "No valid data"
+
+                    ax.set_title(f'{response_name}\n{range_str} | GDP-weighted: {gdp_weighted_mean:.6f}',
+                                fontsize=11, fontweight='bold')
+
+                    # Add colorbar
+                    cbar = plt.colorbar(mesh, ax=ax, orientation='horizontal', pad=0.1, shrink=0.8)
+                    cbar.set_label('Regression Slope\n(GDP variability / Temperature variability)', fontsize=10)
+
+                plt.tight_layout()
+                pdf_pages.savefig(fig, bbox_inches='tight', dpi=150)
+                plt.close(fig)
+
+    print(f"✅ Regression slopes visualization saved: {pdf_path}")
+    return pdf_path
 
 
 def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data):
