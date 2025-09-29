@@ -363,7 +363,7 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     return output_path
 
 
-def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, config: Dict[str, Any]) -> str:
+def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, config: Dict[str, Any], all_data: Dict[str, Any]) -> str:
     """
     Save Step 2 baseline TFP results to NetCDF file.
 
@@ -405,7 +405,7 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, con
     for i, ssp_name in enumerate(ssp_names):
         tfp_all_ssps[i] = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
         k_all_ssps[i] = tfp_results[ssp_name]['k_baseline']      # [time, lat, lon]
-        valid_masks[i] = tfp_results[ssp_name]['valid_mask']
+        valid_masks[i] = all_data['_metadata']['valid_mask']
 
     # Create coordinate arrays (assuming annual time steps starting from year 0)
     time_coords = np.arange(ntime)
@@ -464,7 +464,7 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, con
     return output_path
 
 
-def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str, config: Dict[str, Any]) -> str:
+def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str, config: Dict[str, Any], all_data: Dict[str, Any]) -> str:
     """
     Save Step 3 scaling factor results to NetCDF file.
 
@@ -490,25 +490,25 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Extract data arrays and metadata
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
-    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
-    convergence_flags = scaling_results['convergence_flags']  # [lat, lon, response_func, target]
-    scaled_parameters = scaling_results['scaled_parameters']  # [lat, lon, response_func, target, param]
-    valid_mask = scaling_results['valid_mask']  # [lat, lon]
+    scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
+    optimization_errors = scaling_results['optimization_errors']  # [response_func, target, lat, lon]
+    convergence_flags = scaling_results['convergence_flags']  # [response_func, target, lat, lon]
+    scaled_parameters = scaling_results['scaled_parameters']  # [response_func, target, param, lat, lon]
+    valid_mask = all_data['_metadata']['valid_mask']  # [lat, lon]
 
     # Get dimensions and coordinate info
-    nlat, nlon, n_response_func, n_target = scaling_factors.shape
-    n_scaled_params = scaled_parameters.shape[4]
+    n_response_func, n_target, nlat, nlon = scaling_factors.shape
+    n_scaled_params = scaled_parameters.shape[2]
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
     scaled_param_names = scaling_results['scaled_param_names']
     coordinates = scaling_results['_coordinates']
 
-    # Transpose arrays to put lat,lon last: [lat, lon, response_func, target] -> [response_func, target, lat, lon]
-    scaling_factors_t = scaling_factors.transpose(2, 3, 0, 1)  # [response_func, target, lat, lon]
-    optimization_errors_t = optimization_errors.transpose(2, 3, 0, 1)  # [response_func, target, lat, lon]
-    convergence_flags_t = convergence_flags.transpose(2, 3, 0, 1)  # [response_func, target, lat, lon]
-    scaled_parameters_t = scaled_parameters.transpose(2, 3, 4, 0, 1)  # [response_func, target, param, lat, lon]
+    # Arrays are already in the correct format [response_func, target, lat, lon]
+    scaling_factors_t = scaling_factors  # [response_func, target, lat, lon]
+    optimization_errors_t = optimization_errors  # [response_func, target, lat, lon]
+    convergence_flags_t = convergence_flags  # [response_func, target, lat, lon]
+    scaled_parameters_t = scaled_parameters  # [response_func, target, param, lat, lon]
 
     # Create xarray dataset with lat,lon as last dimensions
     ds = xr.Dataset(
@@ -584,7 +584,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     return output_path
 
 
-def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, config: Dict[str, Any]) -> List[str]:
+def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: str, config: Dict[str, Any], all_data: Dict[str, Any]) -> List[str]:
     """
     Save Step 4 forward model results to separate NetCDF files per SSP/variable combination.
 
@@ -618,7 +618,7 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
     forward_results = step4_results['forward_results']
     response_function_names = step4_results['response_function_names']
     target_names = step4_results['target_names']
-    valid_mask = step4_results['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     coordinates = step4_results['_coordinates']
 
     # Get SSP names and dimensions from first SSP result
@@ -640,10 +640,10 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
         ssp_result = forward_results[ssp_name]
 
         for climate_var, weather_var, var_base in variable_pairs:
-            # Reorder coordinates from [lat, lon, response_func, target, time]
+            # Reorder coordinates from [response_func, target, time, lat, lon]
             # to [target, response_func, time, lat, lon]
-            climate_data = ssp_result[climate_var].transpose(3, 2, 4, 0, 1)  # [target, response_func, time, lat, lon]
-            weather_data = ssp_result[weather_var].transpose(3, 2, 4, 0, 1)  # [target, response_func, time, lat, lon]
+            climate_data = ssp_result[climate_var].transpose(1, 0, 2, 3, 4)  # [target, response_func, time, lat, lon]
+            weather_data = ssp_result[weather_var].transpose(1, 0, 2, 3, 4)  # [target, response_func, time, lat, lon]
 
             # Create dataset for this SSP/variable combination
             ds = xr.Dataset(
@@ -750,7 +750,7 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     lat = metadata['lat']
     lon = metadata['lon']
     years = all_data['years']  # Years stored at top level, not in metadata
-    valid_mask = metadata['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     model_name = config['climate_model']['model_name']
 
     # Get SSP list (excluding metadata and years)

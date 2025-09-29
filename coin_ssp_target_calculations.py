@@ -202,7 +202,7 @@ def calculate_quadratic_target_reduction(quadratic_config, tas_ref, gdp_target, 
     }
 
 
-def calculate_all_target_reductions(target_configs, gridded_data):
+def calculate_all_target_reductions(target_configs, gridded_data, all_data):
     """
     Calculate all configured target GDP reductions using gridded data.
 
@@ -238,7 +238,7 @@ def calculate_all_target_reductions(target_configs, gridded_data):
     tas_ref = gridded_data['tas_ref']
     gdp_target = gridded_data['gdp_target']
     lat = gridded_data['lat']
-    valid_mask = gridded_data['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
 
     for target_config in target_configs:
         target_name = target_config['target_name']

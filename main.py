@@ -273,8 +273,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     gridded_data = {
         'tas_ref': tas_ref,
         'gdp_target': gdp_target,
-        'lat': data['lat'],
-        'valid_mask': valid_mask
+        'lat': data['lat']
     }
     
     # Calculate global means for verification using valid mask
@@ -286,7 +285,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     # Calculate all target reductions using extracted functions
     print("Calculating target GDP reductions...")
-    calculation_results = calculate_all_target_reductions(gdp_targets, gridded_data)
+    calculation_results = calculate_all_target_reductions(gdp_targets, gridded_data, all_data)
     
     # Process results for Step 1 output format
     target_results = {}
@@ -466,9 +465,8 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
         
         tfp_results[ssp_name] = {
             'tfp_baseline': tfp_baseline,
-            'k_baseline': k_baseline, 
+            'k_baseline': k_baseline,
             'grid_cells_processed': grid_cells_processed,
-            'valid_mask': valid_mask,
             'validation_passed': True
         }
         
@@ -499,7 +497,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
         'lon': metadata['lon']
     }
     
-    save_step2_results_netcdf(tfp_results, output_path, config)
+    save_step2_results_netcdf(tfp_results, output_path, config, all_data)
 
     # Generate TFP visualization
     print("Generating baseline TFP visualization...")
@@ -571,21 +569,21 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     # Get baseline TFP for reference SSP
     reference_tfp = tfp_results[reference_ssp]
-    valid_mask = reference_tfp['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     tfp_baseline = reference_tfp['tfp_baseline']  # [time, lat, lon]
     
     # Get dimensions (tas_data is [time, lat, lon])
     ntime, nlat, nlon = tas_data.shape
     
-    # Initialize scaling factor arrays 
-    scaling_factors = np.full((nlat, nlon, n_response_functions, n_gdp_targets), np.nan)
-    optimization_errors = np.full((nlat, nlon, n_response_functions, n_gdp_targets), np.nan)
-    convergence_flags = np.full((nlat, nlon, n_response_functions, n_gdp_targets), False)
+    # Initialize scaling factor arrays
+    scaling_factors = np.full((n_response_functions, n_gdp_targets, nlat, nlon), np.nan)
+    optimization_errors = np.full((n_response_functions, n_gdp_targets, nlat, nlon), np.nan)
+    convergence_flags = np.full((n_response_functions, n_gdp_targets, nlat, nlon), False)
     
-    # Initialize arrays for scaled response function parameters [lat, lon, response_func, target, param]
+    # Initialize arrays for scaled response function parameters [response_func, target, param, lat, lon]
     # The 12 parameters are: k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2
     n_scaled_params = 12
-    scaled_parameters = np.full((nlat, nlon, n_response_functions, n_gdp_targets, n_scaled_params), np.nan)
+    scaled_parameters = np.full((n_response_functions, n_gdp_targets, n_scaled_params, nlat, nlon), np.nan)
     
     # Define parameter names for NetCDF output
     scaled_param_names = ['k_tas1', 'k_tas2', 'k_pr1', 'k_pr2', 
@@ -669,26 +667,25 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         'scaled_parameters': scaled_parameters,   # [lat, lon, response_func_idx, target_idx, param_idx]
         'scaled_param_names': scaled_param_names, # Parameter names for the last dimension
         'response_function_names': [df['scaling_name'] for df in response_scalings],
-        'target_names': [tgt['target_name'] for tgt in gdp_targets], 
+        'target_names': [tgt['target_name'] for tgt in gdp_targets],
         'total_grid_cells': total_grid_cells,
         'successful_optimizations': successful_optimizations,
         'reference_ssp': reference_ssp,
-        'valid_mask': valid_mask,  # [lat, lon] boolean mask
         '_coordinates': all_data['_metadata']  # coordinate information
     }
     
     # Write results to NetCDF file
     output_path = get_step_output_path(output_dir, 3, config, reference_ssp, "scaling_factors", "nc")
-    save_step3_results_netcdf(scaling_results, output_path, config)
+    save_step3_results_netcdf(scaling_results, output_path, config, all_data)
 
     # Generate scaling factors visualization
     print("Generating scaling factors visualization...")
-    visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir)
+    visualization_path = create_scaling_factors_visualization(scaling_results, config, output_dir, all_data)
     print(f"✅ Scaling factors visualization saved: {visualization_path}")
 
     # Generate objective function visualization
     print("Generating objective function visualization...")
-    obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir)
+    obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, all_data)
     print(f"✅ Objective function visualization saved: {obj_func_path}")
 
     # Calculate weather-GDP regression slopes for all response functions
@@ -704,7 +701,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     # Generate regression slopes visualization
     print("Generating regression slopes visualization...")
     from coin_ssp_reporting import create_regression_slopes_visualization
-    regression_viz_path = create_regression_slopes_visualization(scaling_results, config, output_dir)
+    regression_viz_path = create_regression_slopes_visualization(scaling_results, config, output_dir, all_data)
     if regression_viz_path:
         print(f"✅ Regression slopes visualization saved: {regression_viz_path}")
 
@@ -765,12 +762,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     base_params = config['model_params_factory'].create_base()
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
-    valid_mask = scaling_results['valid_mask']
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
-    scaled_parameters = scaling_results['scaled_parameters']  # [lat, lon, response_func, target, param]
+    valid_mask = all_data['_metadata']['valid_mask']
+    scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
+    scaled_parameters = scaling_results['scaled_parameters']  # [response_func, target, param, lat, lon]
     
-    # Get grid dimensions
-    nlat, nlon = valid_mask.shape
+    # Get dimensions
+    n_response_functions, n_gdp_targets, nlat, nlon = scaling_factors.shape
     
     years = all_data['years']
     time_periods = config['time_periods']
@@ -807,13 +804,13 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")
         
         # Initialize result arrays for this SSP
-        # [lat, lon, response_func, target, time]
-        gdp_climate = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
-        gdp_weather = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
-        tfp_climate = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
-        tfp_weather = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
-        k_climate = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
-        k_weather = np.full((nlat, nlon, n_response_functions, n_gdp_targets, ntime), np.nan)
+        # [response_func, target, time, lat, lon]
+        gdp_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
+        gdp_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
+        tfp_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
+        tfp_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
+        k_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
+        k_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
         
         successful_forward_runs = 0
         total_forward_runs = 0
@@ -856,18 +853,18 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         params_scaled.pr0 = np.mean(cell_pr[ref_start_idx:ref_end_idx+1])
                         
                         # Set scaled response function parameters from Step 3 results
-                        params_scaled.k_tas1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 0]
-                        params_scaled.k_tas2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 1]
-                        params_scaled.k_pr1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 2]
-                        params_scaled.k_pr2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 3]
-                        params_scaled.tfp_tas1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 4]
-                        params_scaled.tfp_tas2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 5]
-                        params_scaled.tfp_pr1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 6]
-                        params_scaled.tfp_pr2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 7]
-                        params_scaled.y_tas1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 8]
-                        params_scaled.y_tas2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 9]
-                        params_scaled.y_pr1 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 10]
-                        params_scaled.y_pr2 = scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 11]
+                        params_scaled.k_tas1 = scaled_parameters[response_idx, target_idx, 0, lat_idx, lon_idx]
+                        params_scaled.k_tas2 = scaled_parameters[response_idx, target_idx, 1, lat_idx, lon_idx]
+                        params_scaled.k_pr1 = scaled_parameters[response_idx, target_idx, 2, lat_idx, lon_idx]
+                        params_scaled.k_pr2 = scaled_parameters[response_idx, target_idx, 3, lat_idx, lon_idx]
+                        params_scaled.tfp_tas1 = scaled_parameters[response_idx, target_idx, 4, lat_idx, lon_idx]
+                        params_scaled.tfp_tas2 = scaled_parameters[response_idx, target_idx, 5, lat_idx, lon_idx]
+                        params_scaled.tfp_pr1 = scaled_parameters[response_idx, target_idx, 6, lat_idx, lon_idx]
+                        params_scaled.tfp_pr2 = scaled_parameters[response_idx, target_idx, 7, lat_idx, lon_idx]
+                        params_scaled.y_tas1 = scaled_parameters[response_idx, target_idx, 8, lat_idx, lon_idx]
+                        params_scaled.y_tas2 = scaled_parameters[response_idx, target_idx, 9, lat_idx, lon_idx]
+                        params_scaled.y_pr1 = scaled_parameters[response_idx, target_idx, 10, lat_idx, lon_idx]
+                        params_scaled.y_pr2 = scaled_parameters[response_idx, target_idx, 11, lat_idx, lon_idx]
                         
                         # Run forward model with climate data
                         y_climate, a_climate, k_climate_values, _, _, _ = calculate_coin_ssp_forward_model(
@@ -880,12 +877,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         )
 
                         # Store results (convert normalized values back to actual units)
-                        gdp_climate[lat_idx, lon_idx, response_idx, target_idx, :] = y_climate * cell_gdp[0]
-                        gdp_weather[lat_idx, lon_idx, response_idx, target_idx, :] = y_weather * cell_gdp[0]
-                        tfp_climate[lat_idx, lon_idx, response_idx, target_idx, :] = a_climate
-                        tfp_weather[lat_idx, lon_idx, response_idx, target_idx, :] = a_weather
-                        k_climate[lat_idx, lon_idx, response_idx, target_idx, :] = k_climate_values
-                        k_weather[lat_idx, lon_idx, response_idx, target_idx, :] = k_weather_values
+                        gdp_climate[response_idx, target_idx, :, lat_idx, lon_idx] = y_climate * cell_gdp[0]
+                        gdp_weather[response_idx, target_idx, :, lat_idx, lon_idx] = y_weather * cell_gdp[0]
+                        tfp_climate[response_idx, target_idx, :, lat_idx, lon_idx] = a_climate
+                        tfp_weather[response_idx, target_idx, :, lat_idx, lon_idx] = a_weather
+                        k_climate[response_idx, target_idx, :, lat_idx, lon_idx] = k_climate_values
+                        k_weather[response_idx, target_idx, :, lat_idx, lon_idx] = k_weather_values
 
                         successful_forward_runs += 1
         
@@ -896,12 +893,12 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         
         # Store results for this SSP
         forward_results[ssp_name] = {
-            'gdp_climate': gdp_climate,        # [lat, lon, response_func, target, time]
-            'gdp_weather': gdp_weather,        # [lat, lon, response_func, target, time] 
-            'tfp_climate': tfp_climate,        # [lat, lon, response_func, target, time]
-            'tfp_weather': tfp_weather,        # [lat, lon, response_func, target, time]
-            'k_climate': k_climate,            # [lat, lon, response_func, target, time]
-            'k_weather': k_weather,            # [lat, lon, response_func, target, time]
+            'gdp_climate': gdp_climate,        # [response_func, target, time, lat, lon]
+            'gdp_weather': gdp_weather,        # [response_func, target, time, lat, lon]
+            'tfp_climate': tfp_climate,        # [response_func, target, time, lat, lon]
+            'tfp_weather': tfp_weather,        # [response_func, target, time, lat, lon]
+            'k_climate': k_climate,            # [response_func, target, time, lat, lon]
+            'k_weather': k_weather,            # [response_func, target, time, lat, lon]
             'successful_forward_runs': successful_forward_runs,
             'total_forward_runs': total_forward_runs,
             'success_rate': successful_forward_runs / max(1, total_forward_runs)
@@ -912,7 +909,6 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         'forward_results': forward_results,  # SSP-specific results
         'response_function_names': response_function_names,
         'target_names': target_names,
-        'valid_mask': valid_mask,
         'total_ssps_processed': len(forward_ssps),
         'processing_summary': {
             ssp: {
@@ -931,7 +927,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
     if len(forward_ssps) > 0:
         # Write results to separate NetCDF files per SSP/variable
         model_name = config['climate_model']['model_name']
-        saved_files = save_step4_results_netcdf_split(step4_results, output_dir, config)
+        saved_files = save_step4_results_netcdf_split(step4_results, output_dir, config, all_data)
         print(f"Step 4 NetCDF files saved: {len(saved_files)} files")
 
         # Create PDF visualizations
@@ -1119,11 +1115,11 @@ def run_pipeline(config_path: str, step3_file: str = None, output_dir: str = Non
             model_name = config['climate_model']['model_name']
 
             # Scaling factors visualization
-            pdf_path = create_scaling_factors_visualization(scaling_results, config, output_dir)
+            pdf_path = create_scaling_factors_visualization(scaling_results, config, output_dir, all_data)
             print(f"✅ Scaling factors visualization saved to: {pdf_path}")
 
             # Objective function visualization
-            obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir)
+            obj_func_path = create_objective_function_visualization(scaling_results, config, output_dir, all_data)
             print(f"✅ Objective function visualization saved to: {obj_func_path}")
             step_times['Step 3 - Scaling Factors (Loaded)'] = time.time() - step3_start
         else:

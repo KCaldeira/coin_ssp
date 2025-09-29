@@ -107,7 +107,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata
-    valid_mask = forward_results['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     lat = forward_results['_coordinates']['lat']
     response_function_names = forward_results['response_function_names']
     target_names = forward_results['target_names']
@@ -263,7 +263,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract metadata
-    valid_mask = forward_results['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     lat = forward_results['_coordinates']['lat']
     lon = forward_results['_coordinates']['lon']
     years = forward_results['_coordinates']['years']
@@ -411,7 +411,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
     log10_pdf_path = os.path.join(output_dir, log10_pdf_filename)
 
     # Extract metadata
-    valid_mask = forward_results['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     lat = forward_results['_coordinates']['lat']
     lon = forward_results['_coordinates']['lon']
     response_function_names = forward_results['response_function_names']
@@ -670,8 +670,8 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
     # Extract data
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
-    valid_mask = scaling_results['valid_mask']
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
+    valid_mask = all_data['_metadata']['valid_mask']
+    scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
     optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
 
     # Get reference SSP GDP data for weighting
@@ -703,7 +703,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
     for target_idx, target_name in enumerate(target_names):
         for resp_idx, resp_name in enumerate(response_function_names):
             # Extract scaling factor for this combination
-            scale_data = scaling_factors[:, :, resp_idx, target_idx]  # [lat, lon]
+            scale_data = scaling_factors[resp_idx, target_idx, :, :]  # [lat, lon]
 
             # Use calculate_global_mean with GDP*scaling data to get proper area+GDP weighted mean
             # Since GDP is in units per km², calculate_global_mean will properly handle the spatial weighting
@@ -766,7 +766,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                 scaling_max = scaling_min = np.nan
 
             # Calculate objective function statistics
-            error_data = optimization_errors[:, :, resp_idx, target_idx]  # [lat, lon]
+            error_data = optimization_errors[resp_idx, target_idx, :, :]  # [lat, lon]
             valid_errors = error_data[valid_mask & np.isfinite(error_data)]
 
             if len(valid_errors) > 0:
@@ -1126,7 +1126,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
 
 
-def create_scaling_factors_visualization(scaling_results, config, output_dir):
+def create_scaling_factors_visualization(scaling_results, config, output_dir, all_data):
     """
     Create comprehensive PDF visualization for Step 3 scaling factor results.
 
@@ -1160,8 +1160,8 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract data arrays and metadata
-    scaling_factors = scaling_results['scaling_factors']  # [lat, lon, response_func, target]
-    valid_mask = scaling_results['valid_mask']  # [lat, lon]
+    scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
+    valid_mask = all_data['_metadata']['valid_mask']  # [lat, lon]
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
 
@@ -1217,7 +1217,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
                     ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                 # Extract scaling factor map for this combination
-                sf_map = scaling_factors[:, :, response_idx, target_idx]
+                sf_map = scaling_factors[response_idx, target_idx, :, :]
 
                 # Mask invalid cells and ocean
                 sf_map_masked = np.copy(sf_map)
@@ -1276,7 +1276,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir):
 
 
 
-def create_objective_function_visualization(scaling_results, config, output_dir):
+def create_objective_function_visualization(scaling_results, config, output_dir, all_data):
     """
     Create comprehensive PDF visualization for Step 3 objective function values.
 
@@ -1312,7 +1312,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
 
     # Extract data arrays and metadata
     optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
-    valid_mask = scaling_results['valid_mask']  # [lat, lon]
+    valid_mask = all_data['_metadata']['valid_mask']  # [lat, lon]
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
 
@@ -1368,7 +1368,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
                     ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                 # Extract objective function map for this combination
-                obj_map = optimization_errors[:, :, response_idx, target_idx]
+                obj_map = optimization_errors[response_idx, target_idx, :, :]
 
                 # Mask invalid cells and ocean
                 obj_map_masked = np.copy(obj_map)
@@ -1440,7 +1440,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir)
     return pdf_path
 
 
-def create_regression_slopes_visualization(scaling_results, config, output_dir):
+def create_regression_slopes_visualization(scaling_results, config, output_dir, all_data):
     """
     Create comprehensive PDF visualization of weather-GDP regression slopes.
 
@@ -1478,7 +1478,7 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir):
     regression_data = scaling_results['regression_slopes']
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
-    valid_mask = scaling_results['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
 
     # Get grid coordinates from scaling results
     coordinates = scaling_results['_coordinates']
@@ -1652,7 +1652,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
             tfp_target_mean = np.mean(tfp_timeseries[target_mask], axis=0)  # [lat, lon]
 
             # Use pre-computed valid mask from TFP results (computed once during data loading)
-            valid_mask = tfp_results[viz_ssp]['valid_mask']
+            valid_mask = all_data['_metadata']['valid_mask']
             print(f"  Using pre-computed valid mask: {np.sum(valid_mask)} valid cells")
 
             # If no valid cells found, use fallback

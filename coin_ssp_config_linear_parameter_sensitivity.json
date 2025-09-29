@@ -1,6 +1,6 @@
 {
   "run_metadata": {
-    "json_id": "parameter-sensitivity",
+    "json_id": "linear-sensitivity",
     "run_name": "CanESM5_scale-linear-impacts-test",
     "description": "Run each parameter one at a time to see scaling that gives a 10% uniform loss of gdp in the target period.",
     "created_date": "2025-09-21"

@@ -565,23 +565,23 @@ def process_response_target_optimization(
                 )
 
                 # Store results
-                scaling_factors[lat_idx, lon_idx, response_idx, target_idx] = optimal_scale
-                optimization_errors[lat_idx, lon_idx, response_idx, target_idx] = final_error
-                convergence_flags[lat_idx, lon_idx, response_idx, target_idx] = True
+                scaling_factors[response_idx, target_idx, lat_idx, lon_idx] = optimal_scale
+                optimization_errors[response_idx, target_idx, lat_idx, lon_idx] = final_error
+                convergence_flags[response_idx, target_idx, lat_idx, lon_idx] = True
 
                 # Store scaled response function parameters
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 0] = params_scaled.k_tas1
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 1] = params_scaled.k_tas2
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 2] = params_scaled.k_pr1
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 3] = params_scaled.k_pr2
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 4] = params_scaled.tfp_tas1
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 5] = params_scaled.tfp_tas2
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 6] = params_scaled.tfp_pr1
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 7] = params_scaled.tfp_pr2
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 8] = params_scaled.y_tas1
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 9] = params_scaled.y_tas2
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 10] = params_scaled.y_pr1
-                scaled_parameters[lat_idx, lon_idx, response_idx, target_idx, 11] = params_scaled.y_pr2
+                scaled_parameters[response_idx, target_idx, 0, lat_idx, lon_idx] = params_scaled.k_tas1
+                scaled_parameters[response_idx, target_idx, 1, lat_idx, lon_idx] = params_scaled.k_tas2
+                scaled_parameters[response_idx, target_idx, 2, lat_idx, lon_idx] = params_scaled.k_pr1
+                scaled_parameters[response_idx, target_idx, 3, lat_idx, lon_idx] = params_scaled.k_pr2
+                scaled_parameters[response_idx, target_idx, 4, lat_idx, lon_idx] = params_scaled.tfp_tas1
+                scaled_parameters[response_idx, target_idx, 5, lat_idx, lon_idx] = params_scaled.tfp_tas2
+                scaled_parameters[response_idx, target_idx, 6, lat_idx, lon_idx] = params_scaled.tfp_pr1
+                scaled_parameters[response_idx, target_idx, 7, lat_idx, lon_idx] = params_scaled.tfp_pr2
+                scaled_parameters[response_idx, target_idx, 8, lat_idx, lon_idx] = params_scaled.y_tas1
+                scaled_parameters[response_idx, target_idx, 9, lat_idx, lon_idx] = params_scaled.y_tas2
+                scaled_parameters[response_idx, target_idx, 10, lat_idx, lon_idx] = params_scaled.y_pr1
+                scaled_parameters[response_idx, target_idx, 11, lat_idx, lon_idx] = params_scaled.y_pr2
 
                 successful_optimizations += 1
 
@@ -693,13 +693,14 @@ def calculate_weather_gdp_regression_slopes(
     hist_end_idx = np.where(years == hist_end_year)[0][0]
 
     nlat, nlon = tas_data.shape[1], tas_data.shape[2]
-    valid_mask = all_data['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
 
     # Extract weather data (already computed in all_data)
-    tas_weather_data = all_data['weather_variables'][reference_ssp]['tas_weather']
+    tas_weather_data = all_data[reference_ssp]['tas_weather']
+    pr_weather_data = all_data[reference_ssp]['pr_weather']
 
     # Get model parameters
-    model_params = ModelParams.from_dict(config['model_params'])
+    model_params = config['model_params_factory'].create_base()
 
     # Initialize results storage
     regression_results = {
@@ -730,7 +731,7 @@ def calculate_weather_gdp_regression_slopes(
             regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
 
             # Extract scaling factors for this response-target combination
-            scaling_factors = scaling_results['scaling_factors'][response_idx, target_idx, :, :]
+            scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
 
             # Process each grid cell
             successful_regressions = 0
@@ -739,15 +740,18 @@ def calculate_weather_gdp_regression_slopes(
                     if not valid_mask[lat_idx, lon_idx]:
                         continue
 
-                    scaling_factor = scaling_factors[lat_idx, lon_idx]
+                    scaling_factor = scaling_factors[response_idx, target_idx, lat_idx, lon_idx]
                     if not np.isfinite(scaling_factor):
                         continue
 
                     # Create scaled parameters for this grid cell
-                    scaled_params = create_scaled_params(model_params, response_config, scaling_factor)
+                    # Convert response_config dict to ScalingParams object
+                    scaling_config = filter_scaling_params(response_config)
+                    scaling_params = ScalingParams(**scaling_config)
+                    scaled_params = create_scaled_params(model_params, scaling_params, scaling_factor)
 
                     # Extract baseline TFP for this cell
-                    cell_tfp_baseline = reference_tfp[reference_ssp][:, lat_idx, lon_idx]
+                    cell_tfp_baseline = reference_tfp[reference_ssp]['tfp_baseline'][:, lat_idx, lon_idx]
                     cell_pop = gdp_data[:, lat_idx, lon_idx]  # Population from GDP data
                     cell_tas = tas_data[:, lat_idx, lon_idx]
                     cell_pr = pr_data[:, lat_idx, lon_idx]
@@ -892,7 +896,7 @@ def calculate_variability_climate_response_parameters(
     pr0_2d = all_data['pr0_2d']
 
     # Extract TFP data
-    valid_mask = reference_tfp['valid_mask']
+    valid_mask = all_data['_metadata']['valid_mask']
     tfp_baseline = reference_tfp['tfp_baseline']
     nlat, nlon = valid_mask.shape
 
@@ -915,10 +919,10 @@ def calculate_variability_climate_response_parameters(
     n_response_functions = len(response_scalings)
     n_targets = 1
     n_params = 12
-    scaling_factors = np.zeros((nlat, nlon, n_response_functions, n_targets))
-    optimization_errors = np.zeros((nlat, nlon, n_response_functions, n_targets))
-    convergence_flags = np.zeros((nlat, nlon, n_response_functions, n_targets), dtype=bool)
-    scaled_parameters = np.zeros((nlat, nlon, n_response_functions, n_targets, n_params))
+    scaling_factors = np.zeros((n_response_functions, n_targets, nlat, nlon))
+    optimization_errors = np.zeros((n_response_functions, n_targets, nlat, nlon))
+    convergence_flags = np.zeros((n_response_functions, n_targets, nlat, nlon), dtype=bool)
+    scaled_parameters = np.zeros((n_response_functions, n_targets, n_params, nlat, nlon))
 
     # Run optimization to find scaling factors for uniform 10% GDP loss
     # Uses full climate data (tas_data, pr_data) for optimization
@@ -1242,13 +1246,13 @@ def calculate_variability_scaling_parameters(
 
         # Calculate scaling factors by applying target scaling to reference scaled parameters
         # scaling_factor = target_scaling_factor (no optimization, direct application)
-        scaling_factors[:, :, response_idx, target_idx] = target_scaling_factors_array
+        scaling_factors[response_idx, target_idx, :, :] = target_scaling_factors_array
 
         # For variability targets, set optimization error to zero (no optimization performed)
-        optimization_errors[:, :, response_idx, target_idx] = 0.0
+        optimization_errors[response_idx, target_idx, :, :] = 0.0
 
         # Mark as converged where we have valid baseline parameters and finite scaling factors
-        convergence_flags[:, :, response_idx, target_idx] = (
+        convergence_flags[response_idx, target_idx, :, :] = (
             np.isfinite(baseline_climate_parameters[:, :, 0]) &
             np.isfinite(target_scaling_factors_array)
         )
@@ -1256,7 +1260,7 @@ def calculate_variability_scaling_parameters(
         # Store scaled parameters by applying target scaling to baseline parameters
         # For variability targets, we scale the baseline parameters by the target scaling factor
         for param_idx in range(baseline_climate_parameters.shape[2]):
-            scaled_parameters[:, :, response_idx, target_idx, param_idx] = (
+            scaled_parameters[response_idx, target_idx, param_idx, :, :] = (
                 baseline_climate_parameters[:, :, param_idx] * target_scaling_factors_array
             )
 
