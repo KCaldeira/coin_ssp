@@ -20,6 +20,7 @@ import pandas as pd
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.colors import TwoSlopeNorm
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
 import xarray as xr
@@ -159,8 +160,8 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
-                    gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
-                    gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
+                    gdp_climate = ssp_results['gdp_climate']  # [response_func, target, time, lat, lon]
+                    gdp_weather = ssp_results['gdp_weather']  # [response_func, target, time, lat, lon]
 
                     # Get baseline GDP data from all_data
                     baseline_gdp = get_ssp_data(all_data, ssp, 'gdp')  # [time, lat, lon]
@@ -170,15 +171,15 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
 
 
                     # Extract time series for this combination
-                    ntime = gdp_climate.shape[4]
+                    ntime = gdp_climate.shape[2]
                     y_climate_series = np.zeros(ntime)
                     y_weather_series = np.zeros(ntime)
                     baseline_series = np.zeros(ntime)
 
                     for t in range(ntime):
                         # Extract spatial slice for this time
-                        gdp_climate_t = gdp_climate[:, :, response_idx, target_idx, t]
-                        gdp_weather_t = gdp_weather[:, :, response_idx, target_idx, t]
+                        gdp_climate_t = gdp_climate[response_idx, target_idx, t, :, :]
+                        gdp_weather_t = gdp_weather[response_idx, target_idx, t, :, :]
                         baseline_t = baseline_gdp[t, :, :]  # Note: baseline is [time, lat, lon]
 
                         # Calculate global means
@@ -293,14 +294,13 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
 
                 # Get SSP-specific data
                 ssp_results = forward_results['forward_results'][ssp]
-                gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
-                gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
+                gdp_climate = ssp_results['gdp_climate']  # [response_func, target, time, lat, lon]
+                gdp_weather = ssp_results['gdp_weather']  # [response_func, target, time, lat, lon]
 
                 # Get baseline GDP for this SSP
                 baseline_gdp = get_ssp_data(all_data, ssp, 'gdp')  # [time, lat, lon]
 
                 # Calculate global means for baseline (area-weighted using valid cells only)
-                area_weights = calculate_area_weights(lat)
                 baseline_global = []
                 for t_idx in range(len(years)):
                     baseline_slice = baseline_gdp[t_idx, :, :]  # [lat, lon]
@@ -311,16 +311,16 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                 for target_idx, target_name in enumerate(target_names):
                     ax = plt.subplot(n_targets, 1, target_idx + 1)  # Dynamic rows, 1 column
 
-                    # Extract data for this combination [lat, lon, time]
-                    gdp_climate_combo = gdp_climate[:, :, response_idx, target_idx, :]
-                    gdp_weather_combo = gdp_weather[:, :, response_idx, target_idx, :]
+                    # Extract data for this combination [time, lat, lon]
+                    gdp_climate_combo = gdp_climate[response_idx, target_idx, :, :, :]
+                    gdp_weather_combo = gdp_weather[response_idx, target_idx, :, :, :]
 
                     # Calculate global means for this combination
                     climate_global = []
                     weather_global = []
                     for t_idx in range(len(years)):
-                        climate_slice = gdp_climate_combo[:, :, t_idx]  # [lat, lon]
-                        weather_slice = gdp_weather_combo[:, :, t_idx]  # [lat, lon]
+                        climate_slice = gdp_climate_combo[t_idx, :, :]  # [lat, lon]
+                        weather_slice = gdp_weather_combo[t_idx, :, :]  # [lat, lon]
 
                         climate_global.append(calculate_global_mean(climate_slice, lat, valid_mask))
                         weather_global.append(calculate_global_mean(weather_slice, lat, valid_mask))
@@ -475,12 +475,12 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
                     # Get SSP-specific data
                     ssp_results = forward_results['forward_results'][ssp]
-                    gdp_climate = ssp_results['gdp_climate']  # [lat, lon, response_func, target, time]
-                    gdp_weather = ssp_results['gdp_weather']  # [lat, lon, response_func, target, time]
+                    gdp_climate = ssp_results['gdp_climate']  # [response_func, target, time, lat, lon]
+                    gdp_weather = ssp_results['gdp_weather']  # [response_func, target, time, lat, lon]
 
-                    # Extract data for this combination: [lat, lon, time]
-                    gdp_climate_combo = gdp_climate[:, :, response_idx, target_idx, :]
-                    gdp_weather_combo = gdp_weather[:, :, response_idx, target_idx, :]
+                    # Extract data for this combination: [time, lat, lon]
+                    gdp_climate_combo = gdp_climate[response_idx, target_idx, :, :, :]
+                    gdp_weather_combo = gdp_weather[response_idx, target_idx, :, :, :]
 
                     # Calculate time indices for target period using actual time coordinates
                     time_coords = forward_results['_coordinates']['years']
@@ -496,8 +496,8 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                         for lon_idx in range(nlon):
                             if valid_mask[lat_idx, lon_idx]:
                                 # Extract target period time series for this grid cell
-                                climate_target = gdp_climate_combo[lat_idx, lon_idx, target_start_idx:target_end_idx]
-                                weather_target = gdp_weather_combo[lat_idx, lon_idx, target_start_idx:target_end_idx]
+                                climate_target = gdp_climate_combo[target_start_idx:target_end_idx, lat_idx, lon_idx]
+                                weather_target = gdp_weather_combo[target_start_idx:target_end_idx, lat_idx, lon_idx]
 
                                 if len(climate_target) > 0 and len(weather_target) > 0:
                                     # Add epsilon to prevent division by zero
@@ -820,6 +820,12 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                 if resp_name in regression_data['gdp_weighted_means']:
                     if target_name in regression_data['gdp_weighted_means'][resp_name]:
                         regression_slope = regression_data['gdp_weighted_means'][resp_name][target_name]
+                    else:
+                        print(f"    Warning: Target '{target_name}' not found in regression data for response '{resp_name}'")
+                else:
+                    print(f"    Warning: Response '{resp_name}' not found in regression data. Available: {list(regression_data['gdp_weighted_means'].keys())}")
+            else:
+                print(f"    Warning: No 'regression_slopes' in scaling_results")
 
             csv_row['gdp_weather_slope'] = regression_slope
 

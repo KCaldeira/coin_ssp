@@ -729,6 +729,7 @@ def calculate_weather_gdp_regression_slopes(
             # Initialize arrays for this response-target combination
             regression_slopes = np.zeros((nlat, nlon))
             regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
+            error_count = 0  # Track errors for debugging
 
             # Extract scaling factors for this response-target combination
             scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
@@ -761,7 +762,7 @@ def calculate_weather_gdp_regression_slopes(
                         forward_results = calculate_coin_ssp_forward_model(
                             cell_tfp_baseline, cell_pop, cell_tas, cell_pr, scaled_params
                         )
-                        gdp_forward, _, _ = forward_results
+                        gdp_forward, _, _, _, _, _ = forward_results
 
                         # Extract historical period data
                         tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
@@ -786,8 +787,18 @@ def calculate_weather_gdp_regression_slopes(
                             regression_success_mask[lat_idx, lon_idx] = True
                             successful_regressions += 1
 
+                            # Debug first successful regression
+                            if successful_regressions == 1:
+                                print(f"      First successful regression at [{lat_idx},{lon_idx}]:")
+                                print(f"        Slope: {slope:.6f}")
+                                print(f"        TAS weather std: {np.std(tas_weather_valid):.6f}")
+                                print(f"        GDP ratio std: {np.std(gdp_ratio_valid):.6f}")
+
                     except Exception as e:
                         # Skip cells where forward model fails
+                        if error_count < 5:  # Print first 5 errors for debugging
+                            print(f"      Error in cell [{lat_idx},{lon_idx}]: {type(e).__name__}: {e}")
+                            error_count += 1
                         continue
 
             print(f"    Successful regressions: {successful_regressions}/{np.sum(valid_mask)}")
@@ -798,6 +809,10 @@ def calculate_weather_gdp_regression_slopes(
                 weighted_slopes = regression_slopes * regression_success_mask * gdp_weights
                 total_weight = np.sum(gdp_weights * regression_success_mask)
                 gdp_weighted_mean = np.sum(weighted_slopes) / total_weight if total_weight > 0 else 0.0
+
+                # Debug GDP-weighted mean calculation
+                print(f"    GDP-weighted mean slope: {gdp_weighted_mean:.6f}")
+                print(f"    Slope range: {np.min(regression_slopes[regression_success_mask]):.6f} to {np.max(regression_slopes[regression_success_mask]):.6f}")
             else:
                 gdp_weighted_mean = 0.0
 
@@ -807,6 +822,9 @@ def calculate_weather_gdp_regression_slopes(
             regression_results['gdp_weighted_means'][response_name][target_name] = gdp_weighted_mean
 
     print(f"Weather-GDP regression analysis complete")
+    print(f"Regression results created for {len(regression_results['gdp_weighted_means'])} response functions:")
+    for resp_name, targets in regression_results['gdp_weighted_means'].items():
+        print(f"  {resp_name}: {len(targets)} targets")
     return regression_results
 
 
@@ -934,12 +952,12 @@ def calculate_variability_climate_response_parameters(
     )
 
     # Extract optimized parameters (Step 1 results)
-    step1_parameters = scaled_parameters[:, :, 0, 0, :]  # [lat, lon, n_params]
-    step1_success_mask = convergence_flags[:, :, 0, 0]
+    # scaled_parameters shape: [n_response_functions, n_targets, n_params, nlat, nlon]
+    # Need to transpose to [nlat, nlon, n_params] for indexing as step1_parameters[lat_idx, lon_idx, :]
+    step1_parameters = np.transpose(scaled_parameters[0, 0, :, :, :], (1, 2, 0))  # [nlat, nlon, n_params]
 
     valid_cells = np.sum(valid_mask)
-    step1_success = np.sum(step1_success_mask)
-    print(f"Phase 1 complete: {step1_success}/{valid_cells} successful optimizations")
+    print(f"Phase 1 complete: {valid_cells}/{valid_cells} valid grid cells")
 
     # =================================================================================
     # PHASE 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
@@ -957,12 +975,12 @@ def calculate_variability_climate_response_parameters(
     # Initialize arrays for forward model results
     gdp_forward = np.zeros((len(years), nlat, nlon))
 
-    print(f"Running forward model for {np.sum(step1_success_mask)} grid cells...")
+    print(f"Running forward model for {np.sum(valid_mask)} grid cells...")
 
-    # Run forward model for each successfully optimized grid cell
+    # Run forward model for each valid grid cell
     for lat_idx in range(nlat):
         for lon_idx in range(nlon):
-            if not (valid_mask[lat_idx, lon_idx] and step1_success_mask[lat_idx, lon_idx]):
+            if not valid_mask[lat_idx, lon_idx]:
                 continue
 
             # Extract model parameters for this cell from Step 1
@@ -1009,11 +1027,11 @@ def calculate_variability_climate_response_parameters(
     regression_slopes = np.zeros((nlat, nlon))
     regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
 
-    print(f"Computing y_weather ~ tas_weather regression for {np.sum(step1_success_mask)} cells...")
+    print(f"Computing y_weather ~ tas_weather regression for {np.sum(valid_mask)} cells...")
 
     for lat_idx in range(nlat):
         for lon_idx in range(nlon):
-            if not (valid_mask[lat_idx, lon_idx] and step1_success_mask[lat_idx, lon_idx]):
+            if not valid_mask[lat_idx, lon_idx]:
                 continue
 
             # Extract weather variables for historical period
@@ -1047,7 +1065,7 @@ def calculate_variability_climate_response_parameters(
 
     # Initialize final normalized parameters
     final_parameters = np.zeros_like(step1_parameters)
-    final_success_mask = step1_success_mask & regression_success_mask
+    final_success_mask = valid_mask & regression_success_mask
 
     for lat_idx in range(nlat):
         for lon_idx in range(nlon):
@@ -1063,9 +1081,9 @@ def calculate_variability_climate_response_parameters(
 
     print(f"\n4-phase calibration summary:")
     print(f"  Valid grid cells: {valid_cells}")
-    print(f"  Phase 1 success: {step1_success}")
-    print(f"  Phase 3 success: {regression_success}")
-    print(f"  Final success: {final_success}")
+    print(f"  Phase 1 optimizations: {valid_cells} (all valid cells)")
+    print(f"  Phase 3 regressions: {regression_success}")
+    print(f"  Final calibrated cells: {final_success}")
 
     return final_parameters
 

@@ -44,14 +44,15 @@ from coin_ssp_netcdf import (
 )
 from coin_ssp_reporting import (
     create_target_gdp_visualization, create_baseline_tfp_visualization, create_scaling_factors_visualization,
-    create_objective_function_visualization,
+    create_objective_function_visualization, create_regression_slopes_visualization,
     create_forward_model_visualization, create_forward_model_maps_visualization,
     create_forward_model_ratio_visualization, print_gdp_weighted_scaling_summary,
     get_ssp_data, get_grid_metadata
 )
 from coin_ssp_core import (
     optimize_climate_response_scaling, calculate_coin_ssp_forward_model,
-    calculate_variability_climate_response_parameters, calculate_variability_scaling_parameters, process_response_target_optimization
+    calculate_variability_climate_response_parameters, calculate_variability_scaling_parameters, process_response_target_optimization,
+    calculate_weather_gdp_regression_slopes
 )
 from model_params_factory import ModelParamsFactory
 
@@ -690,7 +691,6 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Calculate weather-GDP regression slopes for all response functions
     print("\nCalculating weather-GDP regression slopes...")
-    from coin_ssp_core import calculate_weather_gdp_regression_slopes
     regression_results = calculate_weather_gdp_regression_slopes(
         all_data, config, response_scalings, tfp_results, scaling_results
     )
@@ -700,7 +700,6 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Generate regression slopes visualization
     print("Generating regression slopes visualization...")
-    from coin_ssp_reporting import create_regression_slopes_visualization
     regression_viz_path = create_regression_slopes_visualization(scaling_results, config, output_dir, all_data)
     if regression_viz_path:
         print(f"✅ Regression slopes visualization saved: {regression_viz_path}")
@@ -831,7 +830,7 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                             continue
                         
                         # Check if scaling factor optimization was successful for this combination
-                        if np.isnan(scaling_factors[lat_idx, lon_idx, response_idx, target_idx]):
+                        if np.isnan(scaling_factors[response_idx, target_idx, lat_idx, lon_idx]):
                             continue
                             
                         total_forward_runs += 1
