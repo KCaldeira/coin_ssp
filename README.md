@@ -13,6 +13,205 @@ COIN_SSP processes gridded NetCDF climate and economic data to quantify how clim
 - **Spatial Processing**: Grid cell-level optimization and forward modeling
 - **Scenario Support**: Multiple SSP economic scenarios and climate projections
 
+## Function Calling Tree
+
+The COIN_SSP pipeline follows a structured calling hierarchy organized into five main processing steps. Understanding this structure is essential for navigating the codebase.
+
+### Pipeline Entry Points
+
+**`main.py`** - Single configuration execution
+- `run_pipeline()` → Main execution orchestrator that coordinates all 5 processing steps
+
+**`workflow_manager.py`** - Multi-stage workflow orchestration
+- `WorkflowManager` → Three-stage pipeline manager for parameter sensitivity analysis
+  - `run_stage1()` → Individual response function assessments (6-12 separate runs)
+  - `analyze_stage1_results()` → Extract GDP-weighted parameter means from Stage 1 CSV outputs
+  - `generate_stage2_config()` → Create multi-variable configuration combining best parameters
+  - `run_stage3()` → Execute final simulations with combined response functions
+
+### Data Loading and Preprocessing
+
+Called at pipeline initialization before Step 1:
+
+**`load_all_data()`** → **[coin_ssp_utils.py]**
+- Loads and concatenates all NetCDF input files (climate, GDP, population)
+- Returns unified `all_data` dictionary used throughout pipeline
+- Sub-functions:
+  - `load_and_concatenate_climate_data()` → Loads temperature/precipitation from historical + SSP files
+  - `load_and_concatenate_pop_data()` → Loads population from historical + SSP files
+  - `load_and_concatenate_gdp_data()` → Loads GDP density from SSP-specific files
+  - `resolve_netcdf_filepath()` → Resolves file paths using configured prefixes
+  - `get_grid_metadata()` → Extracts spatial/temporal coordinates from NetCDF files
+
+**`calculate_weather_vars()`** → **[coin_ssp_utils.py]**
+- Computes weather variability components (LOESS-filtered climate signals)
+- Separates short-term variability from long-term climate trends
+- Sub-functions:
+  - `apply_time_series_filter()` → **[coin_ssp_math_utils.py]** LOESS filtering with 30-year window
+  - `calculate_area_weights()` → **[coin_ssp_math_utils.py]** Cosine-latitude weighting
+
+### Step 1: Target GDP Changes
+
+**`step1_calculate_target_gdp_changes()`** → **[main.py]**
+- Calculates spatial patterns of target GDP reductions that optimization will try to achieve
+- Supports multiple target types: constant, linear, quadratic temperature relationships
+- Called once per pipeline run using reference SSP
+
+Key functions:
+- `calculate_all_target_reductions()` → **[coin_ssp_target_calculations.py]**
+  - Computes target reduction patterns for all configured GDP targets
+  - Sub-functions:
+    - `calculate_constant_target_reduction()` → Uniform spatial targets (e.g., -5% everywhere)
+    - `calculate_linear_target_reduction()` → Temperature-dependent linear targets
+    - `calculate_quadratic_target_reduction()` → Temperature-dependent quadratic targets
+- `save_step1_results_netcdf()` → **[coin_ssp_netcdf.py]**
+  - Writes target patterns to NetCDF with full metadata
+- `create_target_gdp_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates PDF maps showing spatial distribution of targets
+
+**Outputs:**
+- `step1_{json_id}_{model}_{ssp}_target_gdp.nc` (~220 KB)
+- `step1_{json_id}_{model}_{ssp}_target_gdp_visualization.pdf` (~125 KB)
+
+### Step 2: Baseline TFP
+
+**`step2_calculate_baseline_tfp()`** → **[main.py]**
+- Calculates baseline economic variables (TFP, capital) without any climate effects
+- Provides counterfactual "what growth would be without climate change"
+- Called once per SSP scenario (typically 1-2 SSPs)
+
+Key functions:
+- `calculate_tfp_coin_ssp()` → **[coin_ssp_core.py]**
+  - Runs Solow-Swan growth model with zero climate response parameters
+  - Sub-functions:
+    - `calculate_coin_ssp_forward_model()` → Core economic model integration
+      - Solves differential equations for capital accumulation
+      - Computes TFP from GDP, capital, and population
+      - Returns time series of economic variables
+- `save_step2_results_netcdf()` → **[coin_ssp_netcdf.py]**
+  - Writes baseline TFP and capital to NetCDF
+- `create_baseline_tfp_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates PDF time series plots and percentile analysis
+
+**Outputs:**
+- `step2_{json_id}_{model}_{ssp}_baseline_tfp.nc` (~30 MB per SSP)
+- `step2_{json_id}_{model}_baseline_tfp_visualization.pdf` (~470 KB)
+
+### Step 3: Scaling Factor Optimization
+
+**`step3_calculate_scaling_factors_per_cell()`** → **[main.py]**
+- Most computationally expensive step (~5-10 minutes for full grid)
+- Optimizes scaling factors for each grid cell to match target GDP patterns
+- Processes all combinations of response functions × GDP targets
+- Uses reference SSP only for calibration
+
+Key functions:
+
+**For damage-type targets:**
+- `process_response_target_optimization()` → **[coin_ssp_core.py]**
+  - Loops over all grid cells running optimization for each
+  - Sub-functions:
+    - `optimize_climate_response_scaling()` → Per-grid-cell constrained optimization
+      - Uses scipy.optimize.minimize with constraint satisfaction
+      - Objective: minimize squared error between simulated and target GDP
+      - Calls `calculate_coin_ssp_forward_model()` repeatedly during optimization
+      - Returns scaling factor that best matches target for this grid cell
+
+**For variability-type targets:**
+- `calculate_variability_climate_response_parameters()` → **[coin_ssp_core.py]** (NEW December 2025)
+  - 4-step calibration process for variability targets:
+    1. **Phase 1**: Optimize for uniform 10% GDP loss (establishes baseline strength)
+    2. **Phase 2**: Run forward model with weather components to isolate variability effects
+    3. **Phase 3**: Compute regression slopes (GDP_weather ~ TAS_weather) over historical period
+    4. **Phase 4**: Normalize parameters by regression slope to match observed sensitivity
+  - Returns calibrated parameters for all response functions
+  - Outputs per-response-function regression slope statistics to CSV
+
+- `calculate_variability_scaling_parameters()` → **[coin_ssp_core.py]**
+  - Applies variability parameters with target-specific scaling
+
+**Analysis and reporting:**
+- `calculate_weather_gdp_regression_slopes()` → **[coin_ssp_core.py]**
+  - Analyzes historical weather-GDP relationships for all response functions
+  - Computes regression slopes for each grid cell
+  - Returns GDP-weighted statistics
+- `save_step3_results_netcdf()` → **[coin_ssp_netcdf.py]**
+  - Writes scaling factors, parameters, convergence flags to NetCDF
+- `create_scaling_factors_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates PDF maps of optimized scaling factors
+- `create_objective_function_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates PDF maps of optimization errors
+- `create_regression_slopes_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates PDF maps of weather-GDP regression slopes
+- `print_gdp_weighted_scaling_summary()` → **[coin_ssp_reporting.py]**
+  - Computes and writes GDP-weighted statistics to CSV
+- `write_variability_calibration_summary()` → **[coin_ssp_reporting.py]**
+  - Writes per-response-function variability calibration results to CSV
+
+**Outputs:**
+- `step3_{json_id}_{model}_{ssp}_scaling_factors.nc` (~3-6 MB)
+- `step3_{json_id}_{model}_{ssp}_scaling_factors_summary.csv` (~1-2 KB)
+- `step3_{json_id}_{model}_{ssp}_variability_calibration_summary.csv` (~1 KB, if variability targets exist)
+- `step3_{json_id}_{model}_{ssp}_scaling_factors_visualization.pdf` (~700 KB)
+- `step3_{json_id}_{model}_{ssp}_objective_function_visualization.pdf` (~700 KB)
+- `step3_{json_id}_{model}_{ssp}_regression_slopes_visualization.pdf` (~460 KB)
+
+### Step 4: Forward Integration
+
+**`step4_forward_integration_all_ssps()`** → **[main.py]**
+- Runs forward model for all configured SSP scenarios using calibrated parameters
+- Generates climate-integrated economic projections (GDP, capital, TFP)
+- Only executed if `forward_simulation_ssps` specified in configuration
+
+Key functions:
+- `calculate_coin_ssp_forward_model()` → **[coin_ssp_core.py]**
+  - Core Solow-Swan model with climate response functions applied
+  - Called for every grid cell × response function × target × SSP combination
+  - Uses calibrated scaling factors from Step 3
+- `save_step4_results_netcdf_split()` → **[coin_ssp_netcdf.py]**
+  - Writes separate NetCDF files for each SSP and variable type
+  - Files: `step4_{json_id}_{model}_{ssp}_forward_{gdp|tfp|capital}.nc`
+- `create_forward_model_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates time series line plots comparing scenarios
+- `create_forward_model_maps_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates spatial impact maps (both linear and log10 scales)
+- `create_forward_model_ratio_visualization()` → **[coin_ssp_reporting.py]**
+  - Generates ratio maps (climate/weather effects)
+
+**Outputs:**
+- `step4_{json_id}_{model}_{ssp}_forward_{variable}.nc` (~65-70 MB per SSP×variable)
+- `step4_{json_id}_{model}_forward_model_lineplots.pdf` (~55-125 KB)
+- `step4_{json_id}_{model}_forward_model_maps.pdf` (~900 KB - 2.6 MB)
+- `step4_{json_id}_{model}_forward_model_maps_log10.pdf` (~900 KB - 2.7 MB)
+- `step4_{json_id}_{model}_forward_model_ratios.pdf` (~70-180 KB)
+
+### Step 5: Processing Summary
+
+**`step5_processing_summary()`** → **[main.py]**
+- Prints final statistics and timing information
+- Currently minimal - placeholder for future summary analysis
+
+### Utility Functions
+
+**Mathematical Operations** → **[coin_ssp_math_utils.py]**
+- `calculate_global_mean()` → Area-weighted spatial averages with masking
+- `calculate_area_weights()` → Cosine-latitude area weighting
+- `calculate_zero_biased_range()` → Visualization range calculation (extends to include zero)
+- `calculate_time_means()` → Temporal averaging over specified periods
+- `apply_loess_divide()` → LOESS smoothing and ratio calculation
+- `apply_time_series_filter()` → LOESS filtering for weather component extraction
+
+**Data I/O Operations** → **[coin_ssp_netcdf.py]**
+- `create_serializable_config()` → Converts config dict to JSON-safe format for NetCDF attributes
+- `extract_year_coordinate()` → Extracts time coordinates from NetCDF files
+- `interpolate_to_annual_grid()` → Temporal interpolation to annual resolution
+- `resolve_netcdf_filepath()` → Constructs file paths using configured prefixes and naming conventions
+
+**Visualization Utilities** → **[coin_ssp_reporting.py]**
+- `get_adaptive_subplot_layout()` → Calculates optimal subplot arrangement based on number of targets
+- `add_extremes_info_box()` → Adds min/max value boxes to map visualizations
+- All visualization functions use consistent styling and adaptive layouts
+
 ## Installation
 
 ```bash
@@ -36,616 +235,62 @@ python main.py coin_ssp_config_0008.json
 python main.py coin_ssp_config_0008.json --step3-file previous_step3_results.nc
 ```
 
-**Multi-Stage Workflow (NEW):**
+**Multi-Stage Workflow:**
 ```bash
 # Full 3-stage workflow: parameter assessment → analysis → multi-variable simulation
 python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json
 
 # Start from specific stage
-python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 2 --stage1-output ./output_integrated_CanESM5_20231201/
-python workflow_manager.py coin_ssp_config_parameter_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 3 --stage2-config ./configs/stage2_generated_config.json
-
-# Custom configurations
-python workflow_manager.py custom_sensitivity.json custom_template.json --config-dir ./my_configs
+python workflow_manager.py config_sensitivity.json config_template.json --start-stage 2 --stage1-output ./output_dir/
+python workflow_manager.py config_sensitivity.json config_template.json --start-stage 3 --stage2-config ./configs/stage2_generated.json
 ```
 
-### Processing Steps
+### Processing Steps Overview
 1. **Target GDP Changes**: Calculate spatially-explicit economic impact targets
 2. **Baseline TFP**: Compute total factor productivity without climate effects
 3. **Scaling Optimization**: Per-grid-cell parameter calibration for response functions
 4. **Forward Integration**: Climate-integrated economic projections for all SSPs
 5. **Summary Generation**: Aggregate results and visualization
 
-### Variability Scaling
-The model now supports **temperature-dependent climate sensitivity** where economic impacts scale with local temperature:
-
-- **Mathematical Form**: `g(T) = g0 + g1*T + g2*T²`
-- **Implementation**: Added g0, g1, g2 parameters to ModelParams (defaults: 1.0, 0.0, 0.0)
-- **Backward Compatibility**: Default values preserve existing behavior for damage targets
-
-#### Variability Calibration (NEW - December 2025)
-**Status: Implementation Complete, Ready for Testing**
-
-The `calculate_variability_climate_response_parameters` function now implements a sophisticated 4-step calibration process:
-
-1. **Optimization**: Find scaling factors for uniform 10% GDP loss in target period
-2. **Forward Simulation**: Run economic projections with calibrated parameters
-3. **Regression Analysis**: Quantify historical weather-GDP relationship (`log(y_weather) ~ tas_weather`)
-4. **Parameter Normalization**: Scale parameters by observed weather sensitivity
-
-This approach ensures variability targets are calibrated to both the desired impact magnitude AND the actual historical relationship between weather variability and economic fluctuations.
-
 ## Configuration
 
-JSON configuration files control all aspects of the COIN_SSP processing pipeline. Below are all available parameters organized by configuration section:
+See the full README for detailed configuration documentation. Key sections:
+- `run_metadata`: Identifies the configuration
+- `climate_model`: NetCDF file patterns and variable names
+- `ssp_scenarios`: Reference and forward SSP scenarios
+- `time_periods`: Reference, historical, target, and prediction periods
+- `gdp_targets`: Economic impact targets (damage or variability types)
+- `model_params`: Solow-Swan model parameters
+- `response_function_scalings`: Climate response function configurations
 
-### `run_metadata` (Required)
-Identifies the configuration for file naming and reproducibility:
-- **`json_id`** (string): Unique identifier used in output filenames
-- **`run_name`** (string): Descriptive name for this model run
-- **`description`** (string): Detailed description of the experiment
-- **`created_date`** (string): Creation date for tracking
+## Output Structure
 
-### `climate_model` (Required)
-Specifies NetCDF file patterns and variable names:
-- **`model_name`** (string): Climate model identifier (e.g., "CanESM5")
-- **`input_directory`** (string): Base directory for input data files
-- **`file_prefixes`** (object): File naming patterns for each data type
-  - `tas_file_prefix`: Temperature data file prefix
-  - `pr_file_prefix`: Precipitation data file prefix
-  - `gdp_file_prefix`: GDP data file prefix
-  - `pop_file_prefix`: Population data file prefix
-  - `target_reductions_file_prefix`: Target GDP amounts file prefix (optional)
-- **`variable_names`** (object): NetCDF variable names within files
-  - `tas_var_name`: Temperature variable name (default: "tas")
-  - `pr_var_name`: Precipitation variable name (default: "pr")
-  - `gdp_var_name`: GDP variable name (default: "gdp_density")
-  - `pop_var_name`: Population variable name (default: "pop_density")
-
-File naming convention: `{prefix}_{model_name}_historical.nc`, `{prefix}_{model_name}_{ssp}.nc`
-
-### `ssp_scenarios` (Required)
-Controls which SSP scenarios are processed:
-- **`reference_ssp`** (string): SSP used for optimization and calibration (e.g., "ssp245")
-- **`forward_simulation_ssps`** (array): List of SSPs for forward projections (e.g., ["ssp245", "ssp585"])
-
-### `time_periods` (Required)
-Defines temporal windows for different calculations:
-- **`reference_period`** (object): Zero-climate change baseline period
-  - `start_year`: Start year (e.g., 1861)
-  - `end_year`: End year (e.g., 1910)
-  - `description`: Human-readable description
-- **`historical_period`** (object): Historical period for variability calibration
-  - `start_year`: Start year (e.g., 1861)
-  - `end_year`: End year (e.g., 2014)
-  - `description`: Human-readable description
-- **`target_period`** (object): Period for impact assessment
-  - `start_year`: Start year (e.g., 2080)
-  - `end_year`: End year (e.g., 2100)
-  - `description`: Human-readable description
-- **`prediction_period`** (object): Forward model projection period
-  - `start_year`: Start year (e.g., 2015)
-  - `end_year`: End year (e.g., 2100)
-  - `description`: Human-readable description
-
-### `gdp_targets` (Required Array)
-Defines economic impact targets for optimization. Each target object contains:
-- **`target_name`** (string): Unique identifier for this target
-- **`target_shape`** (string): Spatial pattern type
-  - `"constant"`: Uniform reduction across all grid cells
-  - `"linear"`: Linear relationship with temperature
-  - `"quadratic"`: Quadratic relationship with temperature
-- **`target_type`** (string): Impact mechanism type
-  - `"damage"`: Direct economic damage in target period
-  - `"variability"`: GDP variability scaling with climate variability
-- **`global_mean_amount`** (number): Target global mean amount (negative for damage, e.g., -0.05 for 5% reduction; for variability targets, fractional change per °C)
-- **`description`** (string): Human-readable description
-
-For linear targets, additional parameters:
-- **`reference_temperature`** (number): Reference temperature for scaling
-- **`amount_at_reference_temp`** (number): GDP amount at reference temperature
-
-For quadratic targets, additional parameters:
-- **`zero_amount_temperature`** (number): Temperature where impact is zero
-- **`derivative_at_zero_amount_temperature`** (number): Slope at zero temperature
-
-### `model_params` (Required)
-Core Solow-Swan economic model parameters:
-- **`s`** (number): Savings rate (typically 0.3)
-- **`alpha`** (number): Capital elasticity (typically 0.3)
-- **`delta`** (number): Depreciation rate (typically 0.1)
-
-*Note: Baseline temperature (`tas0`) and precipitation (`pr0`) are automatically computed from climate data during the reference period and do not need to be specified in the configuration.*
-
-Climate response parameters (typically 0.0 for base model):
-- **`k_tas1`** (number): Capital linear temperature response
-- **`k_tas2`** (number): Capital quadratic temperature response
-- **`k_pr1`** (number): Capital linear precipitation response
-- **`k_pr2`** (number): Capital quadratic precipitation response
-- **`tfp_tas1`** (number): TFP linear temperature response
-- **`tfp_tas2`** (number): TFP quadratic temperature response
-- **`tfp_pr1`** (number): TFP linear precipitation response
-- **`tfp_pr2`** (number): TFP quadratic precipitation response
-- **`y_tas1`** (number): Output linear temperature response
-- **`y_tas2`** (number): Output quadratic temperature response
-- **`y_pr1`** (number): Output linear precipitation response
-- **`y_pr2`** (number): Output quadratic precipitation response
-
-### `response_function_scalings` (Required Array)
-Defines response function configurations for optimization. Each scaling object contains:
-- **`scaling_name`** (string): Unique identifier for this response function
-- **`description`** (string): Human-readable description
-- Climate response parameter overrides (any subset of the parameters from `model_params`):
-  - `k_tas1`, `k_tas2`, `k_pr1`, `k_pr2`: Capital stock responses
-  - `tfp_tas1`, `tfp_tas2`, `tfp_pr1`, `tfp_pr2`: Total factor productivity responses
-  - `y_tas1`, `y_tas2`, `y_pr1`, `y_pr2`: Direct output responses
-
-Example configurations:
-```json
-{
-  "scaling_name": "output_linear",
-  "description": "Linear temperature sensitivity for output",
-  "y_tas1": 1.0
-},
-{
-  "scaling_name": "capital_quadratic",
-  "description": "Quadratic temperature sensitivity for capital",
-  "k_tas2": 1.0
-}
+Results are organized in timestamped directories:
 ```
-
-### `processing_options` (Optional)
-Advanced processing control options:
-- **`grid_cell_processing`** (object): Grid processing settings
-  - `enabled`: Enable/disable grid cell processing
-  - `parallel_processing`: Enable parallel processing
-  - `chunk_size`: Number of cells to process in each chunk
-- **`output_formats`** (object): Control output file generation
-  - `netcdf`: Generate NetCDF output files
-  - `csv`: Generate CSV summary files
-  - `pdf_maps`: Generate PDF maps
-  - `pdf_line_plots`: Generate PDF time series plots
-- **`validation`** (object): Validation and checking options
-  - `constraint_verification`: Verify optimization constraints
-  - `economic_bounds_check`: Check economic parameter bounds
-  - `temperature_damage_relationship`: Validate temperature-damage relationships
-
-### `output_configuration` (Optional)
-Output file naming and organization:
-- **`output_directory`** (string): Base output directory path
-- **`filename_patterns`** (object): Template patterns for output files
-- **`include_timestamp`** (boolean): Include timestamps in filenames
-
-**Example Configuration:**
-```json
-{
-  "run_metadata": {
-    "json_id": "0008",
-    "run_name": "CanESM5_scale-linear-impacts-test",
-    "description": "5% and 10% linear damage test",
-    "created_date": "2025-09-21"
-  },
-  "climate_model": {
-    "model_name": "CanESM5",
-    "input_directory": "data/input",
-    "file_prefixes": {
-      "tas_file_prefix": "CLIMATE",
-      "pr_file_prefix": "CLIMATE",
-      "gdp_file_prefix": "GDP",
-      "pop_file_prefix": "POP"
-    }
-  },
-  "gdp_targets": [
-    {
-      "target_name": "const_5%",
-      "target_shape": "constant",
-      "target_type": "damage",
-      "global_mean_amount": -0.05
-    }
-  ]
-}
+data/output/output_{model}_{timestamp}/{json_id}_{timestamp}/
+├── coin_ssp_config_{json_id}.json (configuration copy)
+├── all_loaded_data_{json_id}_{model}.nc (all input data)
+├── step1_{json_id}_{model}_{ssp}_target_gdp.* (target patterns)
+├── step2_{json_id}_{model}_{ssp}_baseline_tfp.* (baseline economics)
+├── step3_{json_id}_{model}_{ssp}_scaling_factors.* (optimization results)
+├── step3_{json_id}_{model}_{ssp}_*_summary.csv (GDP-weighted statistics)
+└── step4_{json_id}_{model}_{ssp}_forward_*.* (climate projections, if configured)
 ```
 
 ## Key Features
 
 ✅ **Production Ready**: Complete 5-step processing pipeline
-✅ **Adaptive Optimization**: Automatic bounds expansion when hitting optimization limits
-✅ **Weather Variables**: Pre-computed LOESS-filtered climate variability
-✅ **Variability Targets**: Support for both damage and variability target types
+✅ **Adaptive Optimization**: Automatic bounds expansion when hitting limits
+✅ **Variability Calibration**: 4-step algorithm for variability-type targets
+✅ **Weather Analysis**: Pre-computed LOESS-filtered climate variability
 ✅ **Fail-Fast Design**: Clean error handling without defensive programming
 ✅ **Comprehensive Visualization**: Multi-page PDFs with adaptive layouts
 
-## Output Files
-
-Results are organized in a hierarchical directory structure:
-```
-data/output/
-└── output_{model_name}_{timestamp}/
-    └── {json_id}_{timestamp}/
-        ├── Configuration and Input Data
-        ├── Step 1: Target GDP Patterns
-        ├── Step 2: Baseline Economic Variables
-        ├── Step 3: Scaling Factor Optimization
-        └── Step 4: Forward Model Projections (if forward SSPs configured)
-```
-
-### Configuration and Input Data
-
-**`coin_ssp_config_{json_id}.json`** (4-6 KB)
-- Copy of the input configuration file used for this run
-- Ensures complete reproducibility of results
-- Contains all model parameters, SSP scenarios, target definitions, and processing options
-
-**`all_loaded_data_{json_id}_{model_name}.nc`** (~60 MB)
-- Complete gridded input dataset for the entire workflow
-- **Dimensions**: `[ssp, time, lat, lon]` where time=240 years (1861-2100), lat=64, lon=128
-- **Variables**:
-  - `tas(ssp,time,lat,lon)`: Surface air temperature [°C]
-  - `pr(ssp,time,lat,lon)`: Precipitation rate [mm/day]
-  - `gdp(ssp,time,lat,lon)`: GDP density [economic units]
-  - `pop(ssp,time,lat,lon)`: Population density [people]
-  - `valid_mask(lat,lon)`: Boolean mask for economic grid cells (GDP>0 and Pop>0)
-- Pre-processed with exponential growth assumptions and weather variables (LOESS-filtered)
-
-### Step 1: Target GDP Patterns
-
-**`step1_{json_id}_{model_name}_{ssp}_target_gdp.nc`** (~220 KB)
-- Spatial patterns of target GDP reductions for optimization constraints
-- **Dimensions**: `[target_name, lat, lon]`
-- **Variables**:
-  - `target_gdp_amounts(target_name,lat,lon)`: Target reduction patterns [fractional reduction]
-  - `tas_ref(lat,lon)`: Reference period temperature [°C]
-  - `gdp_target(lat,lon)`: Target period GDP [economic units]
-- **Global Attributes**: Reference/target periods, global means, complete configuration JSON
-
-**`step1_{json_id}_{model_name}_{ssp}_target_gdp_visualization.pdf`** (~125 KB)
-- **Pages**: 1 page per GDP target pattern
-- **Content**: Global maps showing spatial distribution of target GDP reductions
-- Color scale: Red=negative impacts, Blue=positive, White=zero
-- Includes GDP-weighted statistics and temperature relationship plots
-
-### Step 2: Baseline Economic Variables
-
-**`step2_{json_id}_{model_name}_{ssp}_baseline_tfp.nc`** (~30 MB)
-- Baseline economic variables without climate effects (Solow-Swan model)
-- **Dimensions**: `[ssp, time, lat, lon]` where time=240 years (1861-2100)
-- **Variables**:
-  - `tfp_baseline(ssp,time,lat,lon)`: Total Factor Productivity [normalized to year 0]
-  - `k_baseline(ssp,time,lat,lon)`: Capital stock [normalized to year 0]
-  - `valid_mask(ssp,lat,lon)`: Valid economic grid cells
-- Used as baseline for what economic growth would be in the absence of weather variability or climate change
-
-### Step 3: Scaling Factor Optimization
-
-**`step3_{json_id}_{model_name}_{ssp}_scaling_factors.nc`** (~5.6 MB)
-- Per-grid-cell optimization results for climate response scaling factors
-- **Dimensions**: `[response_func, target, lat, lon, param]` where response_func=6, target=1, param=12
-- **Variables**:
-  - `scaling_factors(response_func,target,lat,lon)`: Optimized scaling factors [dimensionless]
-  - `optimization_errors(response_func,target,lat,lon)`: Final objective function values
-  - `convergence_flags(response_func,target,lat,lon)`: Boolean optimization success flags
-  - `scaled_parameters(response_func,target,param,lat,lon)`: Final climate response parameters
-- **Parameter names**: k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2
-
-**`step3_{json_id}_{model_name}_{ssp}_scaling_factors_summary.csv`** (~1.5 KB)
-- GDP-weighted global statistics for each response function × target combination
-- **Columns**: target_name, response_function, gdp_weighted_mean, gdp_weighted_median, scaling_max, scaling_min, obj_func_statistics, 12 parameter columns
-- Used for Stage 2 multi-variable configuration generation
-
-**`step3_{json_id}_{model_name}_{ssp}_scaling_factors_visualization.pdf`** (~720 KB)
-- **Pages**: 1 page per response function (6 pages for parameter sensitivity)
-- **Content**: Global maps of optimized scaling factors for each response function
-- Shows spatial heterogeneity in climate sensitivity required to achieve target impacts
-
-**`step3_{json_id}_{model_name}_{ssp}_objective_function_visualization.pdf`** (~680 KB)
-- **Pages**: 1 page per response function (6 pages for parameter sensitivity)
-- **Content**: Global maps of final optimization objective function values
-- Lower values indicate better constraint satisfaction (closer to target GDP patterns)
-
-### Step 4: Forward Model Projections (Optional)
-
-Generated only when `forward_simulation_ssps` are specified in configuration:
-
-**`step4_{json_id}_{model_name}_forward_results.nc`**
-- Economic projections under climate change for all forward SSP scenarios
-- **Dimensions**: `[ssp, response_func, target, time, lat, lon]`
-- **Variables**: GDP, capital, TFP time series with climate effects applied
-
-**`step4_{json_id}_{model_name}_*_visualization.pdf`**
-- Time series plots and maps showing economic projections
-- Separate PDFs for different visualization types (maps, ratios, linear/log scales)
-
-## Multi-Variable Workflow Output (Stage 3)
-
-When using the 3-stage workflow manager, Stage 3 generates **multi-variable response functions** by combining individual parameter estimates from Stage 1. The output structure is identical to individual runs but with key differences:
-
-### Configuration
-
-**`coin_ssp_config_stage2_generated_{timestamp}.json`** (~6.5 KB)
-- **Generated configuration** combining Stage 1 results with template specifications
-- **Multi-variable response functions** (12 combinations instead of 6 individual)
-- **Response function examples**:
-  - `output_linear`: Pure linear temperature effects on output (`y_tas1: 1.0`)
-  - `output_quadratic`: Combined linear+quadratic (`y_tas1: 0.975, y_tas2: 0.025`)
-  - `y+k_linear`: Linear effects on both output and capital (`y_tas1: 0.708, k_tas1: 0.292`)
-  - `y+k+tfp_quadratic`: Complex multi-pathway response with both linear and quadratic terms
-- **Forward SSP scenarios**: Typically includes both SSP245 and SSP585 for projections
-
-### Enhanced Step 2 Outputs
-
-**`step2_{json_id}_{model_name}_baseline_tfp_visualization.pdf`** (~470 KB)
-- **Baseline TFP visualization** (not generated in individual runs)
-- Time series and spatial patterns of economic variables without climate effects
-
-**`step2_{json_id}_{model_name}_{ssp}_baseline_tfp_extremes.csv`** (~28 KB each)
-- **Statistical summaries** of baseline economic variables
-- Generated for each forward SSP scenario
-- Extreme value analysis for model validation
-
-### Complete Step 4 Forward Projections
-
-**`step4_{json_id}_{model_name}_{ssp}_forward_{variable}.nc`** (~65-70 MB each)
-- **Economic projections** for each SSP scenario and variable type
-- **Variables**: `gdp`, `capital`, `tfp` (3 files per SSP)
-- **Dimensions**: `[target, response_func, time, lat, lon]` where response_func=12, time=240
-- **Contents**:
-  - `{variable}_climate(target,response_func,time,lat,lon)`: Full climate effects
-  - `{variable}_weather(target,response_func,time,lat,lon)`: Weather variability only
-  - Complete time series from 1861-2100 for all 12 multi-variable response functions
-
-**`step4_{json_id}_{model_name}_forward_model_*.pdf`** (Multiple visualization files)
-- **`forward_model_lineplots.pdf`** (~125 KB): Time series plots of economic variables
-- **`forward_model_maps.pdf`** (~2.6 MB): Spatial maps of economic impacts (linear scale)
-- **`forward_model_maps_log10.pdf`** (~2.7 MB): Spatial maps using log10 scale for extreme values
-- **`forward_model_ratios.pdf`** (~180 KB): Ratio maps comparing scenarios
-
-### Key Differences from Individual Runs
-
-| Aspect | Individual Runs (Stage 1) | Multi-Variable Runs (Stage 3) |
-|--------|---------------------------|-------------------------------|
-| **Response Functions** | 6 individual pathways | 12 combined pathways |
-| **Configuration** | User-defined parameters | Generated from Stage 1 results |
-| **Step 4 Outputs** | Usually skipped (no forward SSPs) | Complete forward projections |
-| **File Sizes** | Smaller (~5-30 MB NetCDF) | Larger (~65-125 MB NetCDF) |
-| **Purpose** | Parameter sensitivity analysis | Integrated impact assessment |
-
-## Data Requirements
-
-- **Climate Data**: Gridded NetCDF temperature/precipitation (historical + projections)
-- **Economic Data**: Gridded NetCDF GDP/population (SSP scenarios)
-- **File Structure**: Standardized naming convention with model/scenario identifiers
-- **Storage**: Files located in `./data/input/` directory
-
-## Recent Updates
-
-- **Variability Calibration Algorithm**: Complete 4-step implementation in `calculate_variability_climate_response_parameters` (December 2025)
-- **Weather-GDP Regression**: New regression analysis linking weather variability to economic impacts
-- **Parameter Normalization**: Climate parameters now normalized by observed historical sensitivity
-- **Weather Variables**: Centralized computation and storage in `all_data` structure
-- **Reference Baselines**: Pre-computed `tas0_2d`/`pr0_2d` climate baselines
-- **Function Signatures**: Simplified parameter lists using `all_data` and `config`
-- **Import Organization**: All imports moved to top of files
-- **Variable Naming**: Consistent `tas`/`pr` climatological conventions
-
-## Architecture
-
-### Core Modules
-- **`coin_ssp_core.py`**: Core economic model and optimization functions
-- **`main.py`**: Integrated 5-step processing pipeline
-- **`workflow_manager.py`**: Multi-stage workflow orchestration for parameter sensitivity analysis (NEW)
-- **`coin_ssp_models.py`**: Data classes and model parameter structures
-
-### Specialized Utility Modules
-- **`coin_ssp_math_utils.py`**: Mathematical utilities and helper functions
-- **`coin_ssp_netcdf.py`**: NetCDF input/output and serialization functions
-- **`coin_ssp_target_calculations.py`**: GDP target reduction calculations
-- **`coin_ssp_reporting.py`**: Visualization and PDF generation functions
-- **`coin_ssp_utils.py`**: Mathematical utilities and data processing functions
-
-### Configuration
-- **JSON-based workflow control**: Unified schema with standardized file naming
-
-## Function Calling Tree
-
-The COIN_SSP pipeline follows a structured calling hierarchy. Below shows the main functions called by `main.py` and the key functions they call (2 levels deep):
-
-### Pipeline Entry Points
-
-**`main.py`** - Single configuration execution
-- `run_pipeline()` → Main execution orchestrator
-
-**`workflow_manager.py`** - Multi-stage workflow orchestration (NEW)
-- `WorkflowManager` → Three-stage pipeline manager
-  - `run_stage1()` → Individual response function assessments
-  - `analyze_stage1_results()` → Extract GDP-weighted parameter means
-  - `generate_stage2_config()` → Create multi-variable configuration
-  - `run_stage3()` → Execute final simulations
-  - `load_config()` → Configuration validation and setup
-  - `setup_output_directory()` → Output directory creation
-  - `load_all_data()` → **[coin_ssp_utils.py]** NetCDF data loading
-    - `resolve_netcdf_filepath()` → File path resolution
-    - `get_grid_metadata()` → Extract spatial/temporal coordinates
-  - `calculate_weather_vars()` → **[coin_ssp_utils.py]** Weather variable computation
-    - `apply_time_series_filter()` → **[coin_ssp_math_utils.py]** LOESS filtering
-    - `calculate_area_weights()` → **[coin_ssp_math_utils.py]** Area weighting
-
-### Processing Steps
-**Step 1: Target GDP Changes**
-- `step1_calculate_target_gdp_changes()`
-  - `calculate_all_target_reductions()` → **[coin_ssp_target_calculations.py]** Target computation
-    - `calculate_constant_target_reduction()` → Uniform spatial targets
-    - `calculate_linear_target_reduction()` → Temperature-dependent targets
-    - `calculate_quadratic_target_reduction()` → Quadratic temperature targets
-  - `save_step1_results_netcdf()` → **[coin_ssp_netcdf.py]** NetCDF output
-  - `create_target_gdp_visualization()` → **[coin_ssp_reporting.py]** PDF generation
-
-**Step 2: Baseline TFP**
-- `step2_calculate_baseline_tfp()`
-  - `calculate_tfp_coin_ssp()` → **[coin_ssp_core.py]** Economic model computation
-    - `calculate_coin_ssp_forward_model()` → Solow-Swan model integration
-  - `save_step2_results_netcdf()` → **[coin_ssp_netcdf.py]** NetCDF output
-  - `create_baseline_tfp_visualization()` → **[coin_ssp_reporting.py]** PDF generation
-
-**Step 3: Scaling Optimization**
-- `step3_calculate_scaling_factors_per_cell()`
-  - `optimize_climate_response_scaling()` → **[coin_ssp_core.py]** Per-grid optimization
-    - `calculate_coin_ssp_forward_model()` → Forward model evaluation
-    - Scipy optimization routines → Constraint satisfaction
-  - `save_step3_results_netcdf()` → **[coin_ssp_netcdf.py]** NetCDF output
-  - `create_scaling_factors_visualization()` → **[coin_ssp_reporting.py]** PDF generation
-
-**Step 4: Forward Integration**
-- `step4_forward_integration_all_ssps()`
-  - `calculate_coin_ssp_forward_model()` → **[coin_ssp_core.py]** Climate-integrated projections
-    - Economic model with calibrated response functions
-  - `save_step4_results_netcdf_split()` → **[coin_ssp_netcdf.py]** Multi-SSP NetCDF output
-  - `create_forward_model_visualization()` → **[coin_ssp_reporting.py]** Time series PDFs
-  - `create_forward_model_maps_visualization()` → **[coin_ssp_reporting.py]** Spatial maps PDFs
-
-**Step 5: Processing Summary**
-- `step5_processing_summary()`
-  - Summary statistics and final diagnostics
-  - `create_forward_model_ratio_visualization()` → **[coin_ssp_utils.py]** Ratio analysis PDFs
-
-### Utility Functions
-**Mathematical Operations** → **[coin_ssp_math_utils.py]**
-- `calculate_global_mean()` → Area-weighted spatial averages
-- `calculate_zero_biased_range()` → Visualization range calculation
-- `calculate_time_means()` → Temporal averaging
-
-**Data I/O Operations** → **[coin_ssp_netcdf.py]**
-- `create_serializable_config()` → JSON metadata for NetCDF
-- `extract_year_coordinate()` → Time coordinate extraction
-- `interpolate_to_annual_grid()` → Temporal interpolation
-
-## Post-Processing Analysis
-
-**`main_postprocess.py`** provides comprehensive analysis of results generated by the main pipeline.
-
-### Purpose
-Analyzes output directories created by `main.py` to extract insights, validate results, and generate additional diagnostics beyond the standard pipeline outputs.
-
-### Usage
-```bash
-# Analyze complete pipeline output
-python main_postprocess.py /path/to/output_integrated_CanESM5_20250919_123456/
-
-# Filter analysis to specific SSPs
-python main_postprocess.py output_dir/ --ssps ssp245 ssp585
-```
-
-### Key Functions
-- **`validate_output_directory()`** → Verify required files exist
-- **`obtain_configuration_information()`** → Extract metadata from results
-- **`analysis_tas_gdp_correlations()`** → Temperature-GDP relationship analysis
-- **`run_all_analyses()`** → Execute complete analysis suite
-
-### Analysis Types
-1. **Correlation Analysis**: Temperature-GDP relationships across grid cells and time
-2. **Statistical Validation**: Model performance and constraint satisfaction metrics
-3. **Sensitivity Analysis**: Response function parameter effectiveness
-4. **Comparative Analysis**: Multi-SSP scenario comparisons
-
-### Output
-- **Analysis reports**: Statistical summaries and validation metrics
-- **Diagnostic plots**: Enhanced visualizations for model validation
-- **CSV exports**: Detailed numerical results for further analysis
-
-The post-processing framework is designed to be modular and extensible, allowing researchers to add custom analysis functions for specific research questions.
-
-## Multi-Stage Workflow Analysis
-
-**`workflow_manager.py`** provides a sophisticated three-stage pipeline for parameter sensitivity analysis and multi-variable response function development.
-
-### Workflow Stages
-
-**Stage 1: Parameter Sensitivity Assessment**
-- Runs individual response function configurations (e.g., y_tas1, k_tas2, tfp_tas1 separately)
-- Uses `coin_ssp_config_parameter_sensitivity.json` as the default configuration
-- Generates individual parameter assessments for each grid cell
-- Outputs: Individual response function results for each economic pathway
-
-**Stage 2: Analysis and Configuration Generation**
-- Analyzes Stage 1 results to extract GDP-weighted global parameter means
-- Calculates optimal parameter ratios based on target economic impacts
-- Generates new configuration file for multi-variable simulations
-- Implements the approach described in METHODS.md Section 7.4
-- Outputs: Stage 2 configuration file with multi-variable response functions
-
-**Stage 3: Multi-Variable Simulations**
-- Executes final simulations using generated configuration from Stage 2
-- Combines multiple response pathways (output, capital, TFP) with optimal ratios
-- Produces results for complex multi-variable climate response scenarios
-- Outputs: Complete economic projections with combined response functions
-
-### Key Features
-- **Flexible execution**: Start from any stage, skip completed stages
-- **Automatic file management**: Handles directory creation and file passing between stages
-- **GDP-weighted analysis**: Uses economic data to weight parameter averaging
-- **Reproducible workflows**: All generated configurations are saved for transparency
-- **Error handling**: Robust subprocess management and validation
-
-### Usage Patterns
-```bash
-# Development workflow - test individual parameters first
-python workflow_manager.py test_sensitivity.json coin_ssp_config_response_functions_template.json
-
-# Production workflow - generate multi-variable scenarios
-python workflow_manager.py production_sensitivity.json coin_ssp_config_response_functions_template.json
-
-# Analysis workflow - analyze existing results
-python workflow_manager.py production_sensitivity.json coin_ssp_config_response_functions_template.json --start-stage 2 --stage1-output ./results/sensitivity_run_20231201/
-```
-
-### Running Stage 2 in Isolation
-
-Stage 2 can be run independently to generate multi-variable configurations from existing Stage 1 results:
-
-```bash
-# Run Stage 2 configuration generator
-python stage2_config_generator.py
-```
-
-**Prerequisites:**
-- Completed Stage 1 results with `step3_*_scaling_factors_summary.csv` file
-- Template configuration file: `coin_ssp_config_response_functions_template.json`
-- Base configuration file for copying non-scaling settings
-
-**Key Files:**
-- **Input**: Stage 1 output directory containing CSV results
-- **Template**: `coin_ssp_config_response_functions_template.json` (defines response function ratios)
-- **Output**: `coin_ssp_config_stage3_generated.json` (ready for Stage 3 execution)
-
-**Workflow:**
-1. Loads GDP-weighted median parameters from Stage 1 CSV results
-2. Applies template ratios to baseline values with sign conversion
-3. Normalizes parameters to maintain target impact magnitude (~10% GDP loss)
-4. Generates complete Stage 3 configuration file
-
-**Example Template Entry:**
-```json
-{
-  "scaling_name": "y+k_linear",
-  "description": "Linear temperature sensitivity for output and capital",
-  "y_tas1": 1.0,
-  "k_tas1": 1.0
-}
-```
-
-This creates a response function with proportional weights based on Stage 1 empirical results (e.g., ~70% output, ~30% capital for equal template ratios).
-
-This multi-stage approach enables systematic development of complex response function combinations based on individual parameter assessments, following the methodological framework described in the academic methods documentation.
-
 ## Documentation
 
-### Methods Documentation
-The complete methodological approach is documented in `METHODS.md`, which provides:
-- Detailed mathematical formulation of the Solow-Swan economic model
-- Climate response function specifications and implementation
-- Model calibration procedures for both damage and variability targets
-- Data source requirements and processing standards
-
-This methods documentation is aligned with the actual code implementation and serves as the foundation for academic publication of the COIN-SSP model.
+- **`METHODS.md`**: Complete mathematical formulation and academic methods
+- **`CLAUDE.md`**: Code style guide and architecture decisions
+- **`README.md`**: This file - usage and reference documentation
 
 ## Contributing
 
@@ -657,21 +302,12 @@ This project follows elegant, fail-fast coding principles:
 
 ## License
 
-COIN_SSP is open source software designed for scientific research and is distributed under the MIT License. This license allows for free use, modification, and distribution while maintaining attribution to the original authors.
-
-The MIT License is widely adopted in the scientific computing community as it provides maximum flexibility for researchers while ensuring proper attribution. Users are free to:
-- Use the software for any purpose, including commercial applications
-- Modify and adapt the code for specific research needs
-- Distribute modified versions with appropriate attribution
-- Incorporate the software into larger research frameworks
-
-For the complete license text, see the LICENSE file in the project repository.
+MIT License - See LICENSE file for details.
 
 ## Citation
 
 If you use COIN_SSP in your research, please cite:
 ```
-COIN_SSP: A spatially-explicit climate-economic impact model implementing the Solow-Swan growth model with gridded climate response functions.
+COIN_SSP: A spatially-explicit climate-economic impact model implementing
+the Solow-Swan growth model with gridded climate response functions.
 ```
-
-This software is intended to advance scientific understanding of climate-economic interactions and is provided as a resource to the research community.

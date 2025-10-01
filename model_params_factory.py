@@ -6,7 +6,7 @@ Provides clean parameter management for the COIN-SSP pipeline with validation,
 filtering, and step-specific parameter creation.
 """
 
-from coin_ssp_core import ModelParams
+from coin_ssp_models import ModelParams
 from typing import Dict, Any
 
 

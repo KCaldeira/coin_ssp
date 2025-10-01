@@ -699,8 +699,9 @@ def calculate_weather_gdp_regression_slopes(
     tas_weather_data = all_data[reference_ssp]['tas_weather']
     pr_weather_data = all_data[reference_ssp]['pr_weather']
 
-    # Get model parameters
-    model_params = config['model_params_factory'].create_base()
+    # Get reference climate baselines
+    tas0_2d = all_data['tas0_2d']
+    pr0_2d = all_data['pr0_2d']
 
     # Initialize results storage
     regression_results = {
@@ -746,10 +747,27 @@ def calculate_weather_gdp_regression_slopes(
                         continue
 
                     # Create scaled parameters for this grid cell
-                    # Convert response_config dict to ScalingParams object
-                    scaling_config = filter_scaling_params(response_config)
-                    scaling_params = ScalingParams(**scaling_config)
-                    scaled_params = create_scaled_params(model_params, scaling_params, scaling_factor)
+                    # Start with base parameters from config and scale the response function parameters
+                    base_params = config['model_params']
+                    scaled_params = ModelParams(
+                        s=base_params['s'],
+                        alpha=base_params['alpha'],
+                        delta=base_params['delta'],
+                        tas0=tas0_2d[lat_idx, lon_idx],
+                        pr0=pr0_2d[lat_idx, lon_idx],
+                        k_tas1=response_config.get('k_tas1', 0.0) * scaling_factor,
+                        k_tas2=response_config.get('k_tas2', 0.0) * scaling_factor,
+                        k_pr1=response_config.get('k_pr1', 0.0) * scaling_factor,
+                        k_pr2=response_config.get('k_pr2', 0.0) * scaling_factor,
+                        tfp_tas1=response_config.get('tfp_tas1', 0.0) * scaling_factor,
+                        tfp_tas2=response_config.get('tfp_tas2', 0.0) * scaling_factor,
+                        tfp_pr1=response_config.get('tfp_pr1', 0.0) * scaling_factor,
+                        tfp_pr2=response_config.get('tfp_pr2', 0.0) * scaling_factor,
+                        y_tas1=response_config.get('y_tas1', 0.0) * scaling_factor,
+                        y_tas2=response_config.get('y_tas2', 0.0) * scaling_factor,
+                        y_pr1=response_config.get('y_pr1', 0.0) * scaling_factor,
+                        y_pr2=response_config.get('y_pr2', 0.0) * scaling_factor
+                    )
 
                     # Extract baseline TFP for this cell
                     cell_tfp_baseline = reference_tfp[reference_ssp]['tfp_baseline'][:, lat_idx, lon_idx]
@@ -951,141 +969,182 @@ def calculate_variability_climate_response_parameters(
         scaled_parameters, 0, 0, tas_weather_data, pr_weather_data
     )
 
-    # Extract optimized parameters (Step 1 results)
+    # Extract optimized parameters (Step 1 results) for ALL response functions
     # scaled_parameters shape: [n_response_functions, n_targets, n_params, nlat, nlon]
-    # Need to transpose to [nlat, nlon, n_params] for indexing as step1_parameters[lat_idx, lon_idx, :]
-    step1_parameters = np.transpose(scaled_parameters[0, 0, :, :, :], (1, 2, 0))  # [nlat, nlon, n_params]
+    # Store parameters for each response function
+    all_step1_parameters = {}
+    for resp_idx, response_config in enumerate(response_scalings):
+        response_name = response_config['scaling_name']
+        # Extract and transpose: [n_params, nlat, nlon] -> [nlat, nlon, n_params]
+        all_step1_parameters[response_name] = np.transpose(scaled_parameters[resp_idx, 0, :, :, :], (1, 2, 0))
 
     valid_cells = np.sum(valid_mask)
-    print(f"Phase 1 complete: {valid_cells}/{valid_cells} valid grid cells")
+    print(f"Phase 1 complete: {valid_cells}/{valid_cells} valid grid cells for {n_response_functions} response functions")
 
-    # =================================================================================
-    # PHASE 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
-    # =================================================================================
-    print("\n--- Phase 2: Forward model simulations with scaled parameters ---")
-
-    # Get time period indices
+    # Get time period indices (needed for all response functions)
     time_periods = config['time_periods']
     hist_start_year = time_periods['historical_period']['start_year']
     hist_end_year = time_periods['historical_period']['end_year']
     hist_start_idx = np.where(years >= hist_start_year)[0][0]
     hist_end_idx = np.where(years <= hist_end_year)[0][-1]
-    n_hist_years = hist_end_idx - hist_start_idx + 1
-
-    # Initialize arrays for forward model results
-    gdp_forward = np.zeros((len(years), nlat, nlon))
-
-    print(f"Running forward model for {np.sum(valid_mask)} grid cells...")
-
-    # Run forward model for each valid grid cell
-    for lat_idx in range(nlat):
-        for lon_idx in range(nlon):
-            if not valid_mask[lat_idx, lon_idx]:
-                continue
-
-            # Extract model parameters for this cell from Step 1
-            cell_params = step1_parameters[lat_idx, lon_idx, :]
-
-            # Create ModelParams object with optimized climate response parameters
-            model_params = ModelParams(
-                s=config['model_params']['s'],
-                alpha=config['model_params']['alpha'],
-                delta=config['model_params']['delta'],
-                tas0=tas0_2d[lat_idx, lon_idx],
-                pr0=pr0_2d[lat_idx, lon_idx],
-                k_tas1=cell_params[0], k_tas2=cell_params[1],
-                k_pr1=cell_params[2], k_pr2=cell_params[3],
-                tfp_tas1=cell_params[4], tfp_tas2=cell_params[5],
-                tfp_pr1=cell_params[6], tfp_pr2=cell_params[7],
-                y_tas1=cell_params[8], y_tas2=cell_params[9],
-                y_pr1=cell_params[10], y_pr2=cell_params[11]
-            )
-
-            # Extract time series for this grid cell
-            # Use WEATHER COMPONENTS for forward simulation to isolate variability effects
-            cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
-            cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
-            cell_pop = pop_data[:, lat_idx, lon_idx]
-            cell_gdp = gdp_data[:, lat_idx, lon_idx]
-            cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
-
-            # Run forward model with weather components
-            y_forward, a_forward, k_forward, y_climate, tfp_climate, k_climate = calculate_coin_ssp_forward_model(
-                cell_tfp_baseline, cell_pop, cell_tas_weather, cell_pr_weather, model_params
-            )
-
-            gdp_forward[:, lat_idx, lon_idx] = y_forward
-
-    print(f"Phase 2 complete: Forward model simulations generated")
 
     # =================================================================================
-    # PHASE 3: WEATHER VARIABILITY REGRESSION ANALYSIS
+    # PHASES 2-4: PROCESS EACH RESPONSE FUNCTION SEPARATELY
     # =================================================================================
-    print("\n--- Phase 3: Weather variability regression analysis ---")
+    # Store results for each response function
+    all_regression_slopes = {}
+    all_regression_success_masks = {}
+    all_final_parameters = {}
+    all_final_success_masks = {}
 
-    # Initialize regression slope array
-    regression_slopes = np.zeros((nlat, nlon))
-    regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
+    for resp_idx, response_config in enumerate(response_scalings):
+        response_name = response_config['scaling_name']
+        print(f"\n{'='*80}")
+        print(f"Processing response function: {response_name} ({resp_idx+1}/{n_response_functions})")
+        print(f"{'='*80}")
 
-    print(f"Computing y_weather ~ tas_weather regression for {np.sum(valid_mask)} cells...")
+        step1_parameters = all_step1_parameters[response_name]
 
-    for lat_idx in range(nlat):
-        for lon_idx in range(nlon):
-            if not valid_mask[lat_idx, lon_idx]:
-                continue
+        # =================================================================================
+        # PHASE 2: FORWARD MODEL SIMULATIONS WITH SCALED PARAMETERS
+        # =================================================================================
+        print(f"\n--- Phase 2: Forward model simulations for {response_name} ---")
 
-            # Extract weather variables for historical period
-            tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
-            gdp_forward_hist = gdp_forward[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
+        # Initialize arrays for forward model results
+        gdp_forward = np.zeros((len(years), nlat, nlon))
 
-            # Compute GDP ratio: actual GDP divided by 30-year LOESS smoothed GDP trend
-            # Use the new apply_loess_divide function for clean, mnemonic operation
-            gdp_ratio = apply_loess_divide(gdp_forward_hist, 30)
+        print(f"Running forward model for {np.sum(valid_mask)} grid cells...")
 
-            # Remove any invalid values
-            valid_data_mask = np.isfinite(gdp_ratio) & np.isfinite(tas_weather_hist)
+        # Run forward model for each valid grid cell
+        for lat_idx in range(nlat):
+            for lon_idx in range(nlon):
+                if not valid_mask[lat_idx, lon_idx]:
+                    continue
 
-            # Compute regression: (GDP / LOESS_smoothed_GDP) ~ tas_weather
-            gdp_ratio_valid = gdp_ratio[valid_data_mask]
-            tas_weather_valid = tas_weather_hist[valid_data_mask]
+                # Extract model parameters for this cell from Step 1
+                cell_params = step1_parameters[lat_idx, lon_idx, :]
 
-            # Linear regression
-            if np.std(tas_weather_valid) > 1e-6:  # Check for sufficient variation
-                slope, intercept = np.polyfit(tas_weather_valid, gdp_ratio_valid, 1)
-                regression_slopes[lat_idx, lon_idx] = slope
-                regression_success_mask[lat_idx, lon_idx] = True
+                # Create ModelParams object with optimized climate response parameters
+                model_params = ModelParams(
+                    s=config['model_params']['s'],
+                    alpha=config['model_params']['alpha'],
+                    delta=config['model_params']['delta'],
+                    tas0=tas0_2d[lat_idx, lon_idx],
+                    pr0=pr0_2d[lat_idx, lon_idx],
+                    k_tas1=cell_params[0], k_tas2=cell_params[1],
+                    k_pr1=cell_params[2], k_pr2=cell_params[3],
+                    tfp_tas1=cell_params[4], tfp_tas2=cell_params[5],
+                    tfp_pr1=cell_params[6], tfp_pr2=cell_params[7],
+                    y_tas1=cell_params[8], y_tas2=cell_params[9],
+                    y_pr1=cell_params[10], y_pr2=cell_params[11]
+                )
 
-    regression_success = np.sum(regression_success_mask)
-    print(f"Phase 3 complete: {regression_success} successful regressions")
+                # Extract time series for this grid cell
+                # Use WEATHER COMPONENTS for forward simulation to isolate variability effects
+                cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
+                cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
+                cell_pop = pop_data[:, lat_idx, lon_idx]
+                cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
 
-    # =================================================================================
-    # PHASE 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
-    # =================================================================================
-    print("\n--- Phase 4: Parameter normalization by regression slope ---")
+                # Run forward model with weather components
+                y_forward, _, _, _, _, _ = calculate_coin_ssp_forward_model(
+                    cell_tfp_baseline, cell_pop, cell_tas_weather, cell_pr_weather, model_params
+                )
 
-    # Initialize final normalized parameters
-    final_parameters = np.zeros_like(step1_parameters)
-    final_success_mask = valid_mask & regression_success_mask
+                gdp_forward[:, lat_idx, lon_idx] = y_forward
 
-    for lat_idx in range(nlat):
-        for lon_idx in range(nlon):
-            if not final_success_mask[lat_idx, lon_idx]:
-                continue
+        print(f"Phase 2 complete: Forward model simulations generated for {response_name}")
 
-            slope = regression_slopes[lat_idx, lon_idx]
+        # =================================================================================
+        # PHASE 3: WEATHER VARIABILITY REGRESSION ANALYSIS
+        # =================================================================================
+        print(f"\n--- Phase 3: Weather variability regression analysis for {response_name} ---")
 
-            final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
+        # Initialize regression slope array
+        regression_slopes = np.zeros((nlat, nlon))
+        regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
 
-    final_success = np.sum(final_success_mask)
-    print(f"Phase 4 complete: {final_success} final calibrated parameters")
+        print(f"Computing y_weather ~ tas_weather regression for {np.sum(valid_mask)} cells...")
+
+        for lat_idx in range(nlat):
+            for lon_idx in range(nlon):
+                if not valid_mask[lat_idx, lon_idx]:
+                    continue
+
+                # Extract weather variables for historical period
+                tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
+                gdp_forward_hist = gdp_forward[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
+
+                # Compute GDP ratio: actual GDP divided by 30-year LOESS smoothed GDP trend
+                # Use the new apply_loess_divide function for clean, mnemonic operation
+                gdp_ratio = apply_loess_divide(gdp_forward_hist, 30)
+
+                # Remove any invalid values
+                valid_data_mask = np.isfinite(gdp_ratio) & np.isfinite(tas_weather_hist)
+
+                # Compute regression: (GDP / LOESS_smoothed_GDP) ~ tas_weather
+                gdp_ratio_valid = gdp_ratio[valid_data_mask]
+                tas_weather_valid = tas_weather_hist[valid_data_mask]
+
+                # Linear regression
+                if np.std(tas_weather_valid) > 1e-6:  # Check for sufficient variation
+                    slope, _ = np.polyfit(tas_weather_valid, gdp_ratio_valid, 1)
+                    regression_slopes[lat_idx, lon_idx] = slope
+                    regression_success_mask[lat_idx, lon_idx] = True
+
+        regression_success = np.sum(regression_success_mask)
+        print(f"Phase 3 complete: {regression_success} successful regressions for {response_name}")
+
+        # =================================================================================
+        # PHASE 4: PARAMETER NORMALIZATION BY REGRESSION SLOPE
+        # =================================================================================
+        print(f"\n--- Phase 4: Parameter normalization for {response_name} ---")
+
+        # Initialize final normalized parameters
+        final_parameters = np.zeros_like(step1_parameters)
+        final_success_mask = valid_mask & regression_success_mask
+
+        for lat_idx in range(nlat):
+            for lon_idx in range(nlon):
+                if not final_success_mask[lat_idx, lon_idx]:
+                    continue
+
+                slope = regression_slopes[lat_idx, lon_idx]
+
+                final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
+
+        final_success = np.sum(final_success_mask)
+        print(f"Phase 4 complete: {final_success} final calibrated parameters for {response_name}")
+
+        # Store results for this response function
+        all_regression_slopes[response_name] = regression_slopes
+        all_regression_success_masks[response_name] = regression_success_mask
+        all_final_parameters[response_name] = final_parameters
+        all_final_success_masks[response_name] = final_success_mask
 
     print(f"\n4-phase calibration summary:")
     print(f"  Valid grid cells: {valid_cells}")
-    print(f"  Phase 1 optimizations: {valid_cells} (all valid cells)")
-    print(f"  Phase 3 regressions: {regression_success}")
-    print(f"  Final calibrated cells: {final_success}")
+    print(f"  Response functions processed: {n_response_functions}")
+    for response_name in all_regression_slopes.keys():
+        resp_success = np.sum(all_regression_success_masks[response_name])
+        print(f"    {response_name}: {resp_success} successful regressions")
 
-    return final_parameters
+    # Return comprehensive results dictionary with per-response-function data
+    return {
+        'all_final_parameters': all_final_parameters,  # dict[response_name] -> [nlat, nlon, n_params]
+        'all_step1_parameters': all_step1_parameters,  # dict[response_name] -> [nlat, nlon, n_params]
+        'all_regression_slopes': all_regression_slopes,  # dict[response_name] -> [nlat, nlon]
+        'all_regression_success_masks': all_regression_success_masks,  # dict[response_name] -> [nlat, nlon]
+        'all_final_success_masks': all_final_success_masks,  # dict[response_name] -> [nlat, nlon]
+        'response_function_names': [rf['scaling_name'] for rf in response_scalings],
+        'valid_cells': valid_cells,
+        # Keep first response function as default for backward compatibility
+        'final_parameters': all_final_parameters[response_scalings[0]['scaling_name']],
+        'step1_parameters': all_step1_parameters[response_scalings[0]['scaling_name']],
+        'regression_slopes': all_regression_slopes[response_scalings[0]['scaling_name']],
+        'regression_success_mask': all_regression_success_masks[response_scalings[0]['scaling_name']],
+        'final_success_mask': all_final_success_masks[response_scalings[0]['scaling_name']]
+    }
 
 
 def calculate_variability_scaling_parameters(

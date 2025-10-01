@@ -848,6 +848,143 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
         print()
 
 
+def write_variability_calibration_summary(variability_results: Dict[str, Any], config: Dict[str, Any],
+                                          all_data: Dict[str, Any], output_dir: str, response_scalings: list) -> None:
+    """
+    Write GDP-weighted summary of variability calibration results to CSV.
+
+    Parameters
+    ----------
+    variability_results : Dict[str, Any]
+        Results from calculate_variability_climate_response_parameters
+    config : Dict[str, Any]
+        Configuration dictionary
+    all_data : Dict[str, Any]
+        Pre-loaded NetCDF data containing GDP information
+    output_dir : str
+        Directory to write CSV file
+    response_scalings : list
+        List of response function configurations
+    """
+    print("\n" + "="*80)
+    print("VARIABILITY CALIBRATION SUMMARY")
+    print("="*80)
+
+    # Extract data - now organized by response function
+    all_regression_slopes = variability_results['all_regression_slopes']  # dict[response_name] -> [nlat, nlon]
+    all_regression_success_masks = variability_results['all_regression_success_masks']  # dict[response_name] -> [nlat, nlon]
+    response_function_names = variability_results['response_function_names']
+    valid_mask = all_data['_metadata']['valid_mask']
+
+    # Get reference SSP GDP data for weighting
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+    gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')  # [time, lat, lon]
+
+    # Calculate historical period GDP for weighting
+    hist_period = config['time_periods']['historical_period']
+    hist_start = hist_period['start_year']
+    hist_end = hist_period['end_year']
+    years = all_data['years']
+
+    hist_start_idx = hist_start - years[0]
+    hist_end_idx = hist_end - years[0] + 1
+
+    # Average GDP over historical period for weighting
+    gdp_hist_period = np.mean(gdp_data[hist_start_idx:hist_end_idx], axis=0)  # [lat, lon]
+
+    print(f"GDP-weighted global statistics for variability calibration (using {reference_ssp} GDP, {hist_start}-{hist_end}):")
+    print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
+
+    # Get coordinates from metadata
+    metadata = get_grid_metadata(all_data)
+    lat_values = metadata['lat']
+
+    # Prepare list to collect CSV rows (one per response function)
+    csv_data_list = []
+
+    # Process each response function separately
+    for response_name in response_function_names:
+        print(f"\nProcessing response function: {response_name}")
+
+        regression_slopes = all_regression_slopes[response_name]
+        regression_success_mask = all_regression_success_masks[response_name]
+
+        # Calculate GDP-weighted statistics for regression slopes
+        valid_regression_mask = valid_mask & regression_success_mask
+        successful_regressions = np.sum(valid_regression_mask)
+
+        print(f"  Successful regressions: {successful_regressions}/{np.sum(valid_mask)}")
+
+        # GDP-weighted mean
+        gdp_weighted_slopes_data = gdp_hist_period * regression_slopes
+        total_weighted_slopes = calculate_global_mean(gdp_weighted_slopes_data, lat_values, valid_regression_mask)
+        total_gdp = calculate_global_mean(gdp_hist_period, lat_values, valid_regression_mask)
+        gdp_weighted_mean_slope = total_weighted_slopes / total_gdp if total_gdp > 0 else np.nan
+
+        # Calculate GDP-weighted median for slopes
+        area_weights = calculate_area_weights(lat_values)
+        area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], regression_slopes.shape)
+
+        # Flatten and filter
+        flat_slopes = regression_slopes.flatten()
+        flat_gdp = gdp_hist_period.flatten()
+        flat_area_weights = area_weights_2d.flatten()
+        flat_valid = valid_regression_mask.flatten()
+
+        valid_indices = flat_valid & ~np.isnan(flat_slopes) & ~np.isnan(flat_gdp)
+        if np.sum(valid_indices) > 0:
+            valid_slopes = flat_slopes[valid_indices]
+            valid_gdp = flat_gdp[valid_indices]
+            valid_area_weights = flat_area_weights[valid_indices]
+
+            gdp_area_weights = valid_area_weights * valid_gdp
+            combined = np.column_stack([gdp_area_weights, valid_slopes])
+            sorted_indices = np.argsort(combined[:, 1])
+            sorted_combined = combined[sorted_indices]
+            cumsum_weights = np.cumsum(sorted_combined[:, 0])
+            total_weight = cumsum_weights[-1]
+            half_weight = total_weight / 2.0
+            gdp_weighted_median_slope = np.interp(half_weight, cumsum_weights, sorted_combined[:, 1])
+
+            # Min/max/std
+            slope_min = np.min(valid_slopes)
+            slope_max = np.max(valid_slopes)
+            slope_std = np.std(valid_slopes)
+        else:
+            gdp_weighted_median_slope = slope_min = slope_max = slope_std = np.nan
+
+        # Prepare CSV row for this response function
+        csv_row = {
+            'response_function': response_name,
+            'gdp_weighted_mean_slope': gdp_weighted_mean_slope,
+            'gdp_weighted_median_slope': gdp_weighted_median_slope,
+            'slope_min': slope_min,
+            'slope_max': slope_max,
+            'slope_std': slope_std,
+            'successful_regressions': successful_regressions,
+            'valid_cells': variability_results['valid_cells']
+        }
+
+        csv_data_list.append(csv_row)
+
+        print(f"  GDP-weighted mean slope: {gdp_weighted_mean_slope:.6f}")
+        print(f"  GDP-weighted median slope: {gdp_weighted_median_slope:.6f}")
+        print(f"  Range: {slope_min:.6f} to {slope_max:.6f}")
+        print(f"  Std dev: {slope_std:.6f}")
+
+    # Write to CSV (one row per response function)
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+    csv_filename = f"step3_{json_id}_{model_name}_{reference_ssp}_variability_calibration_summary.csv"
+    csv_path = str(Path(output_dir) / csv_filename)
+
+    df = pd.DataFrame(csv_data_list)
+    df.to_csv(csv_path, index=False, float_format='%.6f')
+
+    print(f"\nVariability calibration summary written to: {csv_path}")
+    print(f"  {len(csv_data_list)} rows (one per response function)")
+    print()
+
 
 def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict[str, Any],
                                    output_dir: str, reference_ssp: str, valid_mask: np.ndarray) -> str:

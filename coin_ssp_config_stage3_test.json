@@ -71,6 +71,24 @@
       "target_type": "variability",
       "global_mean_amount": -0.01,
       "description": "Uniform 1% GDP reduction per C warming across all grid cells"
+    },
+    {
+      "target_name": "const-var 0.01/C",
+      "target_shape": "linear",
+      "target_type": "variability",
+      "global_mean_amount": -0.01,
+      "reference_temperature": 20.0,
+      "amount_at_reference_temp": -0.02,
+      "description": "1% GDP reduction per C warming linear to 2% at 20 C"
+    },
+    {
+      "target_name": "const-var 0.01/C",
+      "target_shape": "quadratic",
+      "target_type": "variability",
+      "global_mean_amount": -0.01,
+      "derivative_at_zero_amount_temperature": -0.005,
+      "zero_amount_temperature": 10.0,
+      "description": "Uniform 1% GDP reduction per C warming across all grid cells"
     }
   ],
   "model_params": {
@@ -96,15 +114,82 @@
   },
   "response_function_scalings": [
     {
-      "scaling_name": "y_linear",
+      "scaling_name": "output_linear",
       "description": "Linear temperature sensitivity for output",
       "y_tas1": 1.0
     },
     {
-      "scaling_name": "y+tfp_linear",
+      "scaling_name": "output_quadratic",
+      "description": "Quadratic temperature sensitivity for output",
+      "y_tas1": 0.9752672135222471,
+      "y_tas2": 0.024732786477752924
+    },
+    {
+      "scaling_name": "capital_linear",
+      "description": "Linear temperature sensitivity for capital stock",
+      "k_tas1": 1.0
+    },
+    {
+      "scaling_name": "capital_quadratic",
+      "description": "Quadratic temperature sensitivity for capital stock",
+      "k_tas1": 0.9736326653608558,
+      "k_tas2": 0.02636733463914419
+    },
+    {
+      "scaling_name": "tfp_linear",
       "description": "Linear temperature sensitivity for TFP",
-      "y_tas1": 1.0,
-      "tfp_tas1": 0.05
+      "tfp_tas1": 1.0
+    },
+    {
+      "scaling_name": "tfp_quadratic",
+      "description": "Quadratic temperature sensitivity for TFP",
+      "tfp_tas1": 0.881118881118881,
+      "tfp_tas2": 0.11888111888111888
+    },
+    {
+      "scaling_name": "y+k_linear",
+      "description": "Linear temperature sensitivity for output and capital",
+      "y_tas1": 0.7083408557501354,
+      "k_tas1": 0.2916591442498646
+    },
+    {
+      "scaling_name": "y+k_quadratic",
+      "description": "Quadratic temperature sensitivity for output and capital",
+      "y_tas1": 0.6904835232522328,
+      "y_tas2": 0.017510669189141626,
+      "k_tas1": 0.28430639271415376,
+      "k_tas2": 0.0076994148444718205
+    },
+    {
+      "scaling_name": "y+tfp_linear",
+      "description": "Linear temperature sensitivity for output and TFP",
+      "y_tas1": 0.984196663740123,
+      "tfp_tas1": 0.015803336259877086
+    },
+    {
+      "scaling_name": "y+tfp_quadratic",
+      "description": "Quadratic temperature sensitivity for output and TFP",
+      "y_tas1": 0.9582366589327148,
+      "y_tas2": 0.02430089143973624,
+      "tfp_tas1": 0.015386494077420933,
+      "tfp_tas2": 0.002075955550128221
+    },
+    {
+      "scaling_name": "y+k+tfp_linear",
+      "description": "Linear temperature sensitivity for output, capital, and TFP",
+      "y_tas1": 0.7003748661192432,
+      "k_tas1": 0.28837915030346306,
+      "tfp_tas1": 0.011245983577293825
+    },
+    {
+      "scaling_name": "y+k+tfp_quadratic",
+      "description": "Quadratic temperature sensitivity for output, capital, and TFP",
+      "y_tas1": 0.6819031066695634,
+      "y_tas2": 0.017293069737127964,
+      "k_tas1": 0.2807734086465349,
+      "k_tas2": 0.007603736693460787,
+      "tfp_tas1": 0.010949380838583534,
+      "tfp_tas2": 0.0014772974147295244
     }
   ],
   "processing_options": {

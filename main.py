@@ -17,7 +17,6 @@ Processing Flow (per README.md Section 3):
 import argparse
 import copy
 import json
-import os
 import pandas as pd
 import shutil
 import sys
@@ -47,7 +46,7 @@ from coin_ssp_reporting import (
     create_objective_function_visualization, create_regression_slopes_visualization,
     create_forward_model_visualization, create_forward_model_maps_visualization,
     create_forward_model_ratio_visualization, print_gdp_weighted_scaling_summary,
-    get_ssp_data, get_grid_metadata
+    write_variability_calibration_summary, get_ssp_data, get_grid_metadata
 )
 from coin_ssp_core import (
     optimize_climate_response_scaling, calculate_coin_ssp_forward_model,
@@ -157,7 +156,7 @@ def get_step_output_path(output_dir: str, step_num: int, config: Dict[str, Any],
     prefix = f"step{step_num}"
     filename = build_filename(prefix, json_id, model_name, file_type, ssp_name, var_name)
 
-    return os.path.join(output_dir, filename)
+    return str(Path(output_dir) / filename)
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -175,8 +174,8 @@ def load_config(config_path: str) -> Dict[str, Any]:
         Parsed and validated configuration dictionary
     """
     print(f"Loading configuration from: {config_path}")
-    
-    if not os.path.exists(config_path):
+
+    if not Path(config_path).exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     
     with open(config_path, 'r') as f:
@@ -619,12 +618,14 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Check if any targets are of type 'variability'
     has_variability_targets = any(target['target_type'] == 'variability' for target in gdp_targets)
+    variability_calibration_results = None
     if has_variability_targets:
         print("Detected 'variability' type GDP targets. Preparing variability reference scaling...")
         # EXPENSIVE: Compute reference relationship once
-        baseline_climate_parameters = calculate_variability_climate_response_parameters(
+        variability_calibration_results = calculate_variability_climate_response_parameters(
                     all_data, config, reference_tfp, response_scalings
                 )
+        baseline_climate_parameters = variability_calibration_results['final_parameters']
 
     # Process each GDP target with conditional logic based on target type
     for target_idx, gdp_target in enumerate(gdp_targets):
@@ -706,6 +707,12 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Display GDP-weighted scaling factor summary (now includes regression slopes)
     print_gdp_weighted_scaling_summary(scaling_results, config, all_data, output_dir)
+
+    # If variability calibration was performed, write its summary too
+    if variability_calibration_results is not None:
+        write_variability_calibration_summary(
+            variability_calibration_results, config, all_data, output_dir, response_scalings
+        )
 
     print(f"\nStep 3 completed: Scaling factors calculated for each grid cell")
     print(f"Total combinations processed: {total_combinations} per valid grid cell")
@@ -1077,8 +1084,8 @@ def run_pipeline(config_path: str, step3_file: str = None, output_dir: str = Non
             print(f"Using provided output directory: {output_dir}")
 
         # Copy config file to output directory for reproducibility
-        config_filename = os.path.basename(config_path)
-        config_copy_path = os.path.join(output_dir, config_filename)
+        config_path_obj = Path(config_path)
+        config_copy_path = Path(output_dir) / config_path_obj.name
         shutil.copy2(config_path, config_copy_path)
         print(f"Configuration file copied to: {config_copy_path}")
 
