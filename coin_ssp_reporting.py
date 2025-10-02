@@ -1519,7 +1519,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
     pdf_path = os.path.join(output_dir, pdf_filename)
 
     # Extract data arrays and metadata
-    optimization_errors = scaling_results['optimization_errors']  # [lat, lon, response_func, target]
+    optimization_errors = scaling_results['optimization_errors']  # [response_func, target, lat, lon]
     valid_mask = all_data['_metadata']['valid_mask']  # [lat, lon]
     response_function_names = scaling_results['response_function_names']
     target_names = scaling_results['target_names']
@@ -1533,7 +1533,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
     # Get dimensions
-    nlat, nlon, n_response_functions, n_targets = optimization_errors.shape
+    n_response_functions, n_targets, nlat, nlon = optimization_errors.shape
 
     # Calculate adaptive layout based on number of targets
     subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
@@ -1716,78 +1716,91 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
     cmap = plt.cm.RdBu_r
     norm = TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
 
-    # Create the PDF
+    # Calculate adaptive layout based on number of response functions
+    n_response_funcs = len(response_function_names)
+    subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_response_funcs)
+
+    print(f"Creating regression slopes visualization: {n_response_funcs} response functions")
+    print(f"  Layout: {subplot_rows} rows × {subplot_cols} cols")
+
+    # Create the PDF - one page per target
     with PdfPages(pdf_path) as pdf_pages:
-        # Process each target (outer loop for page organization)
         for target_idx, target_name in enumerate(target_names):
-            print(f"Creating regression slopes visualization: target {target_name}")
+            target_config = config['gdp_targets'][target_idx]
+            target_type_label = target_config.get('target_type', 'unknown').upper()
 
-            # Calculate number of response functions for this target
-            available_responses = []
-            for response_name in response_function_names:
-                if response_name in regression_data['slopes']:
-                    if target_name in regression_data['slopes'][response_name]:
-                        available_responses.append(response_name)
+            print(f"  Processing target: {target_name} [{target_type_label}]")
 
-            n_response_funcs = len(available_responses)
-            if n_response_funcs == 0:
-                continue
+            # Create figure with adaptive layout
+            fig = plt.figure(figsize=fig_size)
+            fig.suptitle(f'Weather-GDP Regression Slopes - {model_name.upper()} {reference_ssp.upper()}\n'
+                       f'Target: {target_name} [{target_type_label}] | Historical Period Regression Analysis',
+                       fontsize=16, fontweight='bold', y=0.96)
 
-            # Create page layout: 3 per page max, arranged vertically
-            max_per_page = 3
-            n_pages = (n_response_funcs + max_per_page - 1) // max_per_page
+            # Plot each response function
+            for response_idx, response_name in enumerate(response_function_names):
+                # Check if data exists for this response-target combination
+                if response_name not in regression_data['slopes']:
+                    continue
+                if target_name not in regression_data['slopes'][response_name]:
+                    continue
 
-            for page_idx in range(n_pages):
-                fig = plt.figure(figsize=(16, 5 * max_per_page))
-                fig.suptitle(f'Weather-GDP Regression Slopes - {model_name.upper()} {reference_ssp.upper()}\n'
-                           f'Target: {target_name} | Historical Period Regression Analysis',
-                           fontsize=14, fontweight='bold')
+                # Calculate subplot position (1-indexed)
+                if subplot_cols == 1:
+                    subplot_idx = response_idx + 1
+                else:
+                    row = response_idx // subplot_cols
+                    col = response_idx % subplot_cols
+                    subplot_idx = row * subplot_cols + col + 1
 
-                start_idx = page_idx * max_per_page
-                end_idx = min(start_idx + max_per_page, n_response_funcs)
-                n_plots = end_idx - start_idx
+                # Extract regression slope data
+                slope_data = regression_data['slopes'][response_name][target_name]
+                success_mask = regression_data['success_mask'][response_name][target_name]
+                gdp_weighted_mean = regression_data['gdp_weighted_means'][response_name][target_name]
 
-                for plot_idx in range(n_plots):
-                    response_idx = start_idx + plot_idx
-                    response_name = available_responses[response_idx]
+                # Create subplot
+                ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
-                    # Extract regression slope data
-                    slope_data = regression_data['slopes'][response_name][target_name]
-                    success_mask = regression_data['success_mask'][response_name][target_name]
-                    gdp_weighted_mean = regression_data['gdp_weighted_means'][response_name][target_name]
+                # Create plot data (set invalid/unsuccessful cells to NaN for white color)
+                plot_data = np.full_like(slope_data, np.nan)
+                plot_data[valid_mask & success_mask] = slope_data[valid_mask & success_mask]
 
-                    # Create subplot
-                    ax = fig.add_subplot(n_plots, 1, plot_idx + 1)
+                # Create the map
+                mesh = ax.pcolormesh(lon_grid, lat_grid, plot_data, cmap=cmap, norm=norm, shading='auto')
 
-                    # Create plot data (set invalid/unsuccessful cells to NaN for white color)
-                    plot_data = np.full_like(slope_data, np.nan)
-                    plot_data[valid_mask & success_mask] = slope_data[valid_mask & success_mask]
+                # Add coastlines
+                ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
 
-                    # Create the map
-                    mesh = ax.pcolormesh(lon_grid, lat_grid, plot_data, cmap=cmap, norm=norm, shading='auto')
+                # Formatting
+                ax.set_xlabel('Longitude', fontsize=12)
+                ax.set_ylabel('Latitude', fontsize=12)
 
-                    # Formatting
-                    ax.set_xlabel('Longitude')
-                    ax.set_ylabel('Latitude')
+                # Calculate valid range for min/max box
+                valid_slopes = slope_data[valid_mask & success_mask]
+                if len(valid_slopes) > 0:
+                    data_min, data_max = np.min(valid_slopes), np.max(valid_slopes)
+                else:
+                    data_min = data_max = 0.0
 
-                    # Calculate valid range for title
-                    valid_slopes = slope_data[valid_mask & success_mask]
-                    if len(valid_slopes) > 0:
-                        data_min, data_max = np.min(valid_slopes), np.max(valid_slopes)
-                        range_str = f"Range: {data_min:.4f} to {data_max:.4f}"
-                    else:
-                        range_str = "No valid data"
+                # Add min/max info box
+                add_extremes_info_box(ax, data_min, data_max)
 
-                    ax.set_title(f'{response_name}\n{range_str} | GDP-weighted: {gdp_weighted_mean:.6f}',
-                                fontsize=11, fontweight='bold')
+                ax.set_title(f'{response_name}\nGDP-weighted mean: {gdp_weighted_mean:.6f}',
+                            fontsize=14, fontweight='bold')
 
-                    # Add colorbar
-                    cbar = plt.colorbar(mesh, ax=ax, orientation='horizontal', pad=0.1, shrink=0.8)
-                    cbar.set_label('Regression Slope\n(GDP variability / Temperature variability)', fontsize=10)
+                # Add colorbar
+                cbar = plt.colorbar(mesh, ax=ax, shrink=0.6, aspect=12)
+                cbar.set_label('Regression Slope (GDP/Temperature variability)', rotation=270, labelpad=15, fontsize=12)
+                cbar.ax.axhline(y=0.0, color='black', linestyle='-', linewidth=1, alpha=0.8)
 
-                plt.tight_layout()
-                pdf_pages.savefig(fig, bbox_inches='tight', dpi=150)
-                plt.close(fig)
+                # Set map aspect and limits
+                ax.set_xlim(lon.min(), lon.max())
+                ax.set_ylim(lat.min(), lat.max())
+                ax.set_aspect('equal')
+
+            plt.tight_layout()
+            pdf_pages.savefig(fig, bbox_inches='tight', dpi=150)
+            plt.close(fig)
 
     print(f"✅ Regression slopes visualization saved: {pdf_path}")
     return pdf_path
