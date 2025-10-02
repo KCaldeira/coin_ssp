@@ -68,6 +68,23 @@ def get_adaptive_subplot_layout(n_targets):
         return (rows, cols, (16, height))
 
 
+def add_extremes_info_box(ax, data_min, data_max):
+    """
+    Add a text box showing min/max values to a map visualization.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes to add the info box to
+    data_min : float
+        Minimum value to display
+    data_max : float
+        Maximum value to display
+    """
+    max_min_text = f'Max: {data_max:.6f}\nMin: {data_min:.6f}'
+    ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
+           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
+           fontsize=10, verticalalignment='bottom')
 
 
 def create_forward_model_visualization(forward_results, config, output_dir, all_data):
@@ -195,8 +212,9 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                     # Formatting
                     ax.set_xlabel('Year', fontsize=12)
                     ax.set_ylabel('Global Mean GDP', fontsize=12)
+                    target_type_label = target_config.get('target_type', 'unknown').upper()
                     ax.set_title(f'{target_config["target_name"]} × {response_config["scaling_name"]} × {ssp.upper()}\n'
-                                f'({target_config.get("description", "")[:60]}...)',
+                                f'[{target_type_label}] ({target_config.get("description", "")[:50]}...)',
                                 fontsize=14, fontweight='bold')
                     ax.legend(fontsize=10)
                     ax.grid(True, alpha=0.3)
@@ -309,6 +327,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
 
                 # Plot each target on this page
                 for target_idx, target_name in enumerate(target_names):
+                    target_config = config['gdp_targets'][target_idx]
                     ax = plt.subplot(n_targets, 1, target_idx + 1)  # Dynamic rows, 1 column
 
                     # Extract data for this combination [time, lat, lon]
@@ -342,7 +361,8 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                     # Formatting
                     ax.set_xlabel('Year', fontsize=12)
                     ax.set_ylabel('Fractional Change from Baseline', fontsize=12)
-                    ax.set_title(f'Target: {target_name}', fontsize=14, fontweight='bold')
+                    target_type_label = target_config.get('target_type', 'unknown').upper()
+                    ax.set_title(f'Target: {target_name} [{target_type_label}]', fontsize=14, fontweight='bold')
                     ax.grid(True, alpha=0.3)
                     ax.legend(fontsize=10, loc='best')
 
@@ -540,7 +560,8 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     # Linear map formatting
                     linear_ax.set_xlabel('Longitude', fontsize=12)
                     linear_ax.set_ylabel('Latitude', fontsize=12)
-                    linear_ax.set_title(f'{ssp.upper()} × {target_name} × {response_name}\n'
+                    target_type_label = target_config.get('target_type', 'unknown').upper()
+                    linear_ax.set_title(f'{ssp.upper()} × {target_name} × {response_name} [{target_type_label}]\n'
                                 f'Climate Impact: (GDP_climate/GDP_weather - 1)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
@@ -608,7 +629,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     # Log10 map formatting
                     log10_ax.set_xlabel('Longitude', fontsize=12)
                     log10_ax.set_ylabel('Latitude', fontsize=12)
-                    log10_ax.set_title(f'{ssp.upper()} × {target_name} × {response_name}\n'
+                    log10_ax.set_title(f'{ssp.upper()} × {target_name} × {response_name} [{target_type_label}]\n'
                                 f'Climate Impact: log10(GDP_climate/GDP_weather)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
@@ -688,6 +709,13 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
 
     # Average GDP over target period for weighting
     gdp_target_period = np.mean(gdp_data[start_idx:end_idx], axis=0)  # [lat, lon]
+
+    # Calculate historical period GDP for slope weighting
+    historical_start = config['time_periods']['historical_period']['start_year']
+    historical_end = config['time_periods']['historical_period']['end_year']
+    hist_start_idx = historical_start - years[0]
+    hist_end_idx = historical_end - years[0] + 1
+    gdp_hist_period = np.mean(gdp_data[hist_start_idx:hist_end_idx], axis=0)  # [lat, lon]
 
     print(f"GDP-weighted global statistics for scaling factors (using {reference_ssp} GDP, {target_start}-{target_end}):")
     print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
@@ -813,21 +841,58 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             # Add the 12 scaling parameters
             csv_row.update(scaling_params)
 
-            # Add regression slope if available
-            regression_slope = np.nan
+            # Add regression slope statistics if available
+            slope_gdp_mean = np.nan
+            slope_gdp_median = np.nan
+            slope_max = np.nan
+            slope_min = np.nan
+            slope_std = np.nan
+
             if 'regression_slopes' in scaling_results:
                 regression_data = scaling_results['regression_slopes']
-                if resp_name in regression_data['gdp_weighted_means']:
-                    if target_name in regression_data['gdp_weighted_means'][resp_name]:
-                        regression_slope = regression_data['gdp_weighted_means'][resp_name][target_name]
-                    else:
-                        print(f"    Warning: Target '{target_name}' not found in regression data for response '{resp_name}'")
-                else:
-                    print(f"    Warning: Response '{resp_name}' not found in regression data. Available: {list(regression_data['gdp_weighted_means'].keys())}")
-            else:
-                print(f"    Warning: No 'regression_slopes' in scaling_results")
+                if resp_name in regression_data['slopes']:
+                    if target_name in regression_data['slopes'][resp_name]:
+                        # Get GDP-weighted mean from pre-computed value
+                        slope_gdp_mean = regression_data['gdp_weighted_means'][resp_name][target_name]
 
-            csv_row['gdp_weather_slope'] = regression_slope
+                        # Get slope data array for this combination
+                        slope_data = regression_data['slopes'][resp_name][target_name]
+                        success_mask = regression_data['success_mask'][resp_name][target_name]
+
+                        # Calculate GDP-weighted median using historical period GDP for slopes
+                        valid_slope_indices = valid_mask & success_mask & np.isfinite(slope_data)
+
+                        if np.sum(valid_slope_indices) > 0:
+                            # Flatten and filter
+                            flat_slope = slope_data.flatten()
+                            flat_gdp_hist = gdp_hist_period.flatten()  # Use historical period GDP for slopes
+                            flat_area_weights = area_weights_2d.flatten()
+                            flat_valid = valid_slope_indices.flatten()
+
+                            valid_slope = flat_slope[flat_valid]
+                            valid_gdp_slope = flat_gdp_hist[flat_valid]  # Historical period GDP
+                            valid_area_weights_slope = flat_area_weights[flat_valid]
+
+                            # GDP-weighted median using historical period GDP
+                            gdp_area_weights = valid_area_weights_slope * valid_gdp_slope
+                            combined_slope = np.column_stack([gdp_area_weights, valid_slope])
+                            sorted_indices = np.argsort(combined_slope[:, 1])
+                            sorted_combined = combined_slope[sorted_indices]
+                            cumsum_weights = np.cumsum(sorted_combined[:, 0])
+                            total_weight = cumsum_weights[-1]
+                            half_weight = total_weight / 2.0
+                            slope_gdp_median = np.interp(half_weight, cumsum_weights, sorted_combined[:, 1])
+
+                            # Max/min/std
+                            slope_max = np.max(valid_slope)
+                            slope_min = np.min(valid_slope)
+                            slope_std = np.std(valid_slope)
+
+            csv_row['slope_gdp_mean'] = slope_gdp_mean
+            csv_row['slope_gdp_median'] = slope_gdp_median
+            csv_row['slope_max'] = slope_max
+            csv_row['slope_min'] = slope_min
+            csv_row['slope_std'] = slope_std
 
             csv_data.append(csv_row)
 

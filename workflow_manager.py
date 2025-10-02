@@ -68,10 +68,10 @@ class WorkflowManager:
                 json_id = config['run_metadata']['json_id']
 
         # Create hierarchical output directory structure
-        # data/output/output_{model_name}_{timestamp}/{json_id}_{timestamp}
+        # data/output/output_{model_name}_{timestamp}/{json_id}
         base_output_dir = Path("./data/output")
         model_dir = base_output_dir / f"output_{model_name}_{self.timestamp}"
-        output_dir = model_dir / f"{json_id}_{self.timestamp}"
+        output_dir = model_dir / f"{json_id}"
 
         logger.info(f"Starting Stage 1: Running main.py with config {stage1_config}")
         logger.info(f"Stage 1 output directory: {output_dir}")
@@ -193,10 +193,10 @@ class WorkflowManager:
         json_id = config['run_metadata']['json_id']
 
         # Create hierarchical output directory structure for Stage 3
-        # data/output/output_{model_name}_{timestamp}/{json_id}_{timestamp}
+        # data/output/output_{model_name}_{timestamp}/{json_id}
         base_output_dir = Path("./data/output")
         model_dir = base_output_dir / f"output_{model_name}_{self.timestamp}"
-        output_dir = model_dir / f"{json_id}_{self.timestamp}"
+        output_dir = model_dir / f"{json_id}"
 
         logger.info(f"Starting Stage 3: Running main.py with generated config {stage2_config}")
         logger.info(f"Stage 3 output directory: {output_dir}")

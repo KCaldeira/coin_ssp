@@ -504,6 +504,21 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     scaled_param_names = scaling_results['scaled_param_names']
     coordinates = scaling_results['_coordinates']
 
+    # Extract regression slopes if available
+    has_regression_slopes = 'regression_slopes' in scaling_results
+    if has_regression_slopes:
+        regression_data = scaling_results['regression_slopes']
+        # Convert nested dictionaries to arrays [response_func, target, lat, lon]
+        regression_slopes = np.zeros((n_response_func, n_target, nlat, nlon))
+        regression_success_mask = np.zeros((n_response_func, n_target, nlat, nlon), dtype=bool)
+
+        for resp_idx, resp_name in enumerate(response_function_names):
+            if resp_name in regression_data['slopes']:
+                for target_idx, target_name in enumerate(target_names):
+                    if target_name in regression_data['slopes'][resp_name]:
+                        regression_slopes[resp_idx, target_idx, :, :] = regression_data['slopes'][resp_name][target_name]
+                        regression_success_mask[resp_idx, target_idx, :, :] = regression_data['success_mask'][resp_name][target_name]
+
     # Arrays are already in the correct format [response_func, target, lat, lon]
     scaling_factors_t = scaling_factors  # [response_func, target, lat, lon]
     optimization_errors_t = optimization_errors  # [response_func, target, lat, lon]
@@ -511,14 +526,21 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     scaled_parameters_t = scaled_parameters  # [response_func, target, param, lat, lon]
 
     # Create xarray dataset with lat,lon as last dimensions
+    data_vars = {
+        'scaling_factors': (['response_func', 'target', 'lat', 'lon'], scaling_factors_t),
+        'optimization_errors': (['response_func', 'target', 'lat', 'lon'], optimization_errors_t),
+        'convergence_flags': (['response_func', 'target', 'lat', 'lon'], convergence_flags_t),
+        'scaled_parameters': (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters_t),
+        'valid_mask': (['lat', 'lon'], valid_mask)
+    }
+
+    # Add regression slopes if available
+    if has_regression_slopes:
+        data_vars['regression_slopes'] = (['response_func', 'target', 'lat', 'lon'], regression_slopes)
+        data_vars['regression_success_mask'] = (['response_func', 'target', 'lat', 'lon'], regression_success_mask)
+
     ds = xr.Dataset(
-        {
-            'scaling_factors': (['response_func', 'target', 'lat', 'lon'], scaling_factors_t),
-            'optimization_errors': (['response_func', 'target', 'lat', 'lon'], optimization_errors_t),
-            'convergence_flags': (['response_func', 'target', 'lat', 'lon'], convergence_flags_t),
-            'scaled_parameters': (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters_t),
-            'valid_mask': (['lat', 'lon'], valid_mask)
-        },
+        data_vars,
         coords={
             'response_func': response_function_names,
             'target': target_names,
@@ -561,6 +583,19 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         'units': 'boolean',
         'description': 'True for grid cells with economic activity used in optimization'
     }
+
+    # Add regression slopes attributes if available
+    if has_regression_slopes:
+        ds.regression_slopes.attrs = {
+            'long_name': 'Weather-GDP regression slopes',
+            'units': 'fractional change per degree C',
+            'description': 'Linear regression slopes of GDP variability vs temperature variability over historical period'
+        }
+        ds.regression_success_mask.attrs = {
+            'long_name': 'Regression success mask',
+            'units': 'boolean',
+            'description': 'True where regression analysis was successful'
+        }
 
     # Add global attributes
     serializable_config = create_serializable_config(config)

@@ -113,9 +113,9 @@ def setup_output_directory(config: Dict[str, Any]) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_output_dir = Path("./data/output")
 
-    # Create hierarchical structure: output_{model_name}_{timestamp}/{json_id}_{timestamp}
+    # Create hierarchical structure: output_{model_name}_{timestamp}/{json_id}
     model_dir = base_output_dir / f"output_{model_name}_{timestamp}"
-    output_dir = model_dir / f"{json_id}_{timestamp}"
+    output_dir = model_dir / f"{json_id}"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created output directory: {output_dir}")
