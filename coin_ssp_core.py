@@ -686,6 +686,7 @@ def calculate_weather_gdp_regression_slopes(
     tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
     pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
     gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')
+    pop_data = get_ssp_data(all_data, reference_ssp, 'pop')
 
     # Get time indices for historical period
     years = all_data['years']
@@ -771,7 +772,7 @@ def calculate_weather_gdp_regression_slopes(
 
                     # Extract baseline TFP for this cell
                     cell_tfp_baseline = reference_tfp[reference_ssp]['tfp_baseline'][:, lat_idx, lon_idx]
-                    cell_pop = gdp_data[:, lat_idx, lon_idx]  # Population from GDP data
+                    cell_pop = pop_data[:, lat_idx, lon_idx]
                     cell_tas = tas_data[:, lat_idx, lon_idx]
                     cell_pr = pr_data[:, lat_idx, lon_idx]
 
