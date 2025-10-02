@@ -20,6 +20,12 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Use numpy operations** instead of loops and conditionals where possible
 - **Compute once, use many times** - move invariant calculations outside loops and create centralized helper functions
 
+### Naming Conventions
+- **Consistent naming** - use the same variable/field names throughout the codebase when referring to the same concept
+- **Descriptive names preferred** - long, clear names are better than short, ambiguous ones
+- **Follow source naming** - when accessing data from a structure (e.g., `config['response_function_scalings']['scaling_name']`), prefer using the same field name (`scaling_name`) or a composite (`response_function_scaling_name`) rather than inventing new descriptors
+- **Example**: If config has `scaling_name` under `response_function_scalings`, use `scaling_name` or `response_function_scaling_name`, not `response_func` or other variations
+
 ### Function Design
 - Functions should assume valid inputs and focus on their core mathematical/logical purpose
 - Let Python's natural error messages guide debugging rather than custom error handling

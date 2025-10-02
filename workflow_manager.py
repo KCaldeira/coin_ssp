@@ -41,10 +41,11 @@ logger = logging.getLogger(__name__)
 class WorkflowManager:
     """Manages the three-stage COIN-SSP workflow pipeline."""
 
-    def __init__(self, config_dir: Path, output_base_dir: Path = None):
+    def __init__(self, config_dir: Path, output_base_dir: Path = None, verbose: bool = False):
         self.config_dir = Path(config_dir)
         self.output_base_dir = output_base_dir or Path('./workflow_outputs')
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.verbose = verbose
 
     def run_stage1(self, stage1_config: Path, model_name: str = None, json_id: str = None) -> Path:
         """
@@ -79,21 +80,28 @@ class WorkflowManager:
         try:
             # Run main.py with the stage 1 config and explicit output directory
             cmd = ['python', 'main.py', str(stage1_config), '--output-dir', str(output_dir)]
-            result = subprocess.run(
-                cmd,
-                cwd=Path.cwd(),
-                capture_output=True,
-                text=True,
-                check=True
-            )
+
+            if self.verbose:
+                # Pass through output directly to terminal
+                result = subprocess.run(cmd, cwd=Path.cwd(), check=True)
+            else:
+                # Capture output for logging
+                result = subprocess.run(
+                    cmd,
+                    cwd=Path.cwd(),
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                logger.debug(f"Stage 1 stdout: {result.stdout}")
 
             logger.info("Stage 1 completed successfully")
-            logger.debug(f"Stage 1 stdout: {result.stdout}")
             return output_dir
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Stage 1 failed with exit code {e.returncode}")
-            logger.error(f"Stage 1 stderr: {e.stderr}")
+            if not self.verbose and hasattr(e, 'stderr'):
+                logger.error(f"Stage 1 stderr: {e.stderr}")
             raise
 
 
@@ -204,21 +212,28 @@ class WorkflowManager:
         try:
             # Run main.py with the stage 2 config and explicit output directory
             cmd = ['python', 'main.py', str(stage2_config), '--output-dir', str(output_dir)]
-            result = subprocess.run(
-                cmd,
-                cwd=Path.cwd(),
-                capture_output=True,
-                text=True,
-                check=True
-            )
+
+            if self.verbose:
+                # Pass through output directly to terminal
+                result = subprocess.run(cmd, cwd=Path.cwd(), check=True)
+            else:
+                # Capture output for logging
+                result = subprocess.run(
+                    cmd,
+                    cwd=Path.cwd(),
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                logger.debug(f"Stage 3 stdout: {result.stdout}")
 
             logger.info("Stage 3 completed successfully")
-            logger.debug(f"Stage 3 stdout: {result.stdout}")
             return output_dir
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Stage 3 failed with exit code {e.returncode}")
-            logger.error(f"Stage 3 stderr: {e.stderr}")
+            if not self.verbose and hasattr(e, 'stderr'):
+                logger.error(f"Stage 3 stderr: {e.stderr}")
             raise
 
     def run_full_workflow(self, stage1_config: Path,
@@ -302,7 +317,7 @@ def main():
 
     try:
         # Initialize workflow manager
-        workflow = WorkflowManager(args.config_dir, args.output_dir)
+        workflow = WorkflowManager(args.config_dir, args.output_dir, verbose=args.verbose)
 
         if args.start_stage == 1:
             # Full workflow

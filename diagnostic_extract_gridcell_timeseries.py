@@ -72,9 +72,9 @@ def find_extreme_slope_locations(step3_nc_path: str, response_idx: int = 0, targ
     lat = ds['lat'].values
     lon = ds['lon'].values
 
-    # Get response function and target names
-    response_names = ds['response_function_names'].values
-    target_names = ds['target_names'].values
+    # Get response function and target names from coordinates
+    response_names = ds.coords['response_func'].values
+    target_names = ds.coords['target'].values
 
     print(f"Response function: {response_names[response_idx]}")
     print(f"Target: {target_names[target_idx]}")
@@ -273,9 +273,12 @@ def main():
     # Find extreme slope locations
     max_info, min_info = find_extreme_slope_locations(step3_nc_file, response_idx, target_idx)
 
+    # Determine output directory from step3 file path
+    output_dir = Path(step3_nc_file).parent
+
     # Load all data
     print("\nLoading all data...")
-    all_data = load_all_data(config)
+    all_data = load_all_data(config, str(output_dir))
 
     # Extract time series for maximum slope location
     print("\n" + "="*80)

@@ -675,10 +675,6 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         'reference_ssp': reference_ssp,
         '_coordinates': all_data['_metadata']  # coordinate information
     }
-    
-    # Write results to NetCDF file
-    output_path = get_step_output_path(output_dir, 3, config, reference_ssp, "scaling_factors", "nc")
-    save_step3_results_netcdf(scaling_results, output_path, config, all_data)
 
     # Generate scaling factors visualization
     print("Generating scaling factors visualization...")
@@ -707,6 +703,10 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
     # Display GDP-weighted scaling factor summary (now includes regression slopes)
     print_gdp_weighted_scaling_summary(scaling_results, config, all_data, output_dir)
+
+    # Write results to NetCDF file (AFTER regression slopes are added)
+    output_path = get_step_output_path(output_dir, 3, config, reference_ssp, "scaling_factors", "nc")
+    save_step3_results_netcdf(scaling_results, output_path, config, all_data)
 
     # If variability calibration was performed, write its summary too
     if variability_calibration_results is not None:
