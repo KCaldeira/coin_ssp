@@ -7,12 +7,25 @@ from Step 3 results, then extracts all time-varying data from all_data
 for those locations and writes to CSV files.
 
 Usage:
-    python diagnostic_extract_gridcell_timeseries.py <config_file> <step3_netcdf_file>
+    python diagnostic_extract_gridcell_timeseries.py <config_file> [step3_netcdf_file] [response_idx] [target_idx]
 
-Example:
+    The config_file is required. If step3_netcdf_file is omitted, the script will
+    auto-detect the most recent step3 NetCDF file matching the config's json_id.
+
+Examples:
+    # Auto-detect step3 file based on config
+    python diagnostic_extract_gridcell_timeseries.py coin_ssp_config_linear_parameter_sensitivity.json
+
+    # Specify step3 file explicitly
     python diagnostic_extract_gridcell_timeseries.py \
         coin_ssp_config_linear_parameter_sensitivity.json \
         data/output/output_CanESM5_20251002_095048/linear-sensitivity/step3_linear-sensitivity_CanESM5_ssp245_scaling_factors.nc
+
+    # Specify files and indices
+    python diagnostic_extract_gridcell_timeseries.py \
+        coin_ssp_config_linear_parameter_sensitivity.json \
+        data/output/output_CanESM5_20251002_095048/linear-sensitivity/step3_linear-sensitivity_CanESM5_ssp245_scaling_factors.nc \
+        0 1
 """
 
 import sys
@@ -21,7 +34,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
+import glob
 
 from coin_ssp_utils import load_all_data
 
@@ -166,17 +180,83 @@ def extract_timeseries_for_location(all_data: Dict[str, Any], lat_idx: int, lon_
     return df
 
 
+def find_step3_file_for_config(config_path: str) -> Optional[Path]:
+    """
+    Find the most recent step3 NetCDF file matching the config's json_id.
+
+    Parameters
+    ----------
+    config_path : str
+        Path to config file
+
+    Returns
+    -------
+    Optional[Path]
+        Path to step3 NetCDF file, or None if not found
+    """
+    # Load config to get json_id and model_name
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+
+    json_id = config['run_metadata']['json_id']
+    model_name = config['climate_model']['model_name']
+    reference_ssp = config['ssp_scenarios']['reference_ssp']
+
+    # Search for step3 NetCDF files matching this json_id
+    output_base = Path("./data/output")
+    if not output_base.exists():
+        return None
+
+    # Pattern: step3_{json_id}_{model_name}_{reference_ssp}_scaling_factors.nc
+    pattern = f"**/step3_{json_id}_{model_name}_{reference_ssp}_scaling_factors.nc"
+
+    # Find all matching files
+    matching_files = sorted(output_base.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    if not matching_files:
+        return None
+
+    # Return most recent
+    return matching_files[0]
+
+
 def main():
-    if len(sys.argv) < 3:
+    # Config file is required
+    if len(sys.argv) < 2:
+        print("ERROR: Config file is required")
         print(__doc__)
         sys.exit(1)
 
     config_file = sys.argv[1]
-    step3_nc_file = sys.argv[2]
 
-    # Optional: response and target indices
-    response_idx = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-    target_idx = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+    # Check if config file exists
+    if not Path(config_file).exists():
+        print(f"ERROR: Config file not found: {config_file}")
+        sys.exit(1)
+
+    # Auto-detect step3 file if not provided
+    if len(sys.argv) < 3:
+        print(f"Config file: {config_file}")
+        print("Auto-detecting step3 NetCDF file...")
+        step3_nc_file = find_step3_file_for_config(config_file)
+
+        if step3_nc_file is None:
+            print(f"ERROR: Could not find step3 NetCDF file for config {config_file}")
+            print("Please specify the step3 NetCDF file explicitly as the second argument")
+            sys.exit(1)
+
+        print(f"Auto-detected step3 file: {step3_nc_file}")
+
+        # No additional arguments, use defaults
+        response_idx = 0
+        target_idx = 0
+    else:
+        # step3 file provided
+        step3_nc_file = sys.argv[2]
+
+        # Optional: response and target indices
+        response_idx = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+        target_idx = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 
     print("="*80)
     print("DIAGNOSTIC: Grid Cell Time Series Extraction")
