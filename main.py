@@ -33,7 +33,6 @@ from coin_ssp_utils import (
     calculate_time_means, calculate_global_mean,
     calculate_all_target_reductions, load_all_data,
     calculate_tfp_coin_ssp,
-    apply_time_series_filter,
     calculate_area_weights, calculate_weather_vars
 )
 from coin_ssp_netcdf import (

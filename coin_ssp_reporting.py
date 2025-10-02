@@ -33,7 +33,7 @@ from coin_ssp_netcdf import (
     create_serializable_config, extract_year_coordinate
 )
 from coin_ssp_math_utils import (
-    apply_time_series_filter, calculate_zero_biased_range, calculate_zero_biased_axis_range,
+    apply_loess_subtract, calculate_zero_biased_range, calculate_zero_biased_axis_range,
     calculate_area_weights, calculate_time_means, calculate_global_mean
 )
 from coin_ssp_utils import get_ssp_data, get_grid_metadata

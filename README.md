@@ -198,8 +198,8 @@ Key functions:
 - `calculate_area_weights()` → Cosine-latitude area weighting
 - `calculate_zero_biased_range()` → Visualization range calculation (extends to include zero)
 - `calculate_time_means()` → Temporal averaging over specified periods
-- `apply_loess_divide()` → LOESS smoothing and ratio calculation
-- `apply_time_series_filter()` → LOESS filtering for weather component extraction
+- `apply_loess_subtract()` → Degree-2 LOESS smoothing with trend subtraction and reference period mean addition
+- `apply_loess_divide()` → Degree-2 LOESS smoothing applied to log-transformed data (difference of logs for quasi-exponential series like GDP)
 
 **Data I/O Operations** → **[coin_ssp_netcdf.py]**
 - `create_serializable_config()` → Converts config dict to JSON-safe format for NetCDF attributes

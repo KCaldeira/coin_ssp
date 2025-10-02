@@ -39,7 +39,7 @@ from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
 from scipy import stats
-from coin_ssp_utils import apply_time_series_filter, filter_scaling_params, get_ssp_data, get_grid_metadata
+from coin_ssp_utils import filter_scaling_params, get_ssp_data, get_grid_metadata
 from coin_ssp_math_utils import apply_loess_divide
 
 from coin_ssp_models import ScalingParams, ModelParams

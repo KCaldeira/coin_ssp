@@ -3,6 +3,6 @@ matplotlib
 scipy
 pyam-iamc
 pandas
-statsmodels==0.14.5
+scikit-misc
 xarray
 netcdf4

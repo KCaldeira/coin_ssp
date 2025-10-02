@@ -1,58 +1,13 @@
-import copy
-import json
 import numpy as np
-import statsmodels.api as sm
-import xarray as xr
-from typing import Dict, Any
+from skmisc.loess import loess
 
 
 
-
-
-def apply_time_series_filter(time_series, filter_width, ref_start_idx, ref_end_idx):
-    """
-    Apply LOESS filter to time series and remove trend relative to reference period mean.
-
-    Parameters
-    ----------
-    time_series : array-like
-        Annual time series values (first element corresponds to year 0)
-    filter_width : int
-        Width parameter (approx. number of years to smooth over)
-    ref_start_idx : int
-        Start index of reference period (0-indexed)
-    ref_end_idx : int
-        End index of reference period (0-indexed, inclusive)
-
-    Returns
-    -------
-    numpy.ndarray
-        Filtered time series with trend removed and reference period mean added back
-    """
-    ts = np.array(time_series, dtype=float)
-    n = len(ts)
-    t = np.arange(n, dtype=float)
-
-    # Calculate reference period mean
-    mean_of_reference_period = np.mean(ts[ref_start_idx:ref_end_idx+1])
-
-    # LOWESS expects frac = proportion of data used in each local regression
-    # Map filter_width (years) to fraction of total series
-    frac = min(1.0, filter_width / n)
-
-    # Run LOESS smoothing
-    filtered_series = sm.nonparametric.lowess(ts, t, frac=frac,
-                                              it=1, return_sorted=False)
-
-    # Apply detrending to all years: remove trend and add reference period mean
-    result = ts - filtered_series + mean_of_reference_period
-
-    return result
 
 
 def _apply_loess_smoothing(time_series, filter_width):
     """
-    Core LOESS smoothing function.
+    Core degree-2 LOESS smoothing function.
 
     Parameters
     ----------
@@ -64,7 +19,7 @@ def _apply_loess_smoothing(time_series, filter_width):
     Returns
     -------
     numpy.ndarray
-        LOESS smoothed time series
+        LOESS smoothed time series (degree-2 quadratic)
     """
     ts = np.array(time_series, dtype=float)
     n = len(ts)
@@ -73,15 +28,19 @@ def _apply_loess_smoothing(time_series, filter_width):
     # Map filter_width (years) to fraction of total series
     frac = min(1.0, filter_width / n)
 
-    # Run LOESS smoothing
-    smoothed_series = sm.nonparametric.lowess(ts, t, frac=frac,
-                                              it=1, return_sorted=False)
+    # Run LOESS smoothing with degree=2 (quadratic)
+    lo = loess(t, ts)
+    lo.model.span = frac
+    lo.model.degree = 2
+    lo.fit()
+
+    smoothed_series = lo.predict(t, stderror=False).values
     return smoothed_series
 
 
-def apply_loess_subtract(time_series, filter_width, ref_start_idx, ref_end_idx):
+def apply_loess_subtract(time_series, filter_width, ref_start_idx=None, ref_end_idx=None):
     """
-    Apply LOESS smoothing and subtract trend, adding back reference period mean.
+    Apply degree-2 LOESS smoothing and subtract trend, adding back reference period mean.
 
     This is the standard approach for extracting weather variability components
     from climate variables like temperature and precipitation.
@@ -92,10 +51,10 @@ def apply_loess_subtract(time_series, filter_width, ref_start_idx, ref_end_idx):
         Annual time series values
     filter_width : int
         Width parameter (approx. number of years to smooth over)
-    ref_start_idx : int
-        Start index of reference period (0-indexed)
-    ref_end_idx : int
-        End index of reference period (0-indexed, inclusive)
+    ref_start_idx : int, optional
+        Start index of reference period (0-indexed). If None, uses entire series.
+    ref_end_idx : int, optional
+        End index of reference period (0-indexed, inclusive). If None, uses entire series.
 
     Returns
     -------
@@ -105,7 +64,10 @@ def apply_loess_subtract(time_series, filter_width, ref_start_idx, ref_end_idx):
     ts = np.array(time_series, dtype=float)
 
     # Calculate reference period mean
-    mean_of_reference_period = np.mean(ts[ref_start_idx:ref_end_idx+1])
+    if ref_start_idx is None or ref_end_idx is None:
+        mean_of_reference_period = np.mean(ts)
+    else:
+        mean_of_reference_period = np.mean(ts[ref_start_idx:ref_end_idx+1])
 
     # Get LOESS smoothed trend
     smoothed_series = _apply_loess_smoothing(ts, filter_width)
@@ -135,14 +97,21 @@ def apply_loess_divide(time_series, filter_width):
     -------
     numpy.ndarray
         Time series divided by LOESS smoothed trend (ratio values)
+        
+        While this conceptually a division, because it is typically applied to GDP which is 
+        quasi-exponential, we are actually going to take the difference of the logs, which would
+        have similar values in the generatl case, but this way the loess smoothing doesn't need to take into
+        account the exponential growth in gdp (because it is quasi-linear growth in log space)
     """
-    ts = np.array(time_series, dtype=float)
+    lnts = np.log(np.array(time_series, dtype=float))
 
     # Get LOESS smoothed trend
-    smoothed_series = _apply_loess_smoothing(ts, filter_width)
+    smoothed_series = _apply_loess_smoothing(lnts, filter_width)
 
     # Divide original by smoothed trend
-    result = ts / smoothed_series
+    # result = ts / smoothed_series
+    # Difference in logs is close to ratio for small changes, but should be better behaved for quasi-exponential data
+    result = lnts - smoothed_series
 
     return result
 

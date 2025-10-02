@@ -21,7 +21,7 @@ from coin_ssp_netcdf import (
     resolve_netcdf_filepath
 )
 from coin_ssp_math_utils import (
-    apply_time_series_filter, calculate_zero_biased_range, calculate_zero_biased_axis_range,
+    apply_loess_subtract, calculate_zero_biased_range, calculate_zero_biased_axis_range,
     calculate_area_weights, calculate_time_means, calculate_global_mean
 )
 from coin_ssp_target_calculations import (
@@ -709,10 +709,10 @@ def calculate_weather_vars(all_data, config):
                 cell_pr = pr_data[:, lat_idx, lon_idx]
 
                 # Apply weather filtering
-                tas_weather[:, lat_idx, lon_idx] = apply_time_series_filter(
+                tas_weather[:, lat_idx, lon_idx] = apply_loess_subtract(
                     cell_tas, filter_width, ref_start_idx, ref_end_idx
                 )
-                pr_weather[:, lat_idx, lon_idx] = apply_time_series_filter(
+                pr_weather[:, lat_idx, lon_idx] = apply_loess_subtract(
                     cell_pr, filter_width, ref_start_idx, ref_end_idx
                 )
 
