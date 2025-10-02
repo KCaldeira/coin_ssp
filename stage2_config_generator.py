@@ -56,10 +56,8 @@ def load_stage1_results(stage1_output_dir: str) -> Dict[str, float]:
                 gdp_weighted_medians[param] = gdp_weighted_median
                 print(f"  {param}: {gdp_weighted_median:.6f}")
             else:
-                print(f"  Warning: No non-zero assessment found for {param}, setting to 0.0")
                 gdp_weighted_medians[param] = 0.0
         else:
-            print(f"  Warning: {param} not found in CSV, setting to 0.0")
             gdp_weighted_medians[param] = 0.0
 
     return gdp_weighted_medians
