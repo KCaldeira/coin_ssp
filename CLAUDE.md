@@ -19,6 +19,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Favor mathematical clarity** over defensive checks
 - **Use numpy operations** instead of loops and conditionals where possible
 - **Compute once, use many times** - move invariant calculations outside loops and create centralized helper functions
+- **No backward compatibility** - do not add conditional logic to support deprecated field names or old configurations. Update all code and configurations to use current conventions.
 
 ### Naming Conventions
 - **Consistent naming** - use the same variable/field names throughout the codebase when referring to the same concept

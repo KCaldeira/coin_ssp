@@ -157,6 +157,9 @@ def generate_stage3_config(stage1_medians: Dict[str, float],
     # Replace response function scalings with new multi-variable versions
     stage3_config['response_function_scalings'] = new_scalings
 
+    # Copy GDP targets from template
+    stage3_config['gdp_targets'] = template_config['gdp_targets']
+
     # Enable forward simulation SSPs for actual results
     stage3_config['ssp_scenarios']['forward_simulation_ssps'] = ['ssp245', 'ssp585']
 
