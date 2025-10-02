@@ -154,7 +154,7 @@
         "scaling_name": "y+k_linear",
         "description": "Linear temperature sensitivity for y+k",
         "y_tas1": 1.0,
-        "k_tas1": 1.0,
+        "k_tas1": 1.0
       },
       {
         "scaling_name": "y+tfp_linear",
