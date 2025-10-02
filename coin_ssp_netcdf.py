@@ -511,6 +511,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         # Convert nested dictionaries to arrays [response_func, target, lat, lon]
         regression_slopes = np.zeros((n_response_func, n_target, nlat, nlon))
         regression_success_mask = np.zeros((n_response_func, n_target, nlat, nlon), dtype=bool)
+        gdp_weighted_means = np.zeros((n_response_func, n_target))
 
         for resp_idx, resp_name in enumerate(response_function_names):
             if resp_name in regression_data['slopes']:
@@ -518,6 +519,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
                     if target_name in regression_data['slopes'][resp_name]:
                         regression_slopes[resp_idx, target_idx, :, :] = regression_data['slopes'][resp_name][target_name]
                         regression_success_mask[resp_idx, target_idx, :, :] = regression_data['success_mask'][resp_name][target_name]
+                        gdp_weighted_means[resp_idx, target_idx] = regression_data['gdp_weighted_means'][resp_name][target_name]
 
     # Arrays are already in the correct format [response_func, target, lat, lon]
     scaling_factors_t = scaling_factors  # [response_func, target, lat, lon]
@@ -538,6 +540,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     if has_regression_slopes:
         data_vars['regression_slopes'] = (['response_func', 'target', 'lat', 'lon'], regression_slopes)
         data_vars['regression_success_mask'] = (['response_func', 'target', 'lat', 'lon'], regression_success_mask)
+        data_vars['gdp_weighted_means'] = (['response_func', 'target'], gdp_weighted_means)
 
     ds = xr.Dataset(
         data_vars,
@@ -595,6 +598,11 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
             'long_name': 'Regression success mask',
             'units': 'boolean',
             'description': 'True where regression analysis was successful'
+        }
+        ds.gdp_weighted_means.attrs = {
+            'long_name': 'GDP-weighted mean regression slopes',
+            'units': 'fractional change per degree C',
+            'description': 'GDP-weighted spatial mean of regression slopes for each response function and target'
         }
 
     # Add global attributes

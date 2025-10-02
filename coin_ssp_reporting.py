@@ -68,7 +68,7 @@ def get_adaptive_subplot_layout(n_targets):
         return (rows, cols, (16, height))
 
 
-def add_extremes_info_box(ax, data_min, data_max):
+def add_extremes_info_box(ax, data_min, data_max, gdp_weighted_mean=None, lat=None, lon=None, data_array=None, valid_mask=None):
     """
     Add a text box showing min/max values to a map visualization.
 
@@ -80,8 +80,44 @@ def add_extremes_info_box(ax, data_min, data_max):
         Minimum value to display
     data_max : float
         Maximum value to display
+    gdp_weighted_mean : float, optional
+        GDP-weighted mean value to display
+    lat : array, optional
+        Latitude coordinates for location display
+    lon : array, optional
+        Longitude coordinates for location display
+    data_array : array, optional
+        2D data array [lat, lon] to find max/min locations
+    valid_mask : array, optional
+        Boolean mask [lat, lon] for valid cells
     """
-    max_min_text = f'Max: {data_max:.6f}\nMin: {data_min:.6f}'
+    # Build text with coordinates if available
+    if data_array is not None and lat is not None and lon is not None:
+        # Apply valid mask if provided
+        if valid_mask is not None:
+            masked_data = np.where(valid_mask, data_array, np.nan)
+        else:
+            masked_data = data_array
+
+        # Find max location
+        max_idx = np.unravel_index(np.nanargmax(masked_data), masked_data.shape)
+        max_lat, max_lon = lat[max_idx[0]], lon[max_idx[1]]
+
+        # Find min location
+        min_idx = np.unravel_index(np.nanargmin(masked_data), masked_data.shape)
+        min_lat, min_lon = lat[min_idx[0]], lon[min_idx[1]]
+
+        max_text = f'Max: {data_max:.6f} ({max_lat:.1f}, {max_lon:.1f})'
+        min_text = f'Min: {data_min:.6f} ({min_lat:.1f}, {min_lon:.1f})'
+    else:
+        max_text = f'Max: {data_max:.6f}'
+        min_text = f'Min: {data_min:.6f}'
+
+    if gdp_weighted_mean is not None:
+        max_min_text = f'{max_text}\n{min_text}\nGDP-wtd mean: {gdp_weighted_mean:.6f}'
+    else:
+        max_min_text = f'{max_text}\n{min_text}'
+
     ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
            bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
            fontsize=10, verticalalignment='bottom')
@@ -565,11 +601,9 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                                 f'Climate Impact: (GDP_climate/GDP_weather - 1)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
-                    # Linear max/min box
-                    lin_max_min_text = f'Max: {lin_actual_max:.4f}\nMin: {lin_actual_min:.4f}'
-                    linear_ax.text(0.02, 0.08, lin_max_min_text, transform=linear_ax.transAxes,
-                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
-                           fontsize=10, verticalalignment='bottom')
+                    # Linear max/min box with coordinates
+                    add_extremes_info_box(linear_ax, lin_actual_min, lin_actual_max,
+                                        lat=lat, lon=lon, data_array=impact_ratio_linear, valid_mask=valid_mask)
 
                     # Linear colorbar
                     lin_cbar = plt.colorbar(lin_im, ax=linear_ax, shrink=0.6, aspect=12)
@@ -633,11 +667,19 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                                 f'Climate Impact: log10(GDP_climate/GDP_weather)\nTarget Period Mean: {target_start}-{target_end}',
                                 fontsize=14, fontweight='bold')
 
-                    # Log10 max/min box (show both log and original ratio values)
+                    # Log10 max/min box (show both log and original ratio values with coordinates)
                     if len(valid_log10) > 0:
                         max_ratio = 10**log_actual_max
                         min_ratio = 10**log_actual_min
-                        log_max_min_text = f'Max: {log_actual_max:.2f} (×{max_ratio:.2e})\nMin: {log_actual_min:.2f} (×{min_ratio:.2e})'
+
+                        # Find max/min locations
+                        masked_log = np.where(valid_mask, impact_ratio_log10, np.nan)
+                        max_idx = np.unravel_index(np.nanargmax(masked_log), masked_log.shape)
+                        min_idx = np.unravel_index(np.nanargmin(masked_log), masked_log.shape)
+                        max_lat, max_lon = lat[max_idx[0]], lon[max_idx[1]]
+                        min_lat, min_lon = lat[min_idx[0]], lon[min_idx[1]]
+
+                        log_max_min_text = f'Max: {log_actual_max:.2f} (×{max_ratio:.2e}) ({max_lat:.1f}, {max_lon:.1f})\nMin: {log_actual_min:.2f} (×{min_ratio:.2e}) ({min_lat:.1f}, {min_lon:.1f})'
                     else:
                         log_max_min_text = 'No valid data'
                     log10_ax.text(0.02, 0.08, log_max_min_text, transform=log10_ax.transAxes,
@@ -1461,11 +1503,9 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, al
                 ax.set_ylim(lat.min(), lat.max())
                 ax.set_aspect('equal')
 
-                # Add max/min value box in lower part of the map
-                max_min_text = f'Max: {actual_max:.4f}\nMin: {actual_min:.4f}'
-                ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
-                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
-                       fontsize=10, verticalalignment='bottom')
+                # Add max/min value box with coordinates
+                add_extremes_info_box(ax, actual_min, actual_max,
+                                     lat=lat, lon=lon, data_array=sf_map, valid_mask=valid_mask)
 
                 # Add colorbar for each subplot (larger for better visibility)
                 cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=12)
@@ -1627,11 +1667,9 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
                 ax.set_ylim(lat.min(), lat.max())
                 ax.set_aspect('equal')
 
-                # Add max/min value box in lower part of the map
-                max_min_text = f'Max: {actual_max:.6f}\nMin: {actual_min:.6f}'
-                ax.text(0.02, 0.08, max_min_text, transform=ax.transAxes,
-                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='black'),
-                       fontsize=10, verticalalignment='bottom')
+                # Add max/min value box with coordinates
+                add_extremes_info_box(ax, actual_min, actual_max,
+                                     lat=lat, lon=lon, data_array=obj_map, valid_mask=valid_mask)
 
                 # Add colorbar for each subplot (larger for better visibility)
                 cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=12)
@@ -1694,27 +1732,8 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
     lon = coordinates['lon']
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
-    # Calculate color scale from all regression slope data
-    all_slope_values = []
-    for response_name in response_function_names:
-        if response_name in regression_data['slopes']:
-            for target_name in target_names:
-                if target_name in regression_data['slopes'][response_name]:
-                    slope_data = regression_data['slopes'][response_name][target_name]
-                    success_mask = regression_data['success_mask'][response_name][target_name]
-                    valid_slopes = slope_data[valid_mask & success_mask]
-                    if len(valid_slopes) > 0:
-                        all_slope_values.extend(valid_slopes.flatten())
-
-    if len(all_slope_values) > 0:
-        # Use zero-biased range for regression slopes (can be positive or negative)
-        vmin, vmax = calculate_zero_biased_range(all_slope_values)
-    else:
-        vmin, vmax = -0.1, 0.1  # Fallback range
-
     # Use RdBu_r colormap (red=negative, blue=positive, white=zero)
     cmap = plt.cm.RdBu_r
-    norm = TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
 
     # Calculate adaptive layout based on number of response functions
     n_response_funcs = len(response_function_names)
@@ -1756,6 +1775,8 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
                 # Extract regression slope data
                 slope_data = regression_data['slopes'][response_name][target_name]
                 success_mask = regression_data['success_mask'][response_name][target_name]
+
+                # Get GDP-weighted mean from nested dict
                 gdp_weighted_mean = regression_data['gdp_weighted_means'][response_name][target_name]
 
                 # Create subplot
@@ -1765,8 +1786,20 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
                 plot_data = np.full_like(slope_data, np.nan)
                 plot_data[valid_mask & success_mask] = slope_data[valid_mask & success_mask]
 
-                # Create the map
-                mesh = ax.pcolormesh(lon_grid, lat_grid, plot_data, cmap=cmap, norm=norm, shading='auto')
+                # Calculate panel-specific color scale
+                valid_slopes = slope_data[valid_mask & success_mask]
+                if len(valid_slopes) > 0:
+                    data_min, data_max = np.min(valid_slopes), np.max(valid_slopes)
+                    vmin, vmax = calculate_zero_biased_range(valid_slopes)
+                else:
+                    data_min = data_max = 0.0
+                    vmin, vmax = -0.1, 0.1
+
+                # Create panel-specific normalization
+                panel_norm = TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
+
+                # Create the map with panel-specific color scale
+                mesh = ax.pcolormesh(lon_grid, lat_grid, plot_data, cmap=cmap, norm=panel_norm, shading='auto')
 
                 # Add coastlines
                 ax.contour(lon_grid, lat_grid, valid_mask, levels=[0.5], colors='black', linewidths=0.5, alpha=0.7)
@@ -1775,18 +1808,11 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
                 ax.set_xlabel('Longitude', fontsize=12)
                 ax.set_ylabel('Latitude', fontsize=12)
 
-                # Calculate valid range for min/max box
-                valid_slopes = slope_data[valid_mask & success_mask]
-                if len(valid_slopes) > 0:
-                    data_min, data_max = np.min(valid_slopes), np.max(valid_slopes)
-                else:
-                    data_min = data_max = 0.0
+                # Add min/max/mean info box with coordinates
+                add_extremes_info_box(ax, data_min, data_max, gdp_weighted_mean,
+                                     lat=lat, lon=lon, data_array=slope_data, valid_mask=valid_mask & success_mask)
 
-                # Add min/max info box
-                add_extremes_info_box(ax, data_min, data_max)
-
-                ax.set_title(f'{response_name}\nGDP-weighted mean: {gdp_weighted_mean:.6f}',
-                            fontsize=14, fontweight='bold')
+                ax.set_title(f'{response_name}', fontsize=14, fontweight='bold')
 
                 # Add colorbar
                 cbar = plt.colorbar(mesh, ax=ax, shrink=0.6, aspect=12)
@@ -1798,7 +1824,7 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
                 ax.set_ylim(lat.min(), lat.max())
                 ax.set_aspect('equal')
 
-            plt.tight_layout()
+            plt.tight_layout(rect=[0, 0, 1, 0.93])  # Leave space for suptitle at top
             pdf_pages.savefig(fig, bbox_inches='tight', dpi=150)
             plt.close(fig)
 
