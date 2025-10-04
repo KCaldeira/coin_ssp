@@ -1210,13 +1210,14 @@ def calculate_variability_scaling_parameters(
 
     nlat, nlon = tas0_2d.shape
     n_response_functions = len(response_scalings)
+    valid_mask = all_data['_metadata']['valid_mask']
 
     target_name = gdp_target['target_name']
     target_shape = gdp_target['target_shape']
 
     print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?) - Shape: {target_shape}")
 
-    # Step 1: Calculate mean GDP by grid cell over historical period
+    # Step 1: Calculate mean GDP by grid cell over historical period (only for valid cells)
     mean_gdp_per_cell = np.mean(gdp_data[hist_start_idx:hist_end_idx+1, :, :], axis=0)  # [lat, lon]
 
     # Calculate GDP variability scaling parameters (g0, g1, g2) based on target shape
@@ -1237,9 +1238,9 @@ def calculate_variability_scaling_parameters(
 
         print(f"  Linear target: global_mean={global_mean_amount}, ref_temp={reference_temperature}, amount_at_ref={amount_at_reference_temp}")
 
-        # Calculate GDP-weighted mean temperature over historical period
-        total_gdp = np.sum(mean_gdp_per_cell[mean_gdp_per_cell > 0])
-        gdp_weighted_tas = np.sum(mean_gdp_per_cell * tas0_2d) / total_gdp
+        # Calculate GDP-weighted mean temperature using only valid economic cells
+        total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
+        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d[valid_mask]) / total_gdp
 
         # Calculate coefficients for linear relationship: g(T) = a0 + a1 * T
         a1 = (amount_at_reference_temp - global_mean_amount) / (reference_temperature - gdp_weighted_tas)
@@ -1260,10 +1261,10 @@ def calculate_variability_scaling_parameters(
 
         print(f"  Quadratic target: global_mean={global_mean_amount}, zero_temp={zero_amount_temperature}, deriv_at_zero={derivative_at_zero_amount_temperature}")
 
-        # Calculate GDP-weighted mean temperature
-        total_gdp = np.sum(mean_gdp_per_cell[mean_gdp_per_cell > 0])
-        gdp_weighted_tas = np.sum(mean_gdp_per_cell * tas0_2d) / total_gdp
-        gdp_weighted_tas2 = np.sum(mean_gdp_per_cell * tas0_2d**2) / total_gdp
+        # Calculate GDP-weighted mean temperature using only valid economic cells
+        total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
+        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d[valid_mask]) / total_gdp
+        gdp_weighted_tas2 = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d[valid_mask]**2) / total_gdp
 
         T0 = zero_amount_temperature
         T_mean = gdp_weighted_tas
