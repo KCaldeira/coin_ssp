@@ -826,8 +826,8 @@ def calculate_weather_gdp_regression_slopes(
             if successful_regressions > 0:
                 gdp_weights = gdp_data[hist_start_idx:hist_end_idx+1, :, :].mean(axis=0)
                 weighted_slopes = regression_slopes * regression_success_mask * gdp_weights
-                total_weight = np.sum(gdp_weights * regression_success_mask)
-                gdp_weighted_mean = np.sum(weighted_slopes) / total_weight if total_weight > 0 else 0.0
+                total_weight = np.sum(gdp_weights[valid_mask] * regression_success_mask[valid_mask])
+                gdp_weighted_mean = np.sum(weighted_slopes[valid_mask]) / total_weight if total_weight > 0 else 0.0
 
                 # Debug GDP-weighted mean calculation
                 print(f"    GDP-weighted mean slope: {gdp_weighted_mean:.6f}")
