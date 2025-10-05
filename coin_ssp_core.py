@@ -1138,18 +1138,12 @@ def calculate_variability_climate_response_parameters(
         'all_regression_success_masks': all_regression_success_masks,  # dict[response_name] -> [nlat, nlon]
         'all_final_success_masks': all_final_success_masks,  # dict[response_name] -> [nlat, nlon]
         'response_function_names': [rf['scaling_name'] for rf in response_scalings],
-        'valid_cells': valid_cells,
-        # Keep first response function as default for backward compatibility
-        'final_parameters': all_final_parameters[response_scalings[0]['scaling_name']],
-        'step1_parameters': all_step1_parameters[response_scalings[0]['scaling_name']],
-        'regression_slopes': all_regression_slopes[response_scalings[0]['scaling_name']],
-        'regression_success_mask': all_regression_success_masks[response_scalings[0]['scaling_name']],
-        'final_success_mask': all_final_success_masks[response_scalings[0]['scaling_name']]
+        'valid_cells': valid_cells
     }
 
 
 def calculate_variability_scaling_parameters(
-    baseline_climate_parameters, gdp_target, target_idx,
+    variability_calibration_results, gdp_target, target_idx,
     all_data, config, response_scalings,
     scaling_factors, optimization_errors, convergence_flags, scaled_parameters
 ):
@@ -1167,8 +1161,8 @@ def calculate_variability_scaling_parameters(
 
     Parameters
     ----------
-    baseline_climate_parameters : np.ndarray
-        Baseline climate parameters [lat, lon, n_params] from calculate_variability_climate_response_parameters
+    variability_calibration_results : dict
+        Results from calculate_variability_climate_response_parameters containing 'all_final_parameters' dict
     gdp_target : dict
         Target configuration with variability parameters and target_shape
     target_idx : int
@@ -1308,10 +1302,16 @@ def calculate_variability_scaling_parameters(
     total_grid_cells = 0
     successful_optimizations = 0
 
+    # Extract all_final_parameters dict from variability calibration results
+    all_baseline_parameters = variability_calibration_results['all_final_parameters']
+
     # Loop over response functions to match process_response_target_optimization structure
     for response_idx, response_scaling in enumerate(response_scalings):
         scaling_name = response_scaling['scaling_name']
         print(f"  Response function: {scaling_name} ({response_idx+1}/{n_response_functions})")
+
+        # Get response-function-specific baseline parameters
+        baseline_climate_parameters = all_baseline_parameters[scaling_name]
 
         # Progress indicator: print dots for each latitude band (like optimization function)
         for lat_idx in range(nlat):

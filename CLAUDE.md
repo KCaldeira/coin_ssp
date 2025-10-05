@@ -69,7 +69,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Mathematical Form**: Climate sensitivity varies with local temperature as `g(T) = g0 + g1*T + g2*T²`
 - **Parameter Integration**: GDP variability parameters (g0, g1, g2) added to ModelParams with defaults (1.0, 0.0, 0.0)
 - **Forward Model**: Updated `calculate_coin_ssp_forward_model` to apply GDP variability scaling: `f(T) = g(T) * (f1*T + f2*T²) - g(T_ref) * (f1*T_ref + f2*T_ref²)`
-- **Backward Compatibility**: Default values ensure zero behavioral change for `target_type: "damage"`
+- **Default Behavior**: Default values (g0=1.0, g1=0.0, g2=0.0) result in uniform scaling for `target_type: "damage"`
 - **Architecture**: Clean separation between baseline climate parameters (k_tas1, etc.) and GDP variability scaling (g0, g1, g2)
 
 #### Variability Calibration Algorithm

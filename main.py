@@ -624,7 +624,6 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
         variability_calibration_results = calculate_variability_climate_response_parameters(
                     all_data, config, reference_tfp, response_scalings
                 )
-        baseline_climate_parameters = variability_calibration_results['final_parameters']
 
     # Process each GDP target with conditional logic based on target type
     for target_idx, gdp_target in enumerate(gdp_targets):
@@ -634,7 +633,7 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
 
             # CHEAP: Apply target-specific scaling
             results = calculate_variability_scaling_parameters(
-                baseline_climate_parameters, gdp_target, target_idx,
+                variability_calibration_results, gdp_target, target_idx,
                 all_data, config, response_scalings,
                 scaling_factors, optimization_errors, convergence_flags, scaled_parameters
             )
