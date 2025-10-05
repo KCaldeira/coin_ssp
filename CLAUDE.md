@@ -21,6 +21,14 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **Compute once, use many times** - move invariant calculations outside loops and create centralized helper functions
 - **No backward compatibility** - do not add conditional logic to support deprecated field names or old configurations. Update all code and configurations to use current conventions.
 
+### Critical Mathematical Rule
+**⚠️ NEVER assume mean(X × Y) = mean(X) × mean(Y) - this is MATHEMATICALLY WRONG**
+- When calculating weighted means (e.g., GDP-weighted temperature), you MUST use the time series
+- Correct: `mean_over_time[ sum(GDP[t] × T[t]) / sum(GDP[t]) ]`
+- WRONG: `sum(mean(GDP) × mean(T)) / sum(mean(GDP))`
+- Always pass full time series to functions that need weighted means, not time-averaged fields
+- Use `calculate_gdp_weighted_mean()` for temporal GDP-weighted calculations
+
 ### Naming Conventions
 - **Consistent naming** - use the same variable/field names throughout the codebase when referring to the same concept
 - **Descriptive names preferred** - long, clear names are better than short, ambiguous ones

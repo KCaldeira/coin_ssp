@@ -23,7 +23,7 @@ def calculate_constant_target_reduction(gdp_amount_value, tas_ref_shape):
     return np.full(tas_ref_shape, gdp_amount_value, dtype=np.float64)
 
 
-def calculate_linear_target_reduction(linear_config, tas_ref, gdp_target, lat, valid_mask, all_data, reference_ssp, target_period_start, target_period_end):
+def calculate_linear_target_reduction(linear_config, lat, valid_mask, all_data, reference_ssp, period_start, period_end):
     """
     Calculate linear temperature-dependent GDP reduction using constraint satisfaction.
 
@@ -41,12 +41,18 @@ def calculate_linear_target_reduction(linear_config, tas_ref, gdp_target, lat, v
         - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
         - 'reference_temperature': Reference temperature point (e.g., 30.0)
         - 'amount_at_reference_temp': Reduction at reference temperature (e.g., -0.25)
-    tas_ref : np.ndarray
-        Reference period temperature array [lat, lon]
-    gdp_target : np.ndarray
-        Target period GDP array [lat, lon]
     lat : np.ndarray
         Latitude coordinate array for area weighting
+    valid_mask : np.ndarray
+        Boolean mask for valid economic grid cells [lat, lon]
+    all_data : dict
+        Combined data structure containing time series
+    reference_ssp : str
+        Reference SSP scenario name
+    period_start : int
+        Start year of constraint period
+    period_end : int
+        End year of constraint period
 
     Returns
     -------
@@ -61,42 +67,54 @@ def calculate_linear_target_reduction(linear_config, tas_ref, gdp_target, lat, v
     T_ref_linear = linear_config['reference_temperature']
     value_at_ref_linear = linear_config['amount_at_reference_temp']
 
-    # Calculate GDP-weighted global means using time series
+    # Get time series data
     years = all_data['years']
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
-    gdp_weighted_tas_mean = np.float64(calculate_gdp_weighted_mean(
-        tas_series, gdp_series, years, lat, valid_mask, target_period_start, target_period_end
-    ))
-    global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
 
-    # Set up weighted least squares system for exact constraint satisfaction
-    X = np.array([
-        [1.0, T_ref_linear],                    # Point constraint equation
-        [1.0, gdp_weighted_tas_mean]           # GDP-weighted global mean equation
-    ], dtype=np.float64)
+    # Calculate time-averaged temperature for constraint period (for creating reduction spatial pattern)
+    from coin_ssp_math_utils import calculate_time_means
+    tas_period = calculate_time_means(tas_series, years, period_start, period_end)
 
-    y = np.array([
-        value_at_ref_linear,                    # Target at reference temperature
-        global_mean_linear                      # Target GDP-weighted global mean
-    ], dtype=np.float64)
+    # Get time indices for constraint period
+    period_mask = (years >= period_start) & (years <= period_end)
+    tas_period_series = tas_series[period_mask]
+    gdp_period_series = gdp_series[period_mask]
 
-    # Solve for coefficients: [a0, a1]
-    coefficients = np.linalg.solve(X, y)
-    a0_linear, a1_linear = coefficients
+    # Calculate sums over time and space using valid mask
+    # S0 = sum over time and space of GDP (where valid)
+    S0 = np.sum(gdp_period_series[:, valid_mask])
 
-    # Calculate linear reduction array
-    linear_reduction = a0_linear + a1_linear * tas_ref
+    # S1 = sum over time and space of (TAS × GDP) (where valid)
+    S1 = np.sum((tas_period_series * gdp_period_series)[:, valid_mask])
+
+    # Solve for coefficients using constraint equations:
+    # Constraint 1: a0 + a1 * T_ref = value_at_ref
+    # Constraint 2: mean_over_time_and_space[ GDP × (1 + a0 + a1*T_avg) ] / mean(GDP) = 1 + global_mean
+    #
+    # The second constraint gives: (a0 + a1 * mean(GDP×T_avg)/mean(GDP)) = global_mean
+    # Solving: D = S1 - T_ref * S0
+    #          a1 = (global_mean - value_at_ref) * S0 / D
+    #          a0 = value_at_ref - a1 * T_ref
+
+    D = S1 - T_ref_linear * S0
+    a1_linear = (global_mean_linear - value_at_ref_linear) * S0 / D
+    a0_linear = value_at_ref_linear - a1_linear * T_ref_linear
+
+    # Calculate linear reduction array using constraint period temperature
+    linear_reduction = a0_linear + a1_linear * tas_period
 
     # Verify constraint satisfaction
     constraint1_check = a0_linear + a1_linear * T_ref_linear  # Should equal value_at_ref_linear
 
-    # Verify global mean constraint using time series
-    # Since reduction is spatial, apply it to each time step: (1 + reduction) × GDP[t]
+    # Verify global mean constraint using time series (should be exact)
     constraint2_check = calculate_gdp_weighted_mean(
         np.ones_like(tas_series) * (1 + linear_reduction)[np.newaxis, :, :],  # Broadcast reduction to time dimension
-        gdp_series, years, lat, valid_mask, target_period_start, target_period_end
+        gdp_series, years, lat, valid_mask, period_start, period_end
     ) - 1
+
+    # Calculate GDP-weighted temperature for reporting
+    gdp_weighted_tas_mean = S1 / S0
 
     return {
         'reduction_array': linear_reduction.astype(np.float64),
@@ -117,7 +135,7 @@ def calculate_linear_target_reduction(linear_config, tas_ref, gdp_target, lat, v
     }
 
 
-def calculate_quadratic_target_reduction(quadratic_config, tas_ref, gdp_target, lat, valid_mask, all_data, reference_ssp, target_period_start, target_period_end):
+def calculate_quadratic_target_reduction(quadratic_config, lat, valid_mask, all_data, reference_ssp, period_start, period_end):
     """
     Calculate quadratic temperature-dependent GDP reduction using derivative constraint.
 
@@ -156,50 +174,58 @@ def calculate_quadratic_target_reduction(quadratic_config, tas_ref, gdp_target, 
     T0 = quadratic_config['zero_amount_temperature']
     derivative_at_T0 = quadratic_config['derivative_at_zero_amount_temperature']
 
-    # Calculate GDP-weighted global means using time series
+    # Get time series data
     years = all_data['years']
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
-    gdp_weighted_tas_mean = np.float64(calculate_gdp_weighted_mean(
-        tas_series, gdp_series, years, lat, valid_mask, target_period_start, target_period_end
-    ))
-    gdp_weighted_tas2_mean = np.float64(calculate_gdp_weighted_mean(
-        tas_series**2, gdp_series, years, lat, valid_mask, target_period_start, target_period_end
-    ))
-    global_gdp_target = calculate_global_mean(gdp_target, lat, valid_mask)
 
-    # Mathematical solution for quadratic: f(T) = a + b*T + c*T²
-    # Given constraints:
-    # 1. f(T₀) = 0 (zero reduction at T₀)
-    # 2. f'(T₀) = derivative_at_T0 (slope at T₀)
-    # 3. GDP-weighted global mean = global_mean_quad
+    # Calculate time-averaged temperature for constraint period (for creating reduction spatial pattern)
+    from coin_ssp_math_utils import calculate_time_means
+    tas_period = calculate_time_means(tas_series, years, period_start, period_end)
 
-    # From constraint derivation:
-    # c = (global_mean_amount - derivative_at_T0*(GDP_weighted_temp_mean - T0)) /
-    #     (T0² - 2*T0*GDP_weighted_temp_mean + GDP_weighted_temp2_mean)
-    # b = derivative_at_T0 - 2*c*T0
-    # a = -derivative_at_T0*T0 + c*T0²
+    # Get time indices for constraint period
+    period_mask = (years >= period_start) & (years <= period_end)
+    tas_period_series = tas_series[period_mask]
+    gdp_period_series = gdp_series[period_mask]
+
+    # Calculate sums over time and space using valid mask
+    # S0 = sum over time and space of GDP
+    S0 = np.sum(gdp_period_series[:, valid_mask])
+
+    # S1 = sum over time and space of (TAS × GDP)
+    S1 = np.sum((tas_period_series * gdp_period_series)[:, valid_mask])
+
+    # S2 = sum over time and space of (TAS² × GDP)
+    S2 = np.sum((tas_period_series**2 * gdp_period_series)[:, valid_mask])
+
+    # Solve for coefficients using constraint equations:
+    # Constraint 1: a + b*T0 + c*T0² = 0 (zero at T0)
+    # Constraint 2: b + 2*c*T0 = derivative_at_T0 (slope at T0)
+    # Constraint 3: mean_over_time_and_space[ GDP × (1 + a + b*T_avg + c*T_avg²) ] / mean(GDP) = 1 + global_mean
+    #
+    # From constraints 1 and 2: a = -derivative_at_T0*T0 + c*T0², b = derivative_at_T0 - 2*c*T0
+    # Substituting into constraint 3 and solving for c:
+    # c = (global_mean_quad - derivative_at_T0*(S1/S0 - T0)) / (T0² - 2*T0*S1/S0 + S2/S0)
+
+    gdp_weighted_tas_mean = S1 / S0
+    gdp_weighted_tas2_mean = S2 / S0
 
     denominator = T0**2 - 2*T0*gdp_weighted_tas_mean + gdp_weighted_tas2_mean
     c_quad = (global_mean_quad - derivative_at_T0*(gdp_weighted_tas_mean - T0)) / denominator
     b_quad = derivative_at_T0 - 2*c_quad*T0
     a_quad = -derivative_at_T0*T0 + c_quad*T0**2
 
-    # Calculate quadratic reduction array using absolute temperature
-    quadratic_reduction = a_quad + b_quad * tas_ref + c_quad * tas_ref**2
+    # Calculate quadratic reduction array using constraint period temperature
+    quadratic_reduction = a_quad + b_quad * tas_period + c_quad * tas_period**2
 
     # Verify constraint satisfaction
     constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
     constraint2_check = b_quad + 2 * c_quad * T0  # Derivative at T0: should equal derivative_at_T0
 
-    # Verify global mean constraint using time series
-    # Since reduction is spatial, apply it to each time step: (1 + reduction) × GDP[t]
-    years = all_data['years']
-    tas_series = all_data[reference_ssp]['tas']
-    gdp_series = all_data[reference_ssp]['gdp']
+    # Verify global mean constraint using time series (should be exact)
     constraint3_check = calculate_gdp_weighted_mean(
         np.ones_like(tas_series) * (1 + quadratic_reduction)[np.newaxis, :, :],  # Broadcast reduction to time dimension
-        gdp_series, years, lat, valid_mask, target_period_start, target_period_end
+        gdp_series, years, lat, valid_mask, period_start, period_end
     ) - 1
 
     return {
@@ -229,7 +255,7 @@ def calculate_quadratic_target_reduction(quadratic_config, tas_ref, gdp_target, 
     }
 
 
-def calculate_all_target_reductions(target_configs, gridded_data, all_data, reference_ssp, target_period_start, target_period_end):
+def calculate_all_target_reductions(target_configs, gridded_data, all_data, reference_ssp, config):
     """
     Calculate all configured target GDP reductions using gridded data.
 
@@ -270,16 +296,30 @@ def calculate_all_target_reductions(target_configs, gridded_data, all_data, refe
     """
     results = {}
 
-    tas_ref = gridded_data['tas_ref']
-    gdp_target = gridded_data['gdp_target']
     lat = gridded_data['lat']
     valid_mask = all_data['_metadata']['valid_mask']
 
+    # Get time period bounds
+    target_period_start = config['time_periods']['target_period']['start_year']
+    target_period_end = config['time_periods']['target_period']['end_year']
+    historical_period_start = config['time_periods']['historical_period']['start_year']
+    historical_period_end = config['time_periods']['historical_period']['end_year']
+
+    # Get shape for constant targets
+    tas_ref = gridded_data['tas_ref']
+
     for target_config in target_configs:
         target_name = target_config['target_name']
-
-        # Use explicit target_shape from configuration
         target_shape = target_config['target_shape']
+        target_type = target_config.get('target_type', 'damage')
+
+        # Determine constraint period based on target type
+        if target_type == 'variability':
+            period_start = historical_period_start
+            period_end = historical_period_end
+        else:  # damage
+            period_start = target_period_start
+            period_end = target_period_end
 
         if target_shape == 'constant':
             # Constant reduction
@@ -298,14 +338,14 @@ def calculate_all_target_reductions(target_configs, gridded_data, all_data, refe
 
         elif target_shape == 'quadratic':
             # Quadratic reduction (has zero point)
-            result = calculate_quadratic_target_reduction(target_config, tas_ref, gdp_target, lat, valid_mask,
-                                                         all_data, reference_ssp, target_period_start, target_period_end)
+            result = calculate_quadratic_target_reduction(target_config, lat, valid_mask,
+                                                         all_data, reference_ssp, period_start, period_end)
             result['target_shape'] = target_shape
 
         elif target_shape == 'linear':
             # Linear reduction (has global mean constraint)
-            result = calculate_linear_target_reduction(target_config, tas_ref, gdp_target, lat, valid_mask,
-                                                      all_data, reference_ssp, target_period_start, target_period_end)
+            result = calculate_linear_target_reduction(target_config, lat, valid_mask,
+                                                      all_data, reference_ssp, period_start, period_end)
             result['target_shape'] = target_shape
 
         else:

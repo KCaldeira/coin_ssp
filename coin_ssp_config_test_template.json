@@ -107,7 +107,7 @@
         "target_shape": "quadratic",
         "global_mean_amount": -0.01,
         "derivative_at_zero_amount_temperature": -0.0005,
-        "zero_amount_temperature": 10,
+        "zero_amount_temperature": 5,
         "description": "Quadratic 1% per C mean reduction,  0% at 0.05°C, -0.05%/°C at 0% zero-reduction temperature"
       }
   ],
