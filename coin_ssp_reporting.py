@@ -723,8 +723,10 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
 
                     # Log10 colorbar (no zero reference line for viridis)
                     log_cbar = plt.colorbar(log_im, ax=log10_ax, shrink=0.6, aspect=12)
-                    log_cbar.set_label('log10(GDP_climate/GDP_weather)', rotation=270, labelpad=15, fontsize=12)
+                    log_cbar.set_label('GDP_climate/GDP_weather', rotation=270, labelpad=15, fontsize=12)
                     log_cbar.ax.tick_params(labelsize=10)
+                    # Format ticks to show linear values (10^x) instead of log values (x)
+                    format_log_colorbar_ticks(log_cbar, base=10)
 
                     # Set log10 map aspect and limits
                     log10_ax.set_xlim(lon.min(), lon.max())
