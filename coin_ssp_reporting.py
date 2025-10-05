@@ -1197,7 +1197,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     cmap = plt.cm.RdBu_r
 
     # Get time series data
-    time_series = all_data[reference_ssp]['time']
+    time_series = all_data['years']
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
 
