@@ -309,7 +309,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
 
                 # Save this page after plotting all targets
                 plt.tight_layout()
-                plt.subplots_adjust(top=0.93, bottom=0.05)
+                plt.subplots_adjust(top=0.90, bottom=0.05)
                 pdf.savefig(fig, bbox_inches='tight')
                 plt.close(fig)
 
@@ -453,7 +453,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
 
                 # Save this page
                 plt.tight_layout()
-                plt.subplots_adjust(top=0.93, bottom=0.05)
+                plt.subplots_adjust(top=0.90, bottom=0.05)
                 pdf.savefig(fig, bbox_inches='tight')
                 plt.close(fig)
 
@@ -737,7 +737,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                 for fig, pdf in [(linear_fig, linear_pdf), (log10_fig, log10_pdf)]:
                     plt.figure(fig.number)
                     plt.tight_layout()
-                    plt.subplots_adjust(top=0.93, bottom=0.05)
+                    plt.subplots_adjust(top=0.90, bottom=0.05)
                     pdf.savefig(fig, bbox_inches='tight')
                     plt.close(fig)
 
@@ -1551,7 +1551,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, al
 
             # Save this page after plotting all targets for this response function
             plt.tight_layout()
-            plt.subplots_adjust(top=0.93, bottom=0.05)
+            plt.subplots_adjust(top=0.90, bottom=0.05)
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
 
@@ -1715,7 +1715,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
 
             # Save this page after plotting all targets for this response function
             plt.tight_layout()
-            plt.subplots_adjust(top=0.93, bottom=0.05)
+            plt.subplots_adjust(top=0.90, bottom=0.05)
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
 
@@ -2104,9 +2104,9 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                     csv_filename = f"step2_{json_id}_{model_name}_{viz_ssp}_baseline_tfp_extremes.csv"
                     csv_path = os.path.join(output_dir, csv_filename)
 
-                    # Get coordinate arrays
-                    lat_coords = all_data['_metadata']['coordinates']['lat']
-                    lon_coords = all_data['_metadata']['coordinates']['lon']
+                    # Get coordinate arrays (same source as lat/lon used for plotting)
+                    lat_coords = lat
+                    lon_coords = lon
 
                     # Find mean TFP over time for each grid cell
                     mean_tfp_spatial = np.nanmean(tfp_timeseries, axis=0)  # [lat, lon]
