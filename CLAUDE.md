@@ -165,14 +165,13 @@ New `workflow_manager.py` provides systematic approach for parameter sensitivity
 
 ### Recent Key Enhancements
 - **Multi-Stage Workflow Manager**: New `workflow_manager.py` for systematic parameter sensitivity analysis and multi-variable response function development
-- **Nomenclature Clarification**: Clear hierarchy: Stages (workflow levels) → Steps (main.py pipeline) → Phases (sub-processes within steps)
+- **Target Type Visualization**: Separate pages for damage vs variability targets with independent color scales and appropriate reference periods
+- **GDP-Weighted Temperatures**: Correctly calculated as mean(GDP×T)/mean(GDP) over time series rather than from time-averaged fields
 - **Climate Response Formulation**: Cleaner mathematical formulation with helper functions f_y(T,P), f_k(T,P), f_tfp(T,P) and fixed precipitation scaling bug
 - **Methods Documentation**: Complete alignment between `METHODS.md` and code implementation, including actual parameter names and calibration procedures
 - **Weather Variables**: Centralized computation and storage in `all_data` structure
 - **Reference Baselines**: Pre-computed `tas0_2d`/`pr0_2d` climate baselines stored in `all_data`
 - **Function Signatures**: Simplified parameter lists using `all_data` and `config` patterns
-- **Import Organization**: All imports moved to top of files for clarity
-- **Variable Naming**: Consistent `tas`/`pr` climatological conventions throughout codebase
 - **Adaptive Bounds Expansion**: Step 3 optimization automatically expands search bounds by 10× when hitting limits
 - **Visualization Standardization**: All maps use `pcolormesh` with adaptive 3-per-page layouts
 - **Variability Scaling Framework**: Complete implementation of temperature-dependent climate sensitivity with g0, g1, g2 parameters

@@ -224,6 +224,15 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Quick Start - Primary Test
+
+**Test the complete workflow with this single command:**
+```bash
+python workflow_manager.py coin_ssp_config_linear_parameter_sensitivity.json coin_ssp_config_test_template.json
+```
+
+This executes a 3-stage sensitivity analysis workflow combining linear parameter variations with test target configurations.
+
 ### Complete Processing Pipeline
 
 **Single Configuration Run:**
