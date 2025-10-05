@@ -1258,7 +1258,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         ax4 = plt.subplot(subplot_rows, subplot_cols, line_plot_position)
 
         # Temperature range for plotting
-        tas_range = np.linspace(-10, 35, 1000)
+        tas_range = np.linspace(-5, 35, 1000)
 
         # Plot each function
         colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
@@ -1333,7 +1333,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         ax4.legend(fontsize=9, loc='best')
 
         # Set axis limits
-        ax4.set_xlim(-10, 35)
+        ax4.set_xlim(-5, 35)
 
         # Calculate y-axis limits from all function values
         all_y_values = []
