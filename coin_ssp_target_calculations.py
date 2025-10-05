@@ -82,23 +82,32 @@ def calculate_linear_target_reduction(linear_config, lat, valid_mask, all_data, 
     gdp_period_series = gdp_series[period_mask]
 
     # Calculate sums over time and space using valid mask
-    # S0 = sum over time and space of GDP (where valid)
-    S0 = np.sum(gdp_period_series[:, valid_mask])
-
-    # S1 = sum over time and space of (TAS × GDP) (where valid)
-    S1 = np.sum((tas_period_series * gdp_period_series)[:, valid_mask])
-
-    # Solve for coefficients using constraint equations:
-    # Constraint 1: a0 + a1 * T_ref = value_at_ref
-    # Constraint 2: mean_over_time_and_space[ GDP × (1 + a0 + a1*T_avg) ] / mean(GDP) = 1 + global_mean
+    # The reduction at time t is: reduction[t,lat,lon] = a0 + a1 * T[t,lat,lon]
+    # Constraint: mean_over_time[ sum(GDP[t] * (1 + a0 + a1*T[t])) / sum(GDP[t]) ] = 1 + global_mean
     #
-    # The second constraint gives: (a0 + a1 * mean(GDP×T_avg)/mean(GDP)) = global_mean
-    # Solving: D = S1 - T_ref * S0
-    #          a1 = (global_mean - value_at_ref) * S0 / D
-    #          a0 = value_at_ref - a1 * T_ref
+    # Expanding: mean_over_time[ (sum(GDP[t]) * (1+a0) + a1*sum(GDP[t]*T[t])) / sum(GDP[t]) ]
+    #          = mean_over_time[ (1+a0) + a1*sum(GDP[t]*T[t])/sum(GDP[t]) ]
+    #          = (1+a0) + a1*mean_over_time[sum(GDP[t]*T[t])/sum(GDP[t])]
+    #
+    # So: a0 + a1*mean_over_time[GDP-weighted T] = global_mean
+    #
+    # Also: a0 + a1*T_ref = value_at_ref
+    #
+    # Solving: a1 = (global_mean - value_at_ref) / (mean_over_time[GDP-weighted T] - T_ref)
+    #          a0 = value_at_ref - a1*T_ref
 
-    D = S1 - T_ref_linear * S0
-    a1_linear = (global_mean_linear - value_at_ref_linear) * S0 / D
+    # Calculate GDP-weighted temperature for each time step
+    gdp_weighted_temps = []
+    for t in range(len(tas_period_series)):
+        sum_gdp = np.sum(gdp_period_series[t][valid_mask])
+        sum_gdp_tas = np.sum((gdp_period_series[t] * tas_period_series[t])[valid_mask])
+        gdp_weighted_temps.append(sum_gdp_tas / sum_gdp)
+
+    # Mean over time of GDP-weighted temperature
+    mean_gdp_weighted_temp = np.mean(gdp_weighted_temps)
+
+    # Solve for coefficients
+    a1_linear = (global_mean_linear - value_at_ref_linear) / (mean_gdp_weighted_temp - T_ref_linear)
     a0_linear = value_at_ref_linear - a1_linear * T_ref_linear
 
     # Calculate linear reduction array using constraint period temperature
@@ -113,8 +122,8 @@ def calculate_linear_target_reduction(linear_config, lat, valid_mask, all_data, 
         gdp_series, years, lat, valid_mask, period_start, period_end
     ) - 1
 
-    # Calculate GDP-weighted temperature for reporting
-    gdp_weighted_tas_mean = S1 / S0
+    # Store GDP-weighted temperature for reporting
+    gdp_weighted_tas_mean = mean_gdp_weighted_temp
 
     return {
         'reduction_array': linear_reduction.astype(np.float64),
@@ -188,32 +197,42 @@ def calculate_quadratic_target_reduction(quadratic_config, lat, valid_mask, all_
     tas_period_series = tas_series[period_mask]
     gdp_period_series = gdp_series[period_mask]
 
-    # Calculate sums over time and space using valid mask
-    # S0 = sum over time and space of GDP
-    S0 = np.sum(gdp_period_series[:, valid_mask])
-
-    # S1 = sum over time and space of (TAS × GDP)
-    S1 = np.sum((tas_period_series * gdp_period_series)[:, valid_mask])
-
-    # S2 = sum over time and space of (TAS² × GDP)
-    S2 = np.sum((tas_period_series**2 * gdp_period_series)[:, valid_mask])
-
-    # Solve for coefficients using constraint equations:
-    # Constraint 1: a + b*T0 + c*T0² = 0 (zero at T0)
-    # Constraint 2: b + 2*c*T0 = derivative_at_T0 (slope at T0)
-    # Constraint 3: mean_over_time_and_space[ GDP × (1 + a + b*T_avg + c*T_avg²) ] / mean(GDP) = 1 + global_mean
+    # Calculate GDP-weighted temperature and T² for each time step
+    # The reduction at time t is: reduction[t,lat,lon] = a + b*T[t,lat,lon] + c*T[t,lat,lon]²
+    # Constraint: mean_over_time[ sum(GDP[t] * (1 + a + b*T[t] + c*T[t]²)) / sum(GDP[t]) ] = 1 + global_mean
     #
-    # From constraints 1 and 2: a = -derivative_at_T0*T0 + c*T0², b = derivative_at_T0 - 2*c*T0
-    # Substituting into constraint 3 and solving for c:
-    # c = (global_mean_quad - derivative_at_T0*(S1/S0 - T0)) / (T0² - 2*T0*S1/S0 + S2/S0)
+    # Expanding: a + b*mean_over_time[GDP-weighted T] + c*mean_over_time[GDP-weighted T²] = global_mean
+    #
+    # Also: a + b*T0 + c*T0² = 0  (zero at T0)
+    #       b + 2*c*T0 = derivative_at_T0  (slope at T0)
+    #
+    # From the last two: b = derivative_at_T0 - 2*c*T0, a = -derivative_at_T0*T0 + c*T0²
+    #
+    # Substituting into first: (-derivative_at_T0*T0 + c*T0²) + (derivative_at_T0 - 2*c*T0)*mean[GDP-wtd T] + c*mean[GDP-wtd T²] = global_mean
+    # Solving for c: c = (global_mean + derivative_at_T0*(T0 - mean[GDP-wtd T])) / (T0² - 2*T0*mean[GDP-wtd T] + mean[GDP-wtd T²])
 
-    gdp_weighted_tas_mean = S1 / S0
-    gdp_weighted_tas2_mean = S2 / S0
+    gdp_weighted_temps = []
+    gdp_weighted_temps2 = []
+    for t in range(len(tas_period_series)):
+        sum_gdp = np.sum(gdp_period_series[t][valid_mask])
+        sum_gdp_tas = np.sum((gdp_period_series[t] * tas_period_series[t])[valid_mask])
+        sum_gdp_tas2 = np.sum((gdp_period_series[t] * tas_period_series[t]**2)[valid_mask])
+        gdp_weighted_temps.append(sum_gdp_tas / sum_gdp)
+        gdp_weighted_temps2.append(sum_gdp_tas2 / sum_gdp)
 
-    denominator = T0**2 - 2*T0*gdp_weighted_tas_mean + gdp_weighted_tas2_mean
-    c_quad = (global_mean_quad - derivative_at_T0*(gdp_weighted_tas_mean - T0)) / denominator
+    # Mean over time of GDP-weighted T and T²
+    mean_gdp_weighted_temp = np.mean(gdp_weighted_temps)
+    mean_gdp_weighted_temp2 = np.mean(gdp_weighted_temps2)
+
+    # Solve for coefficients
+    denominator = T0**2 - 2*T0*mean_gdp_weighted_temp + mean_gdp_weighted_temp2
+    c_quad = (global_mean_quad - derivative_at_T0*(mean_gdp_weighted_temp - T0)) / denominator
     b_quad = derivative_at_T0 - 2*c_quad*T0
     a_quad = -derivative_at_T0*T0 + c_quad*T0**2
+
+    # Store for reporting
+    gdp_weighted_tas_mean = mean_gdp_weighted_temp
+    gdp_weighted_tas2_mean = mean_gdp_weighted_temp2
 
     # Calculate quadratic reduction array using constraint period temperature
     quadratic_reduction = a_quad + b_quad * tas_period + c_quad * tas_period**2
