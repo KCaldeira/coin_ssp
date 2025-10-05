@@ -2108,28 +2108,38 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                     lat_coords = lat
                     lon_coords = lon
 
-                    # Find mean TFP over time for each grid cell
-                    mean_tfp_spatial = np.nanmean(tfp_timeseries, axis=0)  # [lat, lon]
+                    # Find mean log(TFP) over time for each grid cell
+                    # Use log to avoid overweighting high TFP values at end of time series
+                    log_tfp_timeseries = np.log(tfp_timeseries)
+                    mean_log_tfp_spatial = np.nanmean(log_tfp_timeseries, axis=0)  # [lat, lon]
 
                     # Get valid mask
                     valid_mask = all_data['_metadata']['valid_mask']
 
-                    # Flatten and find top 3 and bottom 3 indices among valid cells
-                    valid_mean_tfp = mean_tfp_spatial[valid_mask]
+                    # Flatten and find top 3, bottom 3, and median 3 indices among valid cells
+                    valid_mean_log_tfp = mean_log_tfp_spatial[valid_mask]
                     valid_indices = np.where(valid_mask)
 
-                    # Get indices of 3 lowest and 3 highest mean TFP values
-                    bottom_3_sorted_idx = np.argsort(valid_mean_tfp)[:3]
-                    top_3_sorted_idx = np.argsort(valid_mean_tfp)[-3:][::-1]  # Reverse to get highest first
+                    # Calculate median log(TFP) value
+                    median_log_tfp = np.nanmedian(valid_mean_log_tfp)
+
+                    # Get indices of 3 lowest and 3 highest mean log(TFP) values
+                    bottom_3_sorted_idx = np.argsort(valid_mean_log_tfp)[:3]
+                    top_3_sorted_idx = np.argsort(valid_mean_log_tfp)[-3:][::-1]  # Reverse to get highest first
+
+                    # Get indices of 3 cells closest to median log(TFP)
+                    distance_from_median = np.abs(valid_mean_log_tfp - median_log_tfp)
+                    median_3_sorted_idx = np.argsort(distance_from_median)[:3]
 
                     # Map back to 2D coordinates
                     bottom_3_coords = [(valid_indices[0][i], valid_indices[1][i]) for i in bottom_3_sorted_idx]
                     top_3_coords = [(valid_indices[0][i], valid_indices[1][i]) for i in top_3_sorted_idx]
+                    median_3_coords = [(valid_indices[0][i], valid_indices[1][i]) for i in median_3_sorted_idx]
 
                     # Extract data from pre-loaded all_data
                     ssp_data = all_data[viz_ssp]
 
-                    # Build DataFrame with time series for all 6 grid cells
+                    # Build DataFrame with time series for all 9 grid cells
                     extremes_data = {'year': years}
 
                     # Add bottom 3 (lowest TFP)
@@ -2139,6 +2149,14 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                         extremes_data[f'min{i}_tfp'] = tfp_timeseries[:, lat_idx, lon_idx]
                         extremes_data[f'min{i}_pop'] = ssp_data['pop'][:, lat_idx, lon_idx]
                         extremes_data[f'min{i}_gdp'] = ssp_data['gdp'][:, lat_idx, lon_idx]
+
+                    # Add median 3 (closest to median TFP)
+                    for i, (lat_idx, lon_idx) in enumerate(median_3_coords, 1):
+                        extremes_data[f'med{i}_lat'] = lat_coords[lat_idx]
+                        extremes_data[f'med{i}_lon'] = lon_coords[lon_idx]
+                        extremes_data[f'med{i}_tfp'] = tfp_timeseries[:, lat_idx, lon_idx]
+                        extremes_data[f'med{i}_pop'] = ssp_data['pop'][:, lat_idx, lon_idx]
+                        extremes_data[f'med{i}_gdp'] = ssp_data['gdp'][:, lat_idx, lon_idx]
 
                     # Add top 3 (highest TFP)
                     for i, (lat_idx, lon_idx) in enumerate(top_3_coords, 1):
