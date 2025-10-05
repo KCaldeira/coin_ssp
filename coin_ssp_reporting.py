@@ -1131,7 +1131,8 @@ def write_variability_calibration_summary(variability_results: Dict[str, Any], c
 
 
 def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict[str, Any],
-                                   output_dir: str, reference_ssp: str, valid_mask: np.ndarray) -> str:
+                                   output_dir: str, reference_ssp: str, valid_mask: np.ndarray,
+                                   all_data: Dict[str, Any]) -> str:
     """
     Create comprehensive visualization of target GDP reduction results.
 
@@ -1149,6 +1150,10 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         Output directory path
     reference_ssp : str
         Reference SSP scenario name
+    valid_mask : np.ndarray
+        Boolean mask for valid economic grid cells
+    all_data : Dict[str, Any]
+        Combined data structure containing climate and economic data
 
     Returns
     -------
@@ -1191,10 +1196,30 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     # Use standard blue-red colormap (blue=positive, red=negative, white=zero)
     cmap = plt.cm.RdBu_r
 
+    # Get time series data
+    time_series = all_data[reference_ssp]['time']
+    tas_series = all_data[reference_ssp]['tas']
+    gdp_series = all_data[reference_ssp]['gdp']
+
     # Calculate GDP-weighted temperature for target period (2080-2100)
     target_period_start = config['time_periods']['target_period']['start_year']
     target_period_end = config['time_periods']['target_period']['end_year']
-    gdp_weighted_tas_target = calculate_global_mean(gdp_target * tas_ref, lat, valid_mask) / global_gdp_target
+    target_start_idx = np.where(time_series == target_period_start)[0][0]
+    target_end_idx = np.where(time_series == target_period_end)[0][0]
+    gdp_weighted_tas_target = np.mean([
+        calculate_global_mean(gdp_series[t] * tas_series[t], lat, valid_mask) / calculate_global_mean(gdp_series[t], lat, valid_mask)
+        for t in range(target_start_idx, target_end_idx + 1)
+    ])
+
+    # Calculate GDP-weighted temperature for historical period (1861-2014)
+    historical_period_start = config['time_periods']['historical_period']['start_year']
+    historical_period_end = config['time_periods']['historical_period']['end_year']
+    hist_start_idx = np.where(time_series == historical_period_start)[0][0]
+    hist_end_idx = np.where(time_series == historical_period_end)[0][0]
+    gdp_weighted_tas_historical = np.mean([
+        calculate_global_mean(gdp_series[t] * tas_series[t], lat, valid_mask) / calculate_global_mean(gdp_series[t], lat, valid_mask)
+        for t in range(hist_start_idx, hist_end_idx + 1)
+    ])
 
     # Extract reduction arrays and calculate statistics
     reduction_arrays = {}
@@ -1259,9 +1284,17 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             # Single page with 4 panels: 3 maps + 1 line plot (2x2 layout)
             fig = plt.figure(figsize=(16, 12))
 
+            # Select period and temperature based on target type
+            if target_type == 'Variability':
+                period_start, period_end = historical_period_start, historical_period_end
+                gdp_weighted_tas = gdp_weighted_tas_historical
+            else:
+                period_start, period_end = target_period_start, target_period_end
+                gdp_weighted_tas = gdp_weighted_tas_target
+
             # Overall title with target type
             fig.suptitle(f'{target_type} Target GDP Reductions - {model_name} {reference_ssp.upper()}\n'
-                        f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_tas_target:.2f}°C',
+                        f'GDP-weighted Mean Temperature ({period_start}-{period_end}): {gdp_weighted_tas:.2f}°C',
                         fontsize=16, fontweight='bold')
 
             # Calculate layout for maps + line plot
@@ -1293,137 +1326,137 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 # Create map with zero-centered normalization (mask invalid cells)
                 masked_reduction_array = np.where(valid_mask, reduction_array, np.nan)
                 norm = mcolors.TwoSlopeNorm(vmin=type_vmin, vcenter=0.0, vmax=type_vmax)
-            im = ax.pcolormesh(lon_grid, lat_grid, masked_reduction_array,
-                             cmap=cmap, norm=norm, shading='auto')
+                im = ax.pcolormesh(lon_grid, lat_grid, masked_reduction_array,
+                                 cmap=cmap, norm=norm, shading='auto')
 
-            # Format target name for display
-            display_name = target_name.replace('_', ' ').title()
+                # Format target name for display
+                display_name = target_name.replace('_', ' ').title()
 
-            # Get target type from configuration
-            target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
-            target_shape = target_config.get('target_shape', 'unknown')
+                # Get target type from configuration
+                target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+                target_shape = target_config.get('target_shape', 'unknown')
 
-            ax.set_title(f'{display_name} ({target_shape})\n'
-                        f'Range: {data_range["min"]:.4f} to {data_range["max"]:.4f}\n'
-                        f'GDP-weighted: {gdp_weighted_mean:.6f}',
-                        fontsize=12, fontweight='bold')
-            ax.set_xlabel('Longitude', fontsize=10)
-            ax.set_ylabel('Latitude', fontsize=10)
-            ax.grid(True, alpha=0.3)
+                ax.set_title(f'{display_name} ({target_shape})\n'
+                            f'Range: {data_range["min"]:.4f} to {data_range["max"]:.4f}\n'
+                            f'GDP-weighted: {gdp_weighted_mean:.6f}',
+                            fontsize=12, fontweight='bold')
+                ax.set_xlabel('Longitude', fontsize=10)
+                ax.set_ylabel('Latitude', fontsize=10)
+                ax.grid(True, alpha=0.3)
 
-            # Add colorbar
-            cbar = plt.colorbar(im, ax=ax, shrink=0.7)
-            cbar.set_label('Fractional GDP\nReduction', rotation=270, labelpad=20, fontsize=10)
+                # Add colorbar
+                cbar = plt.colorbar(im, ax=ax, shrink=0.7)
+                cbar.set_label('Fractional GDP\nReduction', rotation=270, labelpad=20, fontsize=10)
 
-        # Line plot in last position
-        ax4 = plt.subplot(subplot_rows, subplot_cols, line_plot_position)
+            # Line plot in last position
+            ax4 = plt.subplot(subplot_rows, subplot_cols, line_plot_position)
 
-        # Temperature range for plotting
-        tas_range = np.linspace(-5, 35, 1000)
+            # Temperature range for plotting
+            tas_range = np.linspace(-5, 35, 1000)
 
-        # Plot each function
-        colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
+            # Plot each function
+            colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
 
-        for i, target_name in enumerate(target_names):
-            target_info = target_results[target_name]
-            color = colors[i % len(colors)]
+            for i, target_name in enumerate(type_targets):
+                target_info = target_results[target_name]
+                color = colors[i % len(colors)]
 
-            # Get target type from configuration
-            target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
-            target_shape = target_config.get('target_shape', 'unknown')
+                # Get target type from configuration
+                target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+                target_shape = target_config.get('target_shape', 'unknown')
 
-            if target_shape == 'constant':
-                # Constant function
-                gdp_targets = config['gdp_targets']
-                const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                constant_value = const_config['global_mean_amount']
-                function_values = np.full_like(tas_range, constant_value)
-                label = f'Constant: {constant_value:.3f}'
-
-                # Horizontal line for constant
-                ax4.plot(tas_range, function_values, color=color, linewidth=2,
-                        label=label, alpha=0.8)
-
-            elif target_shape == 'linear':
-                coefficients = target_info['coefficients']
-                if coefficients:
-                    # Linear function: reduction = a0 + a1 * T
-                    a0, a1 = coefficients['a0'], coefficients['a1']
-                    function_values = a0 + a1 * tas_range
-
-                    ax4.plot(tas_range, function_values, color=color, linewidth=2,
-                            label=f'Linear: {a0:.4f} + {a1:.4f}×T', alpha=0.8)
-
-                    # Add calibration point from config
+                if target_shape == 'constant':
+                    # Constant function
                     gdp_targets = config['gdp_targets']
-                    linear_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                    if 'reference_temperature' in linear_config:
-                        ref_tas = linear_config['reference_temperature']
-                        ref_value = linear_config['amount_at_reference_temp']
-                        ax4.plot(ref_tas, ref_value, 'o', color=color, markersize=8,
-                                label=f'Linear calib: {ref_tas}°C = {ref_value:.3f}')
+                    const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                    constant_value = const_config['global_mean_amount']
+                    function_values = np.full_like(tas_range, constant_value)
+                    label = f'Constant: {constant_value:.3f}'
 
-            elif target_shape == 'quadratic':
-                coefficients = target_info['coefficients']
-                if coefficients:
-                    # Quadratic function: reduction = a + b*T + c*T²
-                    a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
-                    function_values = a + b * tas_range + c * tas_range**2
-
+                    # Horizontal line for constant
                     ax4.plot(tas_range, function_values, color=color, linewidth=2,
-                            label=f'Quadratic: {a:.4f} + {b:.4f}×T + {c:.6f}×T²', alpha=0.8)
+                            label=label, alpha=0.8)
 
-                    # Add calibration points from config
-                    gdp_targets = config['gdp_targets']
-                    quad_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                elif target_shape == 'linear':
+                    coefficients = target_info['coefficients']
+                    if coefficients:
+                        # Linear function: reduction = a0 + a1 * T
+                        a0, a1 = coefficients['a0'], coefficients['a1']
+                        function_values = a0 + a1 * tas_range
 
-                    # Handle new derivative-based specification
-                    zero_tas = quad_config['zero_amount_temperature']
-                    derivative = quad_config['derivative_at_zero_amount_temperature']
-                    ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
-                            label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.5f})')
+                        ax4.plot(tas_range, function_values, color=color, linewidth=2,
+                                label=f'Linear: {a0:.4f} + {a1:.4f}×T', alpha=0.8)
 
-        # Add reference lines
-        ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+                        # Add calibration point from config
+                        gdp_targets = config['gdp_targets']
+                        linear_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                        if 'reference_temperature' in linear_config:
+                            ref_tas = linear_config['reference_temperature']
+                            ref_value = linear_config['amount_at_reference_temp']
+                            ax4.plot(ref_tas, ref_value, 'o', color=color, markersize=8,
+                                    label=f'Linear calib: {ref_tas}°C = {ref_value:.3f}')
 
-        # Format line plot
-        ax4.set_xlabel('Temperature (°C)', fontsize=12)
-        ax4.set_ylabel('Fractional GDP Reduction', fontsize=12)
-        ax4.set_title('Target Functions vs Temperature', fontsize=12, fontweight='bold')
-        ax4.grid(True, alpha=0.3)
-        ax4.legend(fontsize=9, loc='best')
-
-        # Set axis limits
-        ax4.set_xlim(-5, 35)
-
-        # Calculate y-axis limits from all function values
-        all_y_values = []
-        for target_name in target_names:
-            target_info = target_results[target_name]
-
-            # Get target type from configuration
-            target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
-            target_shape = target_config.get('target_shape', 'unknown')
-
-            if target_shape == 'constant':
-                gdp_targets = config['gdp_targets']
-                const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                constant_value = const_config['global_mean_amount']
-                all_y_values.extend([constant_value])
-
-            elif target_shape in ['linear', 'quadratic'] and target_info['coefficients']:
-                coefficients = target_info['coefficients']
-                if target_shape == 'linear':
-                    a0, a1 = coefficients['a0'], coefficients['a1']
-                    values = a0 + a1 * tas_range
                 elif target_shape == 'quadratic':
-                    a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
-                    values = a + b * tas_range + c * tas_range**2
-                all_y_values.extend(values)
+                    coefficients = target_info['coefficients']
+                    if coefficients:
+                        # Quadratic function: reduction = a + b*T + c*T²
+                        a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
+                        function_values = a + b * tas_range + c * tas_range**2
 
-        if all_y_values:
-            y_min, y_max = calculate_zero_biased_axis_range(all_y_values, padding_factor=0.1)
-            ax4.set_ylim(y_min, y_max)
+                        ax4.plot(tas_range, function_values, color=color, linewidth=2,
+                                label=f'Quadratic: {a:.4f} + {b:.4f}×T + {c:.6f}×T²', alpha=0.8)
+
+                        # Add calibration points from config
+                        gdp_targets = config['gdp_targets']
+                        quad_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+
+                        # Handle new derivative-based specification
+                        zero_tas = quad_config['zero_amount_temperature']
+                        derivative = quad_config['derivative_at_zero_amount_temperature']
+                        ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
+                                label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.5f})')
+
+            # Add reference lines
+            ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+
+            # Format line plot
+            ax4.set_xlabel('Temperature (°C)', fontsize=12)
+            ax4.set_ylabel('Fractional GDP Reduction', fontsize=12)
+            ax4.set_title('Target Functions vs Temperature', fontsize=12, fontweight='bold')
+            ax4.grid(True, alpha=0.3)
+            ax4.legend(fontsize=9, loc='best')
+
+            # Set axis limits
+            ax4.set_xlim(-5, 35)
+
+            # Calculate y-axis limits from all function values
+            all_y_values = []
+            for target_name in type_targets:
+                target_info = target_results[target_name]
+
+                # Get target type from configuration
+                target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+                target_shape = target_config.get('target_shape', 'unknown')
+
+                if target_shape == 'constant':
+                    gdp_targets = config['gdp_targets']
+                    const_config = next(t for t in gdp_targets if t['target_name'] == target_name)
+                    constant_value = const_config['global_mean_amount']
+                    all_y_values.extend([constant_value])
+
+                elif target_shape in ['linear', 'quadratic'] and target_info['coefficients']:
+                    coefficients = target_info['coefficients']
+                    if target_shape == 'linear':
+                        a0, a1 = coefficients['a0'], coefficients['a1']
+                        values = a0 + a1 * tas_range
+                    elif target_shape == 'quadratic':
+                        a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
+                        values = a + b * tas_range + c * tas_range**2
+                    all_y_values.extend(values)
+
+            if all_y_values:
+                y_min, y_max = calculate_zero_biased_axis_range(all_y_values, padding_factor=0.1)
+                ax4.set_ylim(y_min, y_max)
 
             # Adjust layout to prevent overlap
             plt.tight_layout()

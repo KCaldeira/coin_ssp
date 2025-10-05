@@ -335,7 +335,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     # Create visualization
     print("Generating target GDP visualization...")
     visualization_path = create_target_gdp_visualization(target_results, config, output_dir,
-                                                        reference_ssp, valid_mask)
+                                                        reference_ssp, valid_mask, all_data)
     print(f"✅ Visualization saved: {visualization_path}")
 
     print(f"\nStep 1 completed: {len(gdp_targets)} target GDP change patterns calculated")
