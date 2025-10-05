@@ -193,7 +193,7 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                 fig = plt.figure(figsize=fig_size)
                 fig.suptitle(f'Step 4: Forward Model Time Series - {model_name}\n'
                             f'SSP: {ssp.upper()} | Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
-                            fontsize=16, fontweight='bold', y=0.96)
+                            fontsize=16, fontweight='bold', y=0.93)
 
                 # Plot all targets on this page
                 for target_idx, target_name in enumerate(target_names):
@@ -508,12 +508,12 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                 linear_fig = plt.figure(figsize=fig_size)
                 linear_fig.suptitle(f'Step 4: Forward Model Results (Linear Scale) - {model_name}\n'
                                    f'SSP: {ssp.upper()} | Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
-                                   fontsize=16, fontweight='bold', y=0.96)
+                                   fontsize=16, fontweight='bold', y=0.93)
 
                 log10_fig = plt.figure(figsize=fig_size)
                 log10_fig.suptitle(f'Step 4: Forward Model Results (Log10 Scale) - {model_name}\n'
                                   f'SSP: {ssp.upper()} | Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
-                                  fontsize=16, fontweight='bold', y=0.96)
+                                  fontsize=16, fontweight='bold', y=0.93)
 
                 # Plot all targets on this page
                 for target_idx, target_name in enumerate(target_names):
@@ -1449,7 +1449,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, al
             fig = plt.figure(figsize=fig_size)
             fig.suptitle(f'Step 3: Scaling Factors - {model_name} ({reference_ssp})\n'
                         f'Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
-                        fontsize=16, fontweight='bold', y=0.96)
+                        fontsize=16, fontweight='bold', y=0.93)
 
             # Plot all targets on this page
             for target_idx, target_name in enumerate(target_names):
@@ -1598,7 +1598,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
             fig = plt.figure(figsize=fig_size)
             fig.suptitle(f'Step 3: Objective Function Values - {model_name} ({reference_ssp})\n'
                         f'Response Function: {response_config["scaling_name"]} - Page {page_num}/{total_pages}',
-                        fontsize=16, fontweight='bold', y=0.96)
+                        fontsize=16, fontweight='bold', y=0.93)
 
             # Plot all targets on this page
             for target_idx, target_name in enumerate(target_names):
@@ -1754,7 +1754,7 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
             fig = plt.figure(figsize=fig_size)
             fig.suptitle(f'Weather-GDP Regression Slopes - {model_name.upper()} {reference_ssp.upper()}\n'
                        f'Target: {target_name} [{target_type_label}] | Historical Period Regression Analysis',
-                       fontsize=16, fontweight='bold', y=0.96)
+                       fontsize=16, fontweight='bold', y=0.93)
 
             # Plot each response function
             for response_idx, response_name in enumerate(response_function_names):
