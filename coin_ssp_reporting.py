@@ -20,7 +20,7 @@ import pandas as pd
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import TwoSlopeNorm, LogNorm
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
 import xarray as xr
@@ -1952,13 +1952,16 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                 percentile_range = np.nanmax(percentile_timeseries) - np.nanmin(percentile_timeseries)
                 print(f"    {percentile_name} percentile range over time: {percentile_range:.6e}")
 
-            # Determine color scale for maps (TFP values are always positive, use 0-to-max range)
+            # Determine color scale for maps (TFP values are always positive, use log scale)
             all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
-            vmin = 0.0  # TFP values should always be positive
+            vmin = np.percentile(all_tfp_values, 5)  # Use 5th percentile for log scale lower bound
             vmax = np.percentile(all_tfp_values, 95)  # Use 95th percentile to handle outliers
 
             # Create colormap for TFP (use viridis - good for scientific data)
             cmap = plt.cm.viridis
+
+            # Use log normalization for color scale
+            norm = LogNorm(vmin=vmin, vmax=vmax)
 
             # Create page layout for this SSP
             fig = plt.figure(figsize=(18, 10))
@@ -1971,7 +1974,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
             # Panel 1: Reference period mean TFP map
             ax1 = plt.subplot(2, 3, (1, 2))  # Top left, spans 2 columns
             im1 = ax1.pcolormesh(lon_grid, lat_grid, tfp_ref_mean,
-                                cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+                                cmap=cmap, norm=norm, shading='auto')
             ax1.set_title(f'Mean TFP: Reference Period ({ref_start}-{ref_end})',
                          fontsize=14, fontweight='bold')
             ax1.set_xlabel('Longitude')
@@ -1988,7 +1991,7 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
             # Panel 2: Target period mean TFP map
             ax2 = plt.subplot(2, 3, (4, 5))  # Bottom left, spans 2 columns
             im2 = ax2.pcolormesh(lon_grid, lat_grid, tfp_target_mean,
-                                cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+                                cmap=cmap, norm=norm, shading='auto')
             ax2.set_title(f'Mean TFP: Target Period ({target_start}-{target_end})',
                          fontsize=14, fontweight='bold')
             ax2.set_xlabel('Longitude')
@@ -2009,8 +2012,9 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                         label=label, alpha=0.8)
 
             ax3.set_xlabel('Year', fontsize=12)
-            ax3.set_ylabel('Total Factor Productivity', fontsize=12)
+            ax3.set_ylabel('Total Factor Productivity (log scale)', fontsize=12)
             ax3.set_title('TFP Percentiles Across Valid Grid Cells', fontsize=14, fontweight='bold')
+            ax3.set_yscale('log')
             ax3.grid(True, alpha=0.3)
             ax3.legend(fontsize=10, loc='best')
 

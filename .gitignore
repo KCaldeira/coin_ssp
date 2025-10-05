@@ -67,5 +67,8 @@ tfp_test_results.png
 ssp_raw_data.pkl
 data/input/ssp_raw_data.pkl
 
+# Configuration files (copied to output directory)
+configs/
+
 # Output directory (generated results)
 data/output/
