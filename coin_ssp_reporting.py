@@ -2100,39 +2100,54 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                             fontsize=9)
 
-                    # Create CSV file with time series for min and max grid points (per SSP)
+                    # Create CSV file with time series for top 3 and bottom 3 grid points
                     csv_filename = f"step2_{json_id}_{model_name}_{viz_ssp}_baseline_tfp_extremes.csv"
                     csv_path = os.path.join(output_dir, csv_filename)
 
-                    # Extract time series for min and max grid cells
-                    min_tfp_series = tfp_timeseries[:, min_lat, min_lon]
-                    max_tfp_series = tfp_timeseries[:, max_lat, max_lon]
+                    # Get coordinate arrays
+                    lat_coords = all_data['_metadata']['coordinates']['lat']
+                    lon_coords = all_data['_metadata']['coordinates']['lon']
 
-                    # Get GDP and population data for these cells
-                    # Access data directly from the current function call via load_gridded_data
-                    min_pop_series = np.full(len(years), np.nan)
-                    min_gdp_series = np.full(len(years), np.nan)
-                    max_pop_series = np.full(len(years), np.nan)
-                    max_gdp_series = np.full(len(years), np.nan)
+                    # Find mean TFP over time for each grid cell
+                    mean_tfp_spatial = np.nanmean(tfp_timeseries, axis=0)  # [lat, lon]
+
+                    # Get valid mask
+                    valid_mask = all_data['_metadata']['valid_mask']
+
+                    # Flatten and find top 3 and bottom 3 indices among valid cells
+                    valid_mean_tfp = mean_tfp_spatial[valid_mask]
+                    valid_indices = np.where(valid_mask)
+
+                    # Get indices of 3 lowest and 3 highest mean TFP values
+                    bottom_3_sorted_idx = np.argsort(valid_mean_tfp)[:3]
+                    top_3_sorted_idx = np.argsort(valid_mean_tfp)[-3:][::-1]  # Reverse to get highest first
+
+                    # Map back to 2D coordinates
+                    bottom_3_coords = [(valid_indices[0][i], valid_indices[1][i]) for i in bottom_3_sorted_idx]
+                    top_3_coords = [(valid_indices[0][i], valid_indices[1][i]) for i in top_3_sorted_idx]
 
                     # Extract data from pre-loaded all_data
-                    # NOTE: all_data has shape [time, lat, lon] same as TFP
                     ssp_data = all_data[viz_ssp]
-                    min_pop_series = ssp_data['pop'][:, min_lat, min_lon]
-                    max_pop_series = ssp_data['pop'][:, max_lat, max_lon]
-                    min_gdp_series = ssp_data['gdp'][:, min_lat, min_lon]
-                    max_gdp_series = ssp_data['gdp'][:, max_lat, max_lon]
 
-                    # Create DataFrame and save to CSV
-                    extremes_data = {
-                        'year': years,
-                        'min_pop': min_pop_series,
-                        'min_gdp': min_gdp_series,
-                        'min_tfp': min_tfp_series,
-                        'max_pop': max_pop_series,
-                        'max_gdp': max_gdp_series,
-                        'max_tfp': max_tfp_series
-                    }
+                    # Build DataFrame with time series for all 6 grid cells
+                    extremes_data = {'year': years}
+
+                    # Add bottom 3 (lowest TFP)
+                    for i, (lat_idx, lon_idx) in enumerate(bottom_3_coords, 1):
+                        extremes_data[f'min{i}_lat'] = lat_coords[lat_idx]
+                        extremes_data[f'min{i}_lon'] = lon_coords[lon_idx]
+                        extremes_data[f'min{i}_tfp'] = tfp_timeseries[:, lat_idx, lon_idx]
+                        extremes_data[f'min{i}_pop'] = ssp_data['pop'][:, lat_idx, lon_idx]
+                        extremes_data[f'min{i}_gdp'] = ssp_data['gdp'][:, lat_idx, lon_idx]
+
+                    # Add top 3 (highest TFP)
+                    for i, (lat_idx, lon_idx) in enumerate(top_3_coords, 1):
+                        extremes_data[f'max{i}_lat'] = lat_coords[lat_idx]
+                        extremes_data[f'max{i}_lon'] = lon_coords[lon_idx]
+                        extremes_data[f'max{i}_tfp'] = tfp_timeseries[:, lat_idx, lon_idx]
+                        extremes_data[f'max{i}_pop'] = ssp_data['pop'][:, lat_idx, lon_idx]
+                        extremes_data[f'max{i}_gdp'] = ssp_data['gdp'][:, lat_idx, lon_idx]
+
                     df = pd.DataFrame(extremes_data)
                     df.to_csv(csv_path, index=False)
                     print(f"  Extremes CSV saved: {csv_path}")
