@@ -34,7 +34,7 @@ from coin_ssp_netcdf import (
 )
 from coin_ssp_math_utils import (
     apply_loess_subtract, calculate_zero_biased_range, calculate_zero_biased_axis_range,
-    calculate_area_weights, calculate_time_means, calculate_global_mean
+    calculate_area_weights, calculate_time_means, calculate_global_mean, calculate_gdp_weighted_mean
 )
 from coin_ssp_utils import get_ssp_data, get_grid_metadata
 
@@ -1197,29 +1197,23 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     cmap = plt.cm.RdBu_r
 
     # Get time series data
-    time_series = all_data['years']
+    years = all_data['years']
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
 
     # Calculate GDP-weighted temperature for target period (2080-2100)
     target_period_start = config['time_periods']['target_period']['start_year']
     target_period_end = config['time_periods']['target_period']['end_year']
-    target_start_idx = np.where(time_series == target_period_start)[0][0]
-    target_end_idx = np.where(time_series == target_period_end)[0][0]
-    gdp_weighted_tas_target = np.mean([
-        calculate_global_mean(gdp_series[t] * tas_series[t], lat, valid_mask) / calculate_global_mean(gdp_series[t], lat, valid_mask)
-        for t in range(target_start_idx, target_end_idx + 1)
-    ])
+    gdp_weighted_tas_target = calculate_gdp_weighted_mean(
+        tas_series, gdp_series, years, lat, valid_mask, target_period_start, target_period_end
+    )
 
     # Calculate GDP-weighted temperature for historical period (1861-2014)
     historical_period_start = config['time_periods']['historical_period']['start_year']
     historical_period_end = config['time_periods']['historical_period']['end_year']
-    hist_start_idx = np.where(time_series == historical_period_start)[0][0]
-    hist_end_idx = np.where(time_series == historical_period_end)[0][0]
-    gdp_weighted_tas_historical = np.mean([
-        calculate_global_mean(gdp_series[t] * tas_series[t], lat, valid_mask) / calculate_global_mean(gdp_series[t], lat, valid_mask)
-        for t in range(hist_start_idx, hist_end_idx + 1)
-    ])
+    gdp_weighted_tas_historical = calculate_gdp_weighted_mean(
+        tas_series, gdp_series, years, lat, valid_mask, historical_period_start, historical_period_end
+    )
 
     # Extract reduction arrays and calculate statistics
     reduction_arrays = {}
@@ -1293,7 +1287,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 gdp_weighted_tas = gdp_weighted_tas_target
 
             # Overall title with target type
-            fig.suptitle(f'{target_type} Target GDP Reductions - {model_name} {reference_ssp.upper()}\n'
+            fig.suptitle(f'{target_type} Target GDP Response - {model_name} {reference_ssp.upper()}\n'
                         f'GDP-weighted Mean Temperature ({period_start}-{period_end}): {gdp_weighted_tas:.2f}°C',
                         fontsize=16, fontweight='bold')
 

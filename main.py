@@ -284,7 +284,11 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     # Calculate all target reductions using extracted functions
     print("Calculating target GDP reductions...")
-    calculation_results = calculate_all_target_reductions(gdp_targets, gridded_data, all_data)
+    calculation_results = calculate_all_target_reductions(
+        gdp_targets, gridded_data, all_data, reference_ssp,
+        time_periods['target_period']['start_year'],
+        time_periods['target_period']['end_year']
+    )
     
     # Process results for Step 1 output format
     target_results = {}

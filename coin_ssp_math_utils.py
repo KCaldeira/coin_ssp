@@ -305,3 +305,49 @@ def calculate_global_mean(data, lat, valid_mask):
 
     # Use np.nansum and np.sum to handle NaN values properly
     return np.nansum(masked_data * masked_weights) / np.sum(masked_weights)
+
+
+def calculate_gdp_weighted_mean(variable_series, gdp_series, years, lat, valid_mask, start_year, end_year):
+    """
+    Calculate GDP-weighted mean of a variable over a specified time period.
+
+    Correctly computes mean over time of [sum(GDP×variable) / sum(GDP)] for each year,
+    rather than incorrectly using mean(GDP) × mean(variable).
+
+    Parameters
+    ----------
+    variable_series : np.ndarray
+        Variable time series [time, lat, lon] (e.g., temperature, precipitation)
+    gdp_series : np.ndarray
+        GDP time series [time, lat, lon]
+    years : np.ndarray
+        Year coordinate array
+    lat : np.ndarray
+        Latitude coordinate array
+    valid_mask : np.ndarray
+        Boolean mask for valid economic grid cells [lat, lon]
+    start_year : int
+        Start year of period (inclusive)
+    end_year : int
+        End year of period (inclusive)
+
+    Returns
+    -------
+    float
+        GDP-weighted mean of variable over the specified period
+    """
+    # Find time indices for the period
+    start_idx = np.where(years == start_year)[0][0]
+    end_idx = np.where(years == end_year)[0][0]
+
+    # Calculate GDP-weighted mean for each year in the period
+    gdp_weighted_values = []
+    for t in range(start_idx, end_idx + 1):
+        gdp_weighted_value = (
+            calculate_global_mean(gdp_series[t] * variable_series[t], lat, valid_mask) /
+            calculate_global_mean(gdp_series[t], lat, valid_mask)
+        )
+        gdp_weighted_values.append(gdp_weighted_value)
+
+    # Return temporal mean of GDP-weighted values
+    return np.mean(gdp_weighted_values)
