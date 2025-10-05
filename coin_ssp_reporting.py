@@ -1204,6 +1204,19 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     # Get all available targets (flexible for different configurations)
     target_names = [key for key in target_results.keys() if key != '_metadata']
 
+    # Separate targets by type
+    damage_targets = []
+    variability_targets = []
+
+    for target_name in target_names:
+        target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+        target_type = target_config.get('target_type', 'damage')
+
+        if target_type == 'variability':
+            variability_targets.append(target_name)
+        else:
+            damage_targets.append(target_name)
+
     for target_name in target_names:
         reduction_array = target_results[target_name]['reduction_array']
         global_mean = target_results[target_name]['global_mean_achieved']
@@ -1218,11 +1231,6 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             'max': float(np.max(valid_reduction_data))
         }
 
-    # Calculate overall data range for title annotation (using only valid cells)
-    all_valid_data = np.concatenate([arr[valid_mask].flatten() for arr in reduction_arrays.values()])
-    overall_min = np.min(all_valid_data)
-    overall_max = np.max(all_valid_data)
-
     # Calculate GDP-weighted means for verification (like original code)
     gdp_weighted_means = {}
     for target_name in target_names:
@@ -1232,43 +1240,59 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         gdp_weighted_means[target_name] = gdp_weighted_mean
 
     with PdfPages(pdf_path) as pdf:
-        # Single page with 4 panels: 3 maps + 1 line plot (2x2 layout)
-        fig = plt.figure(figsize=(16, 12))
+        # Create separate pages for damage and variability targets
+        for target_type, type_targets in [('Damage', damage_targets), ('Variability', variability_targets)]:
+            if not type_targets:
+                continue  # Skip if no targets of this type
 
-        # Overall title
-        fig.suptitle(f'Target GDP Reductions - {model_name} {reference_ssp.upper()}\n'
-                    f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_tas_target:.2f}°C',
-                    fontsize=16, fontweight='bold')
+            # Calculate color scale for this target type only
+            type_reduction_values = []
+            for target_name in type_targets:
+                reduction_data = reduction_arrays[target_name][valid_mask]
+                type_reduction_values.extend(reduction_data.flatten())
 
-        # Calculate layout for maps + line plot
-        n_targets = len(target_names)
+            if len(type_reduction_values) > 0:
+                type_vmin, type_vmax = calculate_zero_biased_range(type_reduction_values)
+            else:
+                type_vmin, type_vmax = -0.25, 0.25  # Fallback
 
-        if n_targets <= 3:
-            # Use 2x2 layout: 3 maps + 1 line plot
-            subplot_rows, subplot_cols = 2, 2
-            fig.set_size_inches(16, 12)
-        else:
-            # Use 3x2 layout: up to 5 maps + 1 line plot
-            subplot_rows, subplot_cols = 3, 2
-            fig.set_size_inches(18, 16)
+            # Single page with 4 panels: 3 maps + 1 line plot (2x2 layout)
+            fig = plt.figure(figsize=(16, 12))
 
-        # Line plot will be in the last position
-        line_plot_position = subplot_rows * subplot_cols
+            # Overall title with target type
+            fig.suptitle(f'{target_type} Target GDP Reductions - {model_name} {reference_ssp.upper()}\n'
+                        f'GDP-weighted Mean Temperature ({target_period_start}-{target_period_end}): {gdp_weighted_tas_target:.2f}°C',
+                        fontsize=16, fontweight='bold')
 
-        for i, target_name in enumerate(target_names):  # Show all targets
-            reduction_array = reduction_arrays[target_name]
-            global_mean = global_means[target_name]
-            gdp_weighted_mean = gdp_weighted_means[target_name]
-            data_range = data_ranges[target_name]
-            target_info = target_results[target_name]
+            # Calculate layout for maps + line plot
+            n_type_targets = len(type_targets)
 
-            # Calculate subplot position for maps (1-indexed, avoiding last position)
-            subplot_idx = i + 1
-            ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
+            if n_type_targets <= 3:
+                # Use 2x2 layout: 3 maps + 1 line plot
+                subplot_rows, subplot_cols = 2, 2
+                fig.set_size_inches(16, 12)
+            else:
+                # Use 3x2 layout: up to 5 maps + 1 line plot
+                subplot_rows, subplot_cols = 3, 2
+                fig.set_size_inches(18, 16)
 
-            # Create map with zero-centered normalization (mask invalid cells)
-            masked_reduction_array = np.where(valid_mask, reduction_array, np.nan)
-            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+            # Line plot will be in the last position
+            line_plot_position = subplot_rows * subplot_cols
+
+            for i, target_name in enumerate(type_targets):  # Show targets of this type
+                reduction_array = reduction_arrays[target_name]
+                global_mean = global_means[target_name]
+                gdp_weighted_mean = gdp_weighted_means[target_name]
+                data_range = data_ranges[target_name]
+                target_info = target_results[target_name]
+
+                # Calculate subplot position for maps (1-indexed, avoiding last position)
+                subplot_idx = i + 1
+                ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
+
+                # Create map with zero-centered normalization (mask invalid cells)
+                masked_reduction_array = np.where(valid_mask, reduction_array, np.nan)
+                norm = mcolors.TwoSlopeNorm(vmin=type_vmin, vcenter=0.0, vmax=type_vmax)
             im = ax.pcolormesh(lon_grid, lat_grid, masked_reduction_array,
                              cmap=cmap, norm=norm, shading='auto')
 
@@ -1357,7 +1381,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                     zero_tas = quad_config['zero_amount_temperature']
                     derivative = quad_config['derivative_at_zero_amount_temperature']
                     ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
-                            label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.3f})')
+                            label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.5f})')
 
         # Add reference lines
         ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
@@ -1401,11 +1425,11 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             y_min, y_max = calculate_zero_biased_axis_range(all_y_values, padding_factor=0.1)
             ax4.set_ylim(y_min, y_max)
 
-        # Adjust layout to prevent overlap
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.9)  # Make room for suptitle
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
+            # Adjust layout to prevent overlap
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.9)  # Make room for suptitle
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
 
     print(f"Target GDP visualization saved to {pdf_path}")
     return pdf_path
