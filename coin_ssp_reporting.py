@@ -39,6 +39,41 @@ from coin_ssp_math_utils import (
 from coin_ssp_utils import get_ssp_data, get_grid_metadata
 
 
+def format_log_colorbar_ticks(colorbar, base=10):
+    """
+    Format colorbar tick labels to show linear values instead of log values.
+
+    For a log-scale colorbar where ticks show log values (e.g., -0.05),
+    this converts them to show the corresponding linear values (e.g., 10^-0.05 = 0.891).
+
+    Parameters
+    ----------
+    colorbar : matplotlib.colorbar.Colorbar
+        The colorbar to format
+    base : float, default=10
+        The logarithm base (10 for log10, np.e for natural log)
+
+    Examples
+    --------
+    >>> cbar = plt.colorbar(im, ax=ax)
+    >>> format_log_colorbar_ticks(cbar, base=10)  # For log10 scale
+    >>> format_log_colorbar_ticks(cbar, base=np.e)  # For natural log scale
+    """
+    import matplotlib.ticker as ticker
+
+    def log_tick_formatter(x, pos):
+        """Format tick label as linear value from log value."""
+        linear_value = base ** x
+        # Use appropriate formatting based on magnitude
+        if abs(linear_value) >= 1000 or abs(linear_value) < 0.01:
+            return f'{linear_value:.2e}'
+        elif abs(linear_value) >= 10:
+            return f'{linear_value:.1f}'
+        else:
+            return f'{linear_value:.3f}'
+
+    colorbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(log_tick_formatter))
+
 
 def get_adaptive_subplot_layout(n_targets):
     """
