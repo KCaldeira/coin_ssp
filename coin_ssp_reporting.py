@@ -1250,12 +1250,26 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             'max': float(np.max(valid_reduction_data))
         }
 
-    # Calculate GDP-weighted means for verification (like original code)
+    # Calculate GDP-weighted means for verification using time series
     gdp_weighted_means = {}
     for target_name in target_names:
         reduction_array = reduction_arrays[target_name]
-        # GDP-weighted mean calculation: sum(gdp * reduction) / sum(gdp)
-        gdp_weighted_mean = calculate_global_mean(gdp_target * (1 + reduction_array), lat, valid_mask) / calculate_global_mean(gdp_target, lat, valid_mask) - 1
+        target_config = next(t for t in config['gdp_targets'] if t['target_name'] == target_name)
+        target_type = target_config.get('target_type', 'damage')
+
+        # Use appropriate time period based on target type
+        if target_type == 'variability':
+            period_start = historical_period_start
+            period_end = historical_period_end
+        else:
+            period_start = target_period_start
+            period_end = target_period_end
+
+        # GDP-weighted mean calculation using time series: mean_over_time[sum(GDP × (1+reduction)) / sum(GDP)] - 1
+        gdp_weighted_mean = calculate_gdp_weighted_mean(
+            np.ones_like(tas_series) * (1 + reduction_array)[np.newaxis, :, :],  # Broadcast reduction to time dimension
+            gdp_series, years, lat, valid_mask, period_start, period_end
+        ) - 1
         gdp_weighted_means[target_name] = gdp_weighted_mean
 
     with PdfPages(pdf_path) as pdf:

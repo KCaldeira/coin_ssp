@@ -90,7 +90,13 @@ def calculate_linear_target_reduction(linear_config, tas_ref, gdp_target, lat, v
 
     # Verify constraint satisfaction
     constraint1_check = a0_linear + a1_linear * T_ref_linear  # Should equal value_at_ref_linear
-    constraint2_check = calculate_global_mean(gdp_target * (1 + linear_reduction), lat, valid_mask) / global_gdp_target - 1  # Should equal global_mean_linear
+
+    # Verify global mean constraint using time series
+    # Since reduction is spatial, apply it to each time step: (1 + reduction) × GDP[t]
+    constraint2_check = calculate_gdp_weighted_mean(
+        np.ones_like(tas_series) * (1 + linear_reduction)[np.newaxis, :, :],  # Broadcast reduction to time dimension
+        gdp_series, years, lat, valid_mask, target_period_start, target_period_end
+    ) - 1
 
     return {
         'reduction_array': linear_reduction.astype(np.float64),
@@ -185,7 +191,16 @@ def calculate_quadratic_target_reduction(quadratic_config, tas_ref, gdp_target, 
     # Verify constraint satisfaction
     constraint1_check = a_quad + b_quad * T0 + c_quad * T0**2  # Should be 0 at T0
     constraint2_check = b_quad + 2 * c_quad * T0  # Derivative at T0: should equal derivative_at_T0
-    constraint3_check = calculate_global_mean(gdp_target * (1 + quadratic_reduction), lat, valid_mask) / global_gdp_target - 1
+
+    # Verify global mean constraint using time series
+    # Since reduction is spatial, apply it to each time step: (1 + reduction) × GDP[t]
+    years = all_data['years']
+    tas_series = all_data[reference_ssp]['tas']
+    gdp_series = all_data[reference_ssp]['gdp']
+    constraint3_check = calculate_gdp_weighted_mean(
+        np.ones_like(tas_series) * (1 + quadratic_reduction)[np.newaxis, :, :],  # Broadcast reduction to time dimension
+        gdp_series, years, lat, valid_mask, target_period_start, target_period_end
+    ) - 1
 
     return {
         'reduction_array': quadratic_reduction.astype(np.float64),
