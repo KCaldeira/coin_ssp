@@ -1355,7 +1355,9 @@ def calculate_variability_scaling_parameters(
 
     print(f"  Applied to {applied_cells}/{valid_cells} valid grid cells")
     if applied_cells > 0:
-        scaling_range = target_scaling_factors_array[np.isfinite(target_scaling_factors_array)]
+        # Convert to numpy for boolean indexing
+        scaling_values = target_scaling_factors_array.values if hasattr(target_scaling_factors_array, 'values') else target_scaling_factors_array
+        scaling_range = scaling_values[np.isfinite(scaling_values)]
         print(f"  Scaling factors range: {np.min(scaling_range):.6f} to {np.max(scaling_range):.6f}")
 
     return {

@@ -786,15 +786,15 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
     start_idx = target_start - years[0]
     end_idx = target_end - years[0] + 1
 
-    # Average GDP over target period for weighting
-    gdp_target_period = np.mean(gdp_data[start_idx:end_idx], axis=0)  # [lat, lon]
+    # Average GDP over target period for weighting (keep as xarray)
+    gdp_target_period = gdp_data.isel(time=slice(start_idx, end_idx)).mean(dim='time')  # [lat, lon]
 
-    # Calculate historical period GDP for slope weighting
+    # Calculate historical period GDP for slope weighting (keep as xarray)
     historical_start = config['time_periods']['historical_period']['start_year']
     historical_end = config['time_periods']['historical_period']['end_year']
     hist_start_idx = historical_start - years[0]
     hist_end_idx = historical_end - years[0] + 1
-    gdp_hist_period = np.mean(gdp_data[hist_start_idx:hist_end_idx], axis=0)  # [lat, lon]
+    gdp_hist_period = gdp_data.isel(time=slice(hist_start_idx, hist_end_idx)).mean(dim='time')  # [lat, lon]
 
     print(f"GDP-weighted global statistics for scaling factors (using {reference_ssp} GDP, {target_start}-{target_end}):")
     print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
@@ -829,9 +829,9 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             area_weights = calculate_area_weights(lat_values)
             area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], scale_data.shape)
 
-            # Flatten arrays and apply valid mask
+            # Flatten arrays and apply valid mask (convert xarray to numpy for flatten)
             flat_scale = scale_data.flatten()
-            flat_gdp = gdp_target_period.flatten()
+            flat_gdp = gdp_target_period.values.flatten()
             flat_area_weights = area_weights_2d.flatten()
             flat_valid = valid_mask.flatten()
 
@@ -944,7 +944,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                         if np.sum(valid_slope_indices) > 0:
                             # Flatten and filter
                             flat_slope = slope_data.flatten()
-                            flat_gdp_hist = gdp_hist_period.flatten()  # Use historical period GDP for slopes
+                            flat_gdp_hist = gdp_hist_period.values.flatten()  # Use historical period GDP for slopes
                             flat_area_weights = area_weights_2d.flatten()
                             flat_valid = valid_slope_indices.flatten()
 
@@ -1033,8 +1033,8 @@ def write_variability_calibration_summary(variability_results: Dict[str, Any], c
     hist_start_idx = hist_start - years[0]
     hist_end_idx = hist_end - years[0] + 1
 
-    # Average GDP over historical period for weighting
-    gdp_hist_period = np.mean(gdp_data[hist_start_idx:hist_end_idx], axis=0)  # [lat, lon]
+    # Average GDP over historical period for weighting (keep as xarray)
+    gdp_hist_period = gdp_data.isel(time=slice(hist_start_idx, hist_end_idx)).mean(dim='time')  # [lat, lon]
 
     print(f"GDP-weighted global statistics for variability calibration (using {reference_ssp} GDP, {hist_start}-{hist_end}):")
     print(f"Valid grid cells: {np.sum(valid_mask)} of {valid_mask.size}")
@@ -1071,7 +1071,7 @@ def write_variability_calibration_summary(variability_results: Dict[str, Any], c
 
         # Flatten and filter
         flat_slopes = regression_slopes.flatten()
-        flat_gdp = gdp_hist_period.flatten()
+        flat_gdp = gdp_hist_period.values.flatten()
         flat_area_weights = area_weights_2d.flatten()
         flat_valid = valid_regression_mask.flatten()
 
