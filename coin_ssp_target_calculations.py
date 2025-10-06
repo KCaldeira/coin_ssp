@@ -428,6 +428,10 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
         return_diagnostics=True
     )
 
+    print(f"DEBUG: QUadratic fitting results:")
+    print(f"  a0 = {a0}")
+    print(f"  a1 = {a1}")
+    print(f"  a2 = {a2}")
     # The function gives us A(T) = a0 + a1*T + a2*T² which directly represents reduction(T)
 
     # Calculate quadratic reduction array (automatic broadcasting)
