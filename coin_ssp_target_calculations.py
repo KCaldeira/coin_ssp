@@ -83,7 +83,7 @@ def fit_linear_A_xr(
     """
     Solve for (a0, a1) in A(t) = a0 + a1*t under:
       (a) A(tas_zero) = 0
-      (b) sum(A(t)*t*area*gdp) / sum(area*gdp) = 1 + response
+      (b) sum(A(t)*area*gdp) / sum(area*gdp) = 1 + response
 
     Returns:
       a0, a1  (Python floats)
@@ -132,9 +132,9 @@ def fit_linear_A_xr(
         return float(a0), float(a1)
 
     # Diagnostics using existing sums (no extra passes)
-    num_check = a0 * S1v + a1 * S2v
+    num_check = a0 * S0v + a1 * S1v  # sum(A(T)*w) = sum((a0 + a1*T)*w) = a0*S0 + a1*S1
     print(f"DEBUG fit_linear_A_xr: Verification:")
-    print(f"  Weighted mean of A(T) = (a0*S1 + a1*S2)/S0 = {num_check/S0v}")
+    print(f"  Weighted mean of A(T) = (a0*S0 + a1*S1)/S0 = {num_check/S0v}")
     print(f"  Should equal 1 + response = {1.0 + float(response)}")
     print(f"  Zero anchor: A(t0) = a0 + a1*t0 = {a0 + a1 * t0} (should be ~0)")
 
