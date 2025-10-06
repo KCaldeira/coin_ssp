@@ -1407,12 +1407,12 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 elif target_shape == 'quadratic':
                     coefficients = target_info['coefficients']
                     if coefficients:
-                        # Quadratic function: reduction = a + b*T + c*T²
-                        a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
-                        function_values = a + b * tas_range + c * tas_range**2
+                        # Quadratic function: reduction = a0 + a1*T + a2*T²
+                        a0, a1, a2 = coefficients['a0'], coefficients['a1'], coefficients['a2']
+                        function_values = a0 + a1 * tas_range + a2 * tas_range**2
 
                         ax4.plot(tas_range, function_values, color=color, linewidth=2,
-                                label=f'Quadratic: {a:.4f} + {b:.4f}×T + {c:.6f}×T²', alpha=0.8)
+                                label=f'Quadratic: {a0:.4f} + {a1:.4f}×T + {a2:.6f}×T²', alpha=0.8)
 
                         # Add calibration points from config
                         gdp_targets = config['gdp_targets']
@@ -1458,8 +1458,8 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                         a0, a1 = coefficients['a0'], coefficients['a1']
                         values = a0 + a1 * tas_range
                     elif target_shape == 'quadratic':
-                        a, b, c = coefficients['a'], coefficients['b'], coefficients['c']
-                        values = a + b * tas_range + c * tas_range**2
+                        a0, a1, a2 = coefficients['a0'], coefficients['a1'], coefficients['a2']
+                        values = a0 + a1 * tas_range + a2 * tas_range**2
                     all_y_values.extend(values)
 
             if all_y_values:

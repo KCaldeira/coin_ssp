@@ -339,8 +339,6 @@ def optimize_climate_response_scaling(
     end_year = target_period['end_year']
     years = gridcell_data['years']
 
-    # Find index of historical period end (for potential future use in variability calculations)
-    historical_end_idx = np.where(years <= historical_end_year)[0][-1]
     target_mask = (years >= start_year) & (years <= end_year)
     target_indices = np.where(target_mask)[0]
 
@@ -495,12 +493,10 @@ def process_response_target_optimization(
 
     print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?)")
 
-    # Calculate reference period indices from config
+    # Calculate reference period from config
     time_periods = config['time_periods']
     ref_start_year = time_periods['reference_period']['start_year']
     ref_end_year = time_periods['reference_period']['end_year']
-    ref_start_idx = np.where(years == ref_start_year)[0][0]
-    ref_end_idx = np.where(years == ref_end_year)[0][0]
 
     # Get dimensions
     nlat, nlon = valid_mask.shape
@@ -526,25 +522,29 @@ def process_response_target_optimization(
 
                 total_grid_cells += 1
 
-                # Extract time series for this grid cell (climate data is [time, lat, lon])
-                cell_tas = tas_data[:, lat_idx, lon_idx]  # [time]
-                cell_pr = pr_data[:, lat_idx, lon_idx]  # [time]
-                cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
-                cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
-                cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
+                # Extract time series for this grid cell using xarray selection
+                cell_tas = tas_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_pr = pr_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_pop = pop_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_gdp = gdp_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
 
                 # Get target reduction for this grid cell
                 target_reduction = target_reduction_array[lat_idx, lon_idx]
 
                 # Get weather (filtered) time series from pre-computed arrays
-                cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
-                cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
+                cell_tas_weather = tas_weather_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_pr_weather = pr_weather_data.isel(lat=lat_idx, lon=lon_idx).values
 
                 # Create parameters for this grid cell using factory
+                # Calculate reference means using coordinate-based selection
+                tas_ref_mean = float(tas_data.sel(time=slice(ref_start_year, ref_end_year)).isel(lat=lat_idx, lon=lon_idx).mean().values)
+                pr_ref_mean = float(pr_data.sel(time=slice(ref_start_year, ref_end_year)).isel(lat=lat_idx, lon=lon_idx).mean().values)
+
                 params_cell = config['model_params_factory'].create_for_step(
                     "grid_cell_optimization",
-                    tas0=np.mean(cell_tas[ref_start_idx:ref_end_idx+1]),
-                    pr0=np.mean(cell_pr[ref_start_idx:ref_end_idx+1])
+                    tas0=tas_ref_mean,
+                    pr0=pr_ref_mean
                 )
 
                 # Create cell data dictionary matching gridcell_data structure
@@ -619,19 +619,15 @@ def calculate_reference_climate_baselines(all_data, config):
 
     tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
     pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
-    years = all_data['years']
 
-    # Get reference period indices
+    # Get reference period
     time_periods = config['time_periods']
     ref_start_year = time_periods['reference_period']['start_year']
     ref_end_year = time_periods['reference_period']['end_year']
 
-    ref_start_idx = np.where(years == ref_start_year)[0][0]
-    ref_end_idx = np.where(years == ref_end_year)[0][0]
-
-    # Calculate reference period means for all grid cells
-    tas0_2d = np.mean(tas_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
-    pr0_2d = np.mean(pr_data[ref_start_idx:ref_end_idx+1, :, :], axis=0)  # [lat, lon]
+    # Calculate reference period means using coordinate-based selection
+    tas0_2d = tas_data.sel(time=slice(ref_start_year, ref_end_year)).mean(dim='time')
+    pr0_2d = pr_data.sel(time=slice(ref_start_year, ref_end_year)).mean(dim='time')
 
     return tas0_2d, pr0_2d
 
@@ -688,12 +684,8 @@ def calculate_weather_gdp_regression_slopes(
     gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')
     pop_data = get_ssp_data(all_data, reference_ssp, 'pop')
 
-    # Get time indices for historical period
-    years = all_data['years']
-    hist_start_idx = np.where(years == hist_start_year)[0][0]
-    hist_end_idx = np.where(years == hist_end_year)[0][0]
-
-    nlat, nlon = tas_data.shape[1], tas_data.shape[2]
+    # Get dimensions
+    nlat, nlon = len(tas_data.lat), len(tas_data.lon)
     valid_mask = all_data['_metadata']['valid_mask']
 
     # Extract weather data (already computed in all_data)
@@ -772,9 +764,9 @@ def calculate_weather_gdp_regression_slopes(
 
                     # Extract baseline TFP for this cell
                     cell_tfp_baseline = reference_tfp[reference_ssp]['tfp_baseline'][:, lat_idx, lon_idx]
-                    cell_pop = pop_data[:, lat_idx, lon_idx]
-                    cell_tas = tas_data[:, lat_idx, lon_idx]
-                    cell_pr = pr_data[:, lat_idx, lon_idx]
+                    cell_pop = pop_data.isel(lat=lat_idx, lon=lon_idx).values
+                    cell_tas = tas_data.isel(lat=lat_idx, lon=lon_idx).values
+                    cell_pr = pr_data.isel(lat=lat_idx, lon=lon_idx).values
 
                     # Run forward model to get GDP projections
                     try:
@@ -783,9 +775,16 @@ def calculate_weather_gdp_regression_slopes(
                         )
                         gdp_forward, _, _, _, _, _ = forward_results
 
-                        # Extract historical period data
-                        tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
-                        gdp_forward_hist = gdp_forward[hist_start_idx:hist_end_idx+1]
+                        # Extract historical period data using coordinate-based selection
+                        tas_weather_hist = tas_weather_data.sel(
+                            time=slice(hist_start_year, hist_end_year)
+                        ).isel(lat=lat_idx, lon=lon_idx).values
+
+                        # gdp_forward is already numpy array from forward model
+                        # Select historical period
+                        years = all_data['years']
+                        hist_mask = (years >= hist_start_year) & (years <= hist_end_year)
+                        gdp_forward_hist = gdp_forward[hist_mask]
 
                         # Compute GDP ratio: actual GDP / LOESS smoothed trend
                         gdp_ratio = apply_loess_divide(gdp_forward_hist, 30)
@@ -824,7 +823,7 @@ def calculate_weather_gdp_regression_slopes(
 
             # Calculate GDP-weighted mean slope
             if successful_regressions > 0:
-                gdp_weights = gdp_data[hist_start_idx:hist_end_idx+1, :, :].mean(axis=0)
+                gdp_weights = gdp_data.sel(time=slice(hist_start_year, hist_end_year)).mean(dim='time').values
                 weighted_slopes = regression_slopes * regression_success_mask * gdp_weights
                 total_weight = np.sum(gdp_weights[valid_mask] * regression_success_mask[valid_mask])
                 gdp_weighted_mean = np.sum(weighted_slopes[valid_mask]) / total_weight if total_weight > 0 else 0.0
@@ -982,12 +981,10 @@ def calculate_variability_climate_response_parameters(
     valid_cells = np.sum(valid_mask)
     print(f"Phase 1 complete: {valid_cells}/{valid_cells} valid grid cells for {n_response_functions} response functions")
 
-    # Get time period indices (needed for all response functions)
+    # Get time period (needed for all response functions)
     time_periods = config['time_periods']
     hist_start_year = time_periods['historical_period']['start_year']
     hist_end_year = time_periods['historical_period']['end_year']
-    hist_start_idx = np.where(years >= hist_start_year)[0][0]
-    hist_end_idx = np.where(years <= hist_end_year)[0][-1]
 
     # =================================================================================
     # PHASES 2-4: PROCESS EACH RESPONSE FUNCTION SEPARATELY
@@ -1040,11 +1037,11 @@ def calculate_variability_climate_response_parameters(
                     y_pr1=cell_params[10], y_pr2=cell_params[11]
                 )
 
-                # Extract time series for this grid cell
+                # Extract time series for this grid cell using xarray selection
                 # Use WEATHER COMPONENTS for forward simulation to isolate variability effects
-                cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]
-                cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]
-                cell_pop = pop_data[:, lat_idx, lon_idx]
+                cell_tas_weather = tas_weather_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_pr_weather = pr_weather_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_pop = pop_data.isel(lat=lat_idx, lon=lon_idx).values
                 cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
 
                 # Run forward model with weather components
@@ -1073,8 +1070,10 @@ def calculate_variability_climate_response_parameters(
                     continue
 
                 # Extract weather variables for historical period
-                tas_weather_hist = tas_weather_data[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
-                gdp_forward_hist = gdp_forward[hist_start_idx:hist_end_idx+1, lat_idx, lon_idx]
+                tas_weather_hist = tas_weather_data.sel(time=slice(hist_start_year, hist_end_year)).isel(lat=lat_idx, lon=lon_idx).values
+                # gdp_forward is numpy array, use boolean mask for historical period
+                hist_mask = (years >= hist_start_year) & (years <= hist_end_year)
+                gdp_forward_hist = gdp_forward[hist_mask, lat_idx, lon_idx]
 
                 # Compute GDP ratio: actual GDP divided by 30-year LOESS smoothed GDP trend
                 # Use the new apply_loess_divide function for clean, mnemonic operation
@@ -1196,11 +1195,9 @@ def calculate_variability_scaling_parameters(
     years = all_data['years']
     tas0_2d = all_data['tas0_2d']
 
-    # Get historical period indices for GDP weighting
+    # Get historical period for GDP weighting
     hist_start_year = time_periods['historical_period']['start_year']
     hist_end_year = time_periods['historical_period']['end_year']
-    hist_start_idx = np.where(years >= hist_start_year)[0][0]
-    hist_end_idx = np.where(years <= hist_end_year)[0][-1]
 
     nlat, nlon = tas0_2d.shape
     n_response_functions = len(response_scalings)
@@ -1212,7 +1209,7 @@ def calculate_variability_scaling_parameters(
     print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?) - Shape: {target_shape}")
 
     # Step 1: Calculate mean GDP by grid cell over historical period (only for valid cells)
-    mean_gdp_per_cell = np.mean(gdp_data[hist_start_idx:hist_end_idx+1, :, :], axis=0)  # [lat, lon]
+    mean_gdp_per_cell = gdp_data.sel(time=slice(hist_start_year, hist_end_year)).mean(dim='time').values  # [lat, lon]
 
     # Calculate GDP variability scaling parameters (g0, g1, g2) based on target shape
     if target_shape == 'constant':

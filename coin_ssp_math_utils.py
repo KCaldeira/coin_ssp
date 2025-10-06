@@ -1,4 +1,5 @@
 import numpy as np
+import xarray as xr
 from skmisc.loess import loess
 
 
@@ -38,7 +39,7 @@ def _apply_loess_smoothing(time_series, filter_width):
     return smoothed_series
 
 
-def apply_loess_subtract(time_series, filter_width, ref_start_idx=None, ref_end_idx=None):
+def apply_loess_subtract(time_series, filter_width, ref_period_slice):
     """
     Apply degree-2 LOESS smoothing and subtract trend, adding back reference period mean.
 
@@ -47,33 +48,31 @@ def apply_loess_subtract(time_series, filter_width, ref_start_idx=None, ref_end_
 
     Parameters
     ----------
-    time_series : array-like
-        Annual time series values
+    time_series : xr.DataArray
+        Annual time series values with time coordinate
     filter_width : int
         Width parameter (approx. number of years to smooth over)
-    ref_start_idx : int, optional
-        Start index of reference period (0-indexed). If None, uses entire series.
-    ref_end_idx : int, optional
-        End index of reference period (0-indexed, inclusive). If None, uses entire series.
+    ref_period_slice : slice
+        Reference period as slice(start_year, end_year)
 
     Returns
     -------
-    numpy.ndarray
+    xr.DataArray
         Time series with trend subtracted and reference period mean added back
     """
-    ts = np.array(time_series, dtype=float)
+    ts = time_series.values
 
-    # Calculate reference period mean
-    if ref_start_idx is None or ref_end_idx is None:
-        mean_of_reference_period = np.mean(ts)
-    else:
-        mean_of_reference_period = np.mean(ts[ref_start_idx:ref_end_idx+1])
+    # Calculate reference period mean using coordinate-based selection
+    mean_of_reference_period = time_series.sel(time=ref_period_slice).mean().values
 
     # Get LOESS smoothed trend
     smoothed_series = _apply_loess_smoothing(ts, filter_width)
 
     # Subtract trend and add reference period mean
-    result = ts - smoothed_series + mean_of_reference_period
+    result_values = ts - smoothed_series + mean_of_reference_period
+
+    # Return as DataArray with same coordinates
+    result = xr.DataArray(result_values, coords=time_series.coords, dims=time_series.dims)
 
     return result
 
@@ -253,16 +252,14 @@ def calculate_area_weights(lat):
     return weights / weights.sum()
 
 
-def calculate_time_means(data, years, start_year, end_year):
+def calculate_time_means(data, start_year, end_year):
     """
     Calculate temporal mean over specified year range.
 
     Parameters
     ----------
-    data : array
-        Data array with time as first dimension
-    years : array
-        Year values corresponding to time dimension
+    data : xr.DataArray
+        Data array with time coordinate
     start_year : int
         Start year (inclusive)
     end_year : int
@@ -270,44 +267,42 @@ def calculate_time_means(data, years, start_year, end_year):
 
     Returns
     -------
-    array
+    xr.DataArray
         Time-averaged data with time dimension removed
     """
-    mask = (years >= start_year) & (years <= end_year)
-    return data[mask].mean(axis=0)
+    return data.sel(time=slice(start_year, end_year)).mean(dim='time')
 
 
-def calculate_global_mean(data, lat, valid_mask):
+def calculate_global_mean(data, valid_mask):
     """
     Calculate area-weighted global mean using only valid grid cells.
 
     Parameters
     ----------
-    data : array
-        2D spatial data (lat, lon)
-    lat : array
-        Latitude coordinates
-    valid_mask : array
-        2D boolean mask (lat, lon) indicating valid grid cells
+    data : xr.DataArray
+        Spatial data with lat, lon coordinates
+    valid_mask : xr.DataArray
+        Boolean mask (lat, lon) indicating valid grid cells
 
     Returns
     -------
     float
         Area-weighted global mean over valid cells
     """
-    weights = calculate_area_weights(lat)
-    # Expand weights to match data shape: (lat,) -> (lat, lon)
-    weights_2d = np.broadcast_to(weights[:, np.newaxis], data.shape)
+    # Calculate area weights from latitude coordinate
+    weights = np.cos(np.deg2rad(data.lat))
+    weights = weights / weights.sum()
 
-    # Apply mask to both data and weights
-    masked_data = np.where(valid_mask, data, np.nan)
-    masked_weights = np.where(valid_mask, weights_2d, 0.0)
+    # Apply mask and weights
+    masked_data = data.where(valid_mask)
 
-    # Use np.nansum and np.sum to handle NaN values properly
-    return np.nansum(masked_data * masked_weights) / np.sum(masked_weights)
+    # Use xarray's weighted operations
+    weighted_mean = masked_data.weighted(weights).mean(dim=['lat', 'lon'])
+
+    return float(weighted_mean.values)
 
 
-def calculate_gdp_weighted_mean(variable_series, gdp_series, years, lat, valid_mask, start_year, end_year):
+def calculate_gdp_weighted_mean(variable_series, gdp_series, valid_mask, start_year, end_year):
     """
     Calculate GDP-weighted mean of a variable over a specified time period.
 
@@ -316,15 +311,11 @@ def calculate_gdp_weighted_mean(variable_series, gdp_series, years, lat, valid_m
 
     Parameters
     ----------
-    variable_series : np.ndarray
-        Variable time series [time, lat, lon] (e.g., temperature, precipitation)
-    gdp_series : np.ndarray
-        GDP time series [time, lat, lon]
-    years : np.ndarray
-        Year coordinate array
-    lat : np.ndarray
-        Latitude coordinate array
-    valid_mask : np.ndarray
+    variable_series : xr.DataArray
+        Variable time series with time, lat, lon coordinates
+    gdp_series : xr.DataArray
+        GDP time series with time, lat, lon coordinates
+    valid_mask : xr.DataArray
         Boolean mask for valid economic grid cells [lat, lon]
     start_year : int
         Start year of period (inclusive)
@@ -336,18 +327,19 @@ def calculate_gdp_weighted_mean(variable_series, gdp_series, years, lat, valid_m
     float
         GDP-weighted mean of variable over the specified period
     """
-    # Find time indices for the period
-    start_idx = np.where(years == start_year)[0][0]
-    end_idx = np.where(years == end_year)[0][0]
+    # Select time period using coordinate-based slicing
+    var_period = variable_series.sel(time=slice(start_year, end_year))
+    gdp_period = gdp_series.sel(time=slice(start_year, end_year))
 
-    # Calculate GDP-weighted mean for each year in the period
-    gdp_weighted_values = []
-    for t in range(start_idx, end_idx + 1):
-        gdp_weighted_value = (
-            calculate_global_mean(gdp_series[t] * variable_series[t], lat, valid_mask) /
-            calculate_global_mean(gdp_series[t], lat, valid_mask)
-        )
-        gdp_weighted_values.append(gdp_weighted_value)
+    # Apply valid mask (broadcasts automatically across time)
+    var_masked = var_period.where(valid_mask)
+    gdp_masked = gdp_period.where(valid_mask)
 
-    # Return temporal mean of GDP-weighted values
-    return np.mean(gdp_weighted_values)
+    # Calculate GDP-weighted value for each time step (vectorized)
+    gdp_weighted_values = (
+        (gdp_masked * var_masked).sum(dim=['lat', 'lon']) /
+        gdp_masked.sum(dim=['lat', 'lon'])
+    )
+
+    # Return temporal mean
+    return float(gdp_weighted_values.mean(dim='time').values)
