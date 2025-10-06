@@ -1155,7 +1155,7 @@ def calculate_variability_scaling_parameters(
 
     For different target shapes:
     - constant: g0 = target_amount, g1 = 0, g2 = 0
-    - linear: g0, g1 computed from global_mean_amount and amount_at_reference_temp
+    - linear: g0, g1 computed from global_mean_amount and zero_amount_temperature
     - quadratic: g0, g1, g2 computed from global_mean_amount, zero_amount_temperature, etc.
 
     Parameters
@@ -1223,11 +1223,11 @@ def calculate_variability_scaling_parameters(
 
     elif target_shape == 'linear':
         # Linear case: g(T) = a0 + a1 * T, so g0 = a0, g1 = a1, g2 = 0
+        # Constraints: g(T_zero) = 0 and mean(g(T)) = global_mean_amount
         global_mean_amount = gdp_target['global_mean_amount']
-        reference_temperature = gdp_target['reference_temperature']
-        amount_at_reference_temp = gdp_target['amount_at_reference_temp']
+        zero_amount_temperature = gdp_target['zero_amount_temperature']
 
-        print(f"  Linear target: global_mean={global_mean_amount}, ref_temp={reference_temperature}, amount_at_ref={amount_at_reference_temp}")
+        print(f"  Linear target: global_mean={global_mean_amount}, zero_temp={zero_amount_temperature}")
 
         # Calculate GDP-weighted mean temperature using only valid economic cells
         total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
@@ -1235,8 +1235,12 @@ def calculate_variability_scaling_parameters(
         gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]) / total_gdp
 
         # Calculate coefficients for linear relationship: g(T) = a0 + a1 * T
-        a1 = (amount_at_reference_temp - global_mean_amount) / (reference_temperature - gdp_weighted_tas)
-        a0 = global_mean_amount - a1 * gdp_weighted_tas
+        # From constraints: g(T_zero) = 0 => a0 + a1*T_zero = 0 => a0 = -a1*T_zero
+        # mean(g(T)) = global_mean => a0 + a1*mean(T) = global_mean
+        # Substituting: -a1*T_zero + a1*mean(T) = global_mean
+        # => a1*(mean(T) - T_zero) = global_mean
+        a1 = global_mean_amount / (gdp_weighted_tas - zero_amount_temperature)
+        a0 = -a1 * zero_amount_temperature
 
         print(f"  Linear coefficients: g0={a0:.6f}, g1={a1:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
@@ -1249,9 +1253,9 @@ def calculate_variability_scaling_parameters(
         # Quadratic case: g(T) = a0 + a1*T + a2*T^2, so g0 = a0, g1 = a1, g2 = a2
         global_mean_amount = gdp_target['global_mean_amount']
         zero_amount_temperature = gdp_target['zero_amount_temperature']
-        derivative_at_zero_amount_temperature = gdp_target['derivative_at_zero_amount_temperature']
+        zero_derivative_temperature = gdp_target['zero_derivative_temperature']
 
-        print(f"  Quadratic target: global_mean={global_mean_amount}, zero_temp={zero_amount_temperature}, deriv_at_zero={derivative_at_zero_amount_temperature}")
+        print(f"  Quadratic target: global_mean={global_mean_amount}, zero_temp={zero_amount_temperature}, deriv_at_zero={zero_derivative_temperature}")
 
         # Calculate GDP-weighted mean temperature using only valid economic cells
         total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
@@ -1264,7 +1268,7 @@ def calculate_variability_scaling_parameters(
         T2_mean = gdp_weighted_tas2
 
         # From constraints:
-        # a1 + 2*a2*T0 = derivative_at_zero_amount_temperature
+        # a1 + 2*a2*T0 = zero_derivative_temperature
         # a0 + a1*T0 + a2*T0^2 = 0
         # a0 + a1*T_mean + a2*T2_mean = global_mean_amount
 
@@ -1272,14 +1276,14 @@ def calculate_variability_scaling_parameters(
         # From first two: a0 = -a1*T0 - a2*T0^2
         # Substitute into third: -a1*T0 - a2*T0^2 + a1*T_mean + a2*T2_mean = global_mean_amount
         # a1*(T_mean - T0) + a2*(T2_mean - T0^2) = global_mean_amount
-        # a1 + 2*a2*T0 = derivative_at_zero_amount_temperature
+        # a1 + 2*a2*T0 = zero_derivative_temperature
 
         # Matrix form: [T_mean-T0, T2_mean-T0^2] [a1] = [global_mean_amount]
-        #              [1,         2*T0         ] [a2]   [derivative_at_zero_amount_temperature]
+        #              [1,         2*T0         ] [a2]   [zero_derivative_temperature]
 
         det = (T_mean - T0) * 2 * T0 - (T2_mean - T0**2) * 1
-        a1 = (global_mean_amount * 2 * T0 - derivative_at_zero_amount_temperature * (T2_mean - T0**2)) / det
-        a2 = (derivative_at_zero_amount_temperature * (T_mean - T0) - global_mean_amount * 1) / det
+        a1 = (global_mean_amount * 2 * T0 - zero_derivative_temperature * (T2_mean - T0**2)) / det
+        a2 = (zero_derivative_temperature * (T_mean - T0) - global_mean_amount * 1) / det
         a0 = -a1 * T0 - a2 * T0**2
 
         print(f"  Quadratic coefficients: g0={a0:.6f}, g1={a1:.6f}, g2={a2:.6f}")

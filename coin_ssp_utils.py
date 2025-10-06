@@ -522,6 +522,25 @@ def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
     all_data['_metadata']['valid_mask'] = valid_mask
     all_data['_metadata']['valid_count'] = final_valid_count
 
+    # Create area weights (cosine of latitude) as a 2D array [lat, lon]
+    # This makes it general for any grid structure
+    lat_coords = ref_gdp.lat
+    lon_coords = ref_gdp.lon
+    lat_rad = np.deg2rad(lat_coords)
+
+    # Create 2D area weights array by broadcasting cos(lat) across longitude
+    area_weights_2d = np.cos(lat_rad)[:, np.newaxis] * np.ones(len(lon_coords))
+
+    # Store as xarray DataArray with proper coordinates
+    area_weights = xr.DataArray(
+        area_weights_2d,
+        dims=['lat', 'lon'],
+        coords={'lat': lat_coords, 'lon': lon_coords}
+    )
+    all_data['_metadata']['area_weights'] = area_weights
+
+    print("✅ Area weights computed and stored")
+
     # Write NetCDF file with all loaded data if output directory is provided
     if output_dir is not None:
         write_all_loaded_data_netcdf(all_data, config, output_dir)

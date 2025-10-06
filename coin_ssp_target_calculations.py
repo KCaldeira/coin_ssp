@@ -214,7 +214,7 @@ def calculate_linear_target_reduction(linear_config, valid_mask, all_data, refer
     reduction(T) = a0 + a1 * T
 
     Subject to two constraints:
-    1. Point constraint: reduction(T_ref) = value_at_ref
+    1. Zero anchor: reduction(T_zero) = 0
     2. GDP-weighted global mean: ∑[w_i * gdp_i * (1 + reduction(T_i))] / ∑[w_i * gdp_i] = target_mean
 
     Parameters
@@ -222,8 +222,7 @@ def calculate_linear_target_reduction(linear_config, valid_mask, all_data, refer
     linear_config : dict
         Configuration containing:
         - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
-        - 'reference_temperature': Reference temperature point (e.g., 30.0)
-        - 'amount_at_reference_temp': Reduction at reference temperature (e.g., -0.25)
+        - 'zero_amount_temperature': Temperature with zero reduction (e.g., 13.5)
     valid_mask : xr.DataArray
         Boolean mask for valid economic grid cells [lat, lon]
     all_data : dict
@@ -241,16 +240,16 @@ def calculate_linear_target_reduction(linear_config, valid_mask, all_data, refer
         Dictionary containing:
         - 'reduction_array': Linear reduction DataArray [lat, lon]
         - 'coefficients': {'a0': intercept, 'a1': slope}
-        - 'constraint_verification': Verification of constraint satisfaction
+        - 'diagnostics': Diagnostic information from fitting function
     """
     # Extract configuration parameters
-    global_mean_linear = linear_config['global_mean_amount']
-    T_ref_linear = linear_config['reference_temperature']
-    value_at_ref_linear = linear_config['amount_at_reference_temp']
+    global_mean_amount = linear_config['global_mean_amount']
+    zero_amount_temperature = linear_config['zero_amount_temperature']
 
     # Get time series data as xarray DataArrays
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
+    area_weights = all_data['_metadata']['area_weights']
 
     # Calculate time-averaged temperature for constraint period
     from coin_ssp_math_utils import calculate_time_means
@@ -260,56 +259,36 @@ def calculate_linear_target_reduction(linear_config, valid_mask, all_data, refer
     tas_period_series = tas_series.sel(time=slice(period_start, period_end))
     gdp_period_series = gdp_series.sel(time=slice(period_start, period_end))
 
-    # Apply valid mask (broadcasts automatically across time)
-    tas_masked = tas_period_series.where(valid_mask)
-    gdp_masked = gdp_period_series.where(valid_mask)
-
-    # Calculate GDP-weighted temperature for each time step (vectorized)
-    gdp_weighted_temps = (
-        (gdp_masked * tas_masked).sum(dim=['lat', 'lon']) /
-        gdp_masked.sum(dim=['lat', 'lon'])
+    # Use fit_linear_A_xr with valid_mask as extra_weight
+    # The function solves for A(T) = a0 + a1*T where:
+    # - A(tas_zero) = 0 (zero anchor constraint at zero_amount_temperature)
+    # - sum(A(T)*area*gdp) / sum(area*gdp) = 1 + response
+    a0, a1, diagnostics = fit_linear_A_xr(
+        tas_period_series,
+        gdp_period_series,
+        area_weights,
+        tas_zero=zero_amount_temperature,
+        response=global_mean_amount,
+        extra_weight=valid_mask.astype(float),
+        return_diagnostics=True
     )
 
-    # Mean over time of GDP-weighted temperature
-    mean_gdp_weighted_temp = float(gdp_weighted_temps.mean(dim='time').values)
-
-    # Solve for coefficients
-    a1_linear = (global_mean_linear - value_at_ref_linear) / (mean_gdp_weighted_temp - T_ref_linear)
-    a0_linear = value_at_ref_linear - a1_linear * T_ref_linear
+    # The function gives us exactly what we want: reduction(T) = a0 + a1*T
 
     # Calculate linear reduction array (automatic broadcasting)
-    linear_reduction = a0_linear + a1_linear * tas_period
-
-    # Verify constraint satisfaction
-    constraint1_check = a0_linear + a1_linear * T_ref_linear
+    linear_reduction = a0 + a1 * tas_period
 
     # Verify global mean constraint
-    reduction_broadcast = linear_reduction.broadcast_like(tas_series)
-    constraint2_check = calculate_gdp_weighted_mean(
-        1 + reduction_broadcast,
-        gdp_series, valid_mask, period_start, period_end
-    ) - 1
+    constraint_check = diagnostics['mean_actual'] - 1.0
 
     return {
         'reduction_array': linear_reduction.astype(np.float64),
         'coefficients': {
-            'a0': float(a0_linear),
-            'a1': float(a1_linear),
+            'a0': float(a0),
+            'a1': float(a1),
             'a2': 0.0
         },
-        'constraint_verification': {
-            'point_constraint': {
-                'achieved': float(constraint1_check),
-                'target': float(value_at_ref_linear),
-                'error': float(abs(constraint1_check - value_at_ref_linear))
-            },
-            'global_mean_constraint': {
-                'achieved': float(constraint2_check),
-                'target': float(global_mean_linear),
-                'error': float(abs(constraint2_check - global_mean_linear))
-            }
-        },
-        'gdp_weighted_tas_mean': float(mean_gdp_weighted_temp)
+        'diagnostics': diagnostics
     }
 
 
@@ -322,7 +301,7 @@ def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data,
 
     Subject to three constraints:
     1. Zero point: reduction(T₀) = 0
-    2. Derivative at zero: reduction'(T₀) = derivative_at_zero_amount_temperature
+    2. Derivative at zero: reduction'(T₀) = zero_derivative_temperature
     3. GDP-weighted global mean: ∑[w_i * gdp_i * (1 + reduction(T_i))] / ∑[w_i * gdp_i] = target_mean
 
     Parameters
@@ -331,7 +310,7 @@ def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data,
         Configuration containing:
         - 'global_mean_amount': Target GDP-weighted global mean (e.g., -0.10)
         - 'zero_amount_temperature': Temperature with zero reduction (e.g., 13.5)
-        - 'derivative_at_zero_amount_temperature': Slope at T₀ (e.g., -0.01)
+        - 'zero_derivative_temperature': Slope at T₀ (e.g., -0.01)
     valid_mask : xr.DataArray
         Boolean mask for valid economic grid cells [lat, lon]
     all_data : dict
@@ -353,12 +332,13 @@ def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data,
     """
     # Extract configuration parameters
     global_mean_quad = quadratic_config['global_mean_amount']
-    T0 = quadratic_config['zero_amount_temperature']
-    derivative_at_T0 = quadratic_config['derivative_at_zero_amount_temperature']
+    zero_amount_temperature = quadratic_config['zero_amount_temperature']
+    zero_derivative_temperature = quadratic_config['zero_derivative_temperature']
 
     # Get time series data as xarray DataArrays
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
+    area_weights = all_data['_metadata']['area_weights']
 
     # Calculate time-averaged temperature for constraint period
     from coin_ssp_math_utils import calculate_time_means
@@ -368,75 +348,35 @@ def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data,
     tas_period_series = tas_series.sel(time=slice(period_start, period_end))
     gdp_period_series = gdp_series.sel(time=slice(period_start, period_end))
 
-    # Apply valid mask (broadcasts automatically across time)
-    tas_masked = tas_period_series.where(valid_mask)
-    gdp_masked = gdp_period_series.where(valid_mask)
-
-    # Calculate GDP-weighted T and T² for each time step (vectorized)
-    tas2_masked = tas_masked ** 2
-
-    gdp_weighted_temps = (
-        (gdp_masked * tas_masked).sum(dim=['lat', 'lon']) /
-        gdp_masked.sum(dim=['lat', 'lon'])
+    # Use fit_quadratic_A_xr with valid_mask as extra_weight
+    # The function solves for A(T) = a0 + a1*T + a2*T² where:
+    # - A(tas_zero) = 0 (zero anchor constraint at zero_amount_temperature)
+    # - dA/dt(tas_zero_deriv) = 0 (derivative is zero at zero_derivative_temperature)
+    # - sum(A(T)*area*gdp) / sum(area*gdp) = 1 + response
+    a0, a1, a2, diagnostics = fit_quadratic_A_xr(
+        tas_period_series,
+        gdp_period_series,
+        area_weights,
+        tas_zero=zero_amount_temperature,
+        tas_zero_deriv=zero_derivative_temperature,
+        response=global_mean_quad,
+        extra_weight=valid_mask.astype(float),
+        return_diagnostics=True
     )
 
-    gdp_weighted_temps2 = (
-        (gdp_masked * tas2_masked).sum(dim=['lat', 'lon']) /
-        gdp_masked.sum(dim=['lat', 'lon'])
-    )
-
-    # Mean over time
-    mean_gdp_weighted_temp = float(gdp_weighted_temps.mean(dim='time').values)
-    mean_gdp_weighted_temp2 = float(gdp_weighted_temps2.mean(dim='time').values)
-
-    # Solve for coefficients
-    denominator = T0**2 - 2*T0*mean_gdp_weighted_temp + mean_gdp_weighted_temp2
-    a2_quad = (global_mean_quad - derivative_at_T0*(mean_gdp_weighted_temp - T0)) / denominator
-    a1_quad = derivative_at_T0 - 2*a2_quad*T0
-    a0_quad = -derivative_at_T0*T0 + a2_quad*T0**2
+    # The function gives us exactly what we want: reduction(T) = a0 + a1*T + a2*T²
 
     # Calculate quadratic reduction array (automatic broadcasting)
-    quadratic_reduction = a0_quad + a1_quad * tas_period + a2_quad * tas_period**2
-
-    # Verify constraint satisfaction
-    constraint1_check = a0_quad + a1_quad * T0 + a2_quad * T0**2
-    constraint2_check = a1_quad + 2 * a2_quad * T0
-
-    # Verify global mean constraint
-    reduction_broadcast = quadratic_reduction.broadcast_like(tas_series)
-    constraint3_check = calculate_gdp_weighted_mean(
-        1 + reduction_broadcast,
-        gdp_series, valid_mask, period_start, period_end
-    ) - 1
+    quadratic_reduction = a0 + a1 * tas_period + a2 * tas_period**2
 
     return {
         'reduction_array': quadratic_reduction.astype(np.float64),
         'coefficients': {
-            'a0': float(a0_quad),
-            'a1': float(a1_quad),
-            'a2': float(a2_quad)
+            'a0': float(a0),
+            'a1': float(a1),
+            'a2': float(a2)
         },
-        'constraint_verification': {
-            'zero_point_constraint': {
-                'achieved': float(constraint1_check),
-                'target': 0.0,
-                'error': float(abs(constraint1_check))
-            },
-            'derivative_constraint': {
-                'achieved': float(constraint2_check),
-                'target': float(derivative_at_T0),
-                'error': float(abs(constraint2_check - derivative_at_T0))
-            },
-            'global_mean_constraint': {
-                'achieved': float(constraint3_check),
-                'target': float(global_mean_quad),
-                'error': float(abs(constraint3_check - global_mean_quad))
-            }
-        },
-        'gdp_weighted_tas_mean': float(mean_gdp_weighted_temp),
-        'gdp_weighted_tas2_mean': float(mean_gdp_weighted_temp2),
-        'derivative_at_zero_tas': float(derivative_at_T0),
-        'zero_amount_temperature': float(T0)
+        'diagnostics': diagnostics
     }
 
 

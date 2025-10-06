@@ -1414,14 +1414,13 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                         ax4.plot(tas_range, function_values, color=color, linewidth=2,
                                 label=f'Linear: {a0:.4f} + {a1:.4f}×T', alpha=0.8)
 
-                        # Add calibration point from config
+                        # Add zero anchor point from config
                         gdp_targets = config['gdp_targets']
                         linear_config = next(t for t in gdp_targets if t['target_name'] == target_name)
-                        if 'reference_temperature' in linear_config:
-                            ref_tas = linear_config['reference_temperature']
-                            ref_value = linear_config['amount_at_reference_temp']
-                            ax4.plot(ref_tas, ref_value, 'o', color=color, markersize=8,
-                                    label=f'Linear calib: {ref_tas}°C = {ref_value:.3f}')
+                        if 'zero_amount_temperature' in linear_config:
+                            zero_tas = linear_config['zero_amount_temperature']
+                            ax4.plot(zero_tas, 0.0, 'o', color=color, markersize=8,
+                                    label=f'Linear anchor: {zero_tas}°C = 0.0')
 
                 elif target_shape == 'quadratic':
                     coefficients = target_info['coefficients']
@@ -1439,7 +1438,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
                         # Handle new derivative-based specification
                         zero_tas = quad_config['zero_amount_temperature']
-                        derivative = quad_config['derivative_at_zero_amount_temperature']
+                        derivative = quad_config['zero_derivative_temperature']
                         ax4.plot(zero_tas, 0, 's', color=color, markersize=8,
                                 label=f'Quad zero: {zero_tas}°C = 0 (slope={derivative:.5f})')
 

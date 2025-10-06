@@ -79,8 +79,7 @@
         "target_shape": "linear",
         "target_type": "damage",
         "global_mean_amount": -0.01,
-        "reference_temperature": 20.0,
-        "amount_at_reference_temp": -0.02,
+        "zero_amount_temperature": 20.0,
         "description": "1% GDP reduction per C warming linear to 2% at 20 C"
       },
       {
@@ -88,7 +87,7 @@
         "target_shape": "quadratic",
         "target_type": "damage",
         "global_mean_amount": -0.01,
-        "derivative_at_zero_amount_temperature":-0.005,
+        "zero_derivative_temperature":-0.005,
         "zero_amount_temperature": 10.0,
         "description": "Uniform 1% GDP reduction per C warming across all grid cells"
       }
