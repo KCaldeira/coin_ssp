@@ -187,7 +187,7 @@ def fit_quadratic_A_xr(
     return float(a0), float(a1), float(a2), diagnostics
 
 
-def calculate_constant_target_reduction(gdp_amount_value, tas_ref_template):
+def calculate_constant_target_response(gdp_amount_value, tas_ref_template):
     """
     Calculate constant GDP reduction across all grid cells.
 
@@ -206,7 +206,7 @@ def calculate_constant_target_reduction(gdp_amount_value, tas_ref_template):
     return xr.full_like(tas_ref_template, gdp_amount_value, dtype=np.float64)
 
 
-def calculate_linear_target_reduction(linear_config, valid_mask, all_data, reference_ssp, period_start, period_end):
+def calculate_linear_target_response(linear_config, valid_mask, all_data, reference_ssp, period_start, period_end):
     """
     Calculate linear temperature-dependent GDP reduction using constraint satisfaction.
 
@@ -276,13 +276,10 @@ def calculate_linear_target_reduction(linear_config, valid_mask, all_data, refer
     # The function gives us exactly what we want: reduction(T) = a0 + a1*T
 
     # Calculate linear reduction array (automatic broadcasting)
-    linear_reduction = a0 + a1 * tas_period
-
-    # Verify global mean constraint
-    constraint_check = diagnostics['mean_actual'] - 1.0
+    linear_response = a0 + a1 * tas_period
 
     return {
-        'reduction_array': linear_reduction.astype(np.float64),
+        'reduction_array': linear_response.astype(np.float64),
         'coefficients': {
             'a0': float(a0),
             'a1': float(a1),
@@ -292,7 +289,7 @@ def calculate_linear_target_reduction(linear_config, valid_mask, all_data, refer
     }
 
 
-def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data, reference_ssp, period_start, period_end):
+def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, reference_ssp, period_start, period_end):
     """
     Calculate quadratic temperature-dependent GDP reduction using derivative constraint.
 
@@ -367,10 +364,10 @@ def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data,
     # The function gives us exactly what we want: reduction(T) = a0 + a1*T + a2*T²
 
     # Calculate quadratic reduction array (automatic broadcasting)
-    quadratic_reduction = a0 + a1 * tas_period + a2 * tas_period**2
+    quadratic_response = a0 + a1 * tas_period + a2 * tas_period**2
 
     return {
-        'reduction_array': quadratic_reduction.astype(np.float64),
+        'reduction_array': quadratic_response.astype(np.float64),
         'coefficients': {
             'a0': float(a0),
             'a1': float(a1),
@@ -380,7 +377,7 @@ def calculate_quadratic_target_reduction(quadratic_config, valid_mask, all_data,
     }
 
 
-def calculate_all_target_reductions(target_configs, gridded_data, all_data, reference_ssp, config):
+def calculate_all_target_responses(target_configs, gridded_data, all_data, reference_ssp, config):
     """
     Calculate all configured target GDP reductions using gridded data.
 
@@ -437,7 +434,7 @@ def calculate_all_target_reductions(target_configs, gridded_data, all_data, refe
 
         if target_shape == 'constant':
             # Constant reduction
-            reduction_array = calculate_constant_target_reduction(
+            reduction_array = calculate_constant_target_response(
                 target_config['global_mean_amount'], tas_ref
             )
             result = {
@@ -456,13 +453,13 @@ def calculate_all_target_reductions(target_configs, gridded_data, all_data, refe
 
         elif target_shape == 'quadratic':
             # Quadratic reduction
-            result = calculate_quadratic_target_reduction(target_config, valid_mask,
+            result = calculate_quadratic_target_response(target_config, valid_mask,
                                                          all_data, reference_ssp, period_start, period_end)
             result['target_shape'] = target_shape
 
         elif target_shape == 'linear':
             # Linear reduction
-            result = calculate_linear_target_reduction(target_config, valid_mask,
+            result = calculate_linear_target_response(target_config, valid_mask,
                                                       all_data, reference_ssp, period_start, period_end)
             result['target_shape'] = target_shape
 

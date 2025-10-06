@@ -17,7 +17,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
     config : Dict[str, Any]
         Configuration dictionary
     data_type : str
-        Type of data ('tas', 'pr', 'gdp', 'pop', 'target_reductions')
+        Type of data ('tas', 'pr', 'gdp', 'pop', 'target_responses')
     ssp_name : str
         SSP scenario name (e.g., 'ssp245', 'ssp585')
 
@@ -36,7 +36,7 @@ def resolve_netcdf_filepath(config: Dict[str, Any], data_type: str, ssp_name: st
         'pr': 'pr_file_prefix',
         'gdp': 'gdp_file_prefix',
         'pop': 'pop_file_prefix',
-        'target_reductions': 'target_reductions_file_prefix'
+        'target_responses': 'target_responses_file_prefix'
     }
 
     prefix_key = prefix_mapping[data_type]
@@ -315,12 +315,12 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
             target_names.append(target_name)
 
     # Stack arrays: (target_name, lat, lon)
-    target_reductions = np.stack(target_arrays, axis=0)
+    target_responses = np.stack(target_arrays, axis=0)
 
     # Create xarray dataset
     ds = xr.Dataset(
         {
-            'target_gdp_amounts': (['target_name', 'lat', 'lon'], target_reductions),
+            'target_gdp_amounts': (['target_name', 'lat', 'lon'], target_responses),
             'tas_ref': (['lat', 'lon'], metadata['tas_ref'].values),
             'gdp_target': (['lat', 'lon'], metadata['gdp_target'].values)
         },

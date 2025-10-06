@@ -489,7 +489,7 @@ def process_response_target_optimization(
     """
 
     target_name = gdp_target['target_name']
-    target_reduction_array = target_results[target_name]['reduction_array']  # [lat, lon]
+    target_response_array = target_results[target_name]['reduction_array']  # [lat, lon]
 
     print(f"\nProcessing GDP target: {target_name} ({target_idx+1}/?)")
 
@@ -530,7 +530,7 @@ def process_response_target_optimization(
                 cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
 
                 # Get target reduction for this grid cell
-                target_reduction = target_reduction_array[lat_idx, lon_idx]
+                target_response = target_response_array[lat_idx, lon_idx]
 
                 # Get weather (filtered) time series from pre-computed arrays
                 cell_tas_weather = tas_weather_data.isel(lat=lat_idx, lon=lon_idx).values
@@ -746,8 +746,8 @@ def calculate_weather_gdp_regression_slopes(
                         s=base_params['s'],
                         alpha=base_params['alpha'],
                         delta=base_params['delta'],
-                        tas0=tas0_2d[lat_idx, lon_idx],
-                        pr0=pr0_2d[lat_idx, lon_idx],
+                        tas0=float(tas0_2d[lat_idx, lon_idx].values),
+                        pr0=float(pr0_2d[lat_idx, lon_idx].values),
                         k_tas1=response_config.get('k_tas1', 0.0) * scaling_factor,
                         k_tas2=response_config.get('k_tas2', 0.0) * scaling_factor,
                         k_pr1=response_config.get('k_pr1', 0.0) * scaling_factor,
@@ -944,10 +944,10 @@ def calculate_variability_climate_response_parameters(
         'target_name': 'variability_reference'
     }
 
-    constant_reduction = np.full((nlat, nlon), -0.10)
+    constant_response = np.full((nlat, nlon), -0.10)
     dummy_target_results = {
         'variability_reference': {
-            'reduction_array': constant_reduction
+            'reduction_array': constant_response
         }
     }
 
@@ -1027,8 +1027,8 @@ def calculate_variability_climate_response_parameters(
                     s=config['model_params']['s'],
                     alpha=config['model_params']['alpha'],
                     delta=config['model_params']['delta'],
-                    tas0=tas0_2d[lat_idx, lon_idx],
-                    pr0=pr0_2d[lat_idx, lon_idx],
+                    tas0=float(tas0_2d[lat_idx, lon_idx].values),
+                    pr0=float(pr0_2d[lat_idx, lon_idx].values),
                     k_tas1=cell_params[0], k_tas2=cell_params[1],
                     k_pr1=cell_params[2], k_pr2=cell_params[3],
                     tfp_tas1=cell_params[4], tfp_tas2=cell_params[5],

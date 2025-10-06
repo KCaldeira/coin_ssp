@@ -1182,7 +1182,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
     # Determine color scale using zero-biased range from all target reduction data
-    all_reduction_values = []
+    all_response_values = []
     for target_name, result in target_results.items():
         if target_name != '_metadata':
             reduction_array = result['reduction_array']
@@ -1191,10 +1191,10 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 reduction_data = reduction_array.values[valid_mask]
             else:
                 reduction_data = reduction_array[valid_mask]
-            all_reduction_values.extend(reduction_data.flatten())
+            all_response_values.extend(reduction_data.flatten())
 
-    if len(all_reduction_values) > 0:
-        vmin, vmax = calculate_zero_biased_range(all_reduction_values)
+    if len(all_response_values) > 0:
+        vmin, vmax = calculate_zero_biased_range(all_response_values)
     else:
         vmin, vmax = -0.25, 0.25  # Fallback
 
@@ -1250,12 +1250,12 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
         # Calculate ranges using only valid cells
         if hasattr(reduction_array, 'values'):
-            valid_reduction_data = reduction_array.values[valid_mask]
+            valid_response_data = reduction_array.values[valid_mask]
         else:
-            valid_reduction_data = reduction_array[valid_mask]
+            valid_response_data = reduction_array[valid_mask]
         data_ranges[target_name] = {
-            'min': float(np.min(valid_reduction_data)),
-            'max': float(np.max(valid_reduction_data))
+            'min': float(np.min(valid_response_data)),
+            'max': float(np.max(valid_response_data))
         }
 
     # Calculate GDP-weighted means for verification using time series
@@ -1294,17 +1294,17 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 continue  # Skip if no targets of this type
 
             # Calculate color scale for this target type only
-            type_reduction_values = []
+            type_response_values = []
             for target_name in type_targets:
                 reduction_array = reduction_arrays[target_name]
                 if hasattr(reduction_array, 'values'):
                     reduction_data = reduction_array.values[valid_mask]
                 else:
                     reduction_data = reduction_array[valid_mask]
-                type_reduction_values.extend(reduction_data.flatten())
+                type_response_values.extend(reduction_data.flatten())
 
-            if len(type_reduction_values) > 0:
-                type_vmin, type_vmax = calculate_zero_biased_range(type_reduction_values)
+            if len(type_response_values) > 0:
+                type_vmin, type_vmax = calculate_zero_biased_range(type_response_values)
             else:
                 type_vmin, type_vmax = -0.25, 0.25  # Fallback
 
@@ -1351,9 +1351,9 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
                 ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                 # Create map with zero-centered normalization (mask invalid cells)
-                masked_reduction_array = np.where(valid_mask, reduction_array, np.nan)
+                masked_response_array = np.where(valid_mask, reduction_array, np.nan)
                 norm = mcolors.TwoSlopeNorm(vmin=type_vmin, vcenter=0.0, vmax=type_vmax)
-                im = ax.pcolormesh(lon_grid, lat_grid, masked_reduction_array,
+                im = ax.pcolormesh(lon_grid, lat_grid, masked_response_array,
                                  cmap=cmap, norm=norm, shading='auto')
 
                 # Format target name for display

@@ -25,8 +25,8 @@ from coin_ssp_math_utils import (
     calculate_area_weights, calculate_time_means, calculate_global_mean
 )
 from coin_ssp_target_calculations import (
-    calculate_constant_target_reduction, calculate_linear_target_reduction,
-    calculate_quadratic_target_reduction, calculate_all_target_reductions
+    calculate_constant_target_response, calculate_linear_target_response,
+    calculate_quadratic_target_response, calculate_all_target_responses
 )
 
 def filter_scaling_params(scaling_config):

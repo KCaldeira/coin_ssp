@@ -31,7 +31,7 @@ from coin_ssp_models import ScalingParams, ModelParams
 
 from coin_ssp_utils import (
     calculate_time_means, calculate_global_mean,
-    calculate_all_target_reductions, load_all_data,
+    calculate_all_target_responses, load_all_data,
     calculate_tfp_coin_ssp,
     calculate_area_weights, calculate_weather_vars
 )
@@ -284,7 +284,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     # Calculate all target reductions using extracted functions
     print("Calculating target GDP reductions...")
-    calculation_results = calculate_all_target_reductions(
+    calculation_results = calculate_all_target_responses(
         gdp_targets, gridded_data, all_data, reference_ssp, config
     )
     

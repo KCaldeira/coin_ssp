@@ -17,7 +17,7 @@
       "pr_file_prefix": "CLIMATE",
       "gdp_file_prefix": "GDP",
       "pop_file_prefix": "POP",
-      "target_reductions_file_prefix": "target_gdp_amounts"
+      "target_responses_file_prefix": "target_gdp_amounts"
     },
     "variable_names": {
       "tas_var_name": "tas",
@@ -149,7 +149,7 @@
     "_processing_step": "Step 5 - Output Generation",
     "output_directory": "data/output",
     "filename_patterns": {
-      "target_reductions": "{model_name}_{reference_ssp}_target_reductions_{timestamp}.nc",
+      "target_responses": "{model_name}_{reference_ssp}_target_responses_{timestamp}.nc",
       "forward_results": "{model_name}_{ssp}_{scaling_name}_results_{timestamp}.nc",
       "maps": "{model_name}_{reference_ssp}_maps_{timestamp}.pdf",
       "diagnostics": "{model_name}_{reference_ssp}_diagnostics_{timestamp}.pdf"
