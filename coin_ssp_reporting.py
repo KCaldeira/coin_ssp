@@ -1243,10 +1243,8 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
     for target_name in target_names:
         reduction_array = target_results[target_name]['reduction_array']
-        global_mean = target_results[target_name]['global_mean_achieved']
 
         reduction_arrays[target_name] = reduction_array
-        global_means[target_name] = global_mean
 
         # Calculate ranges using only valid cells
         if hasattr(reduction_array, 'values'):
@@ -1341,7 +1339,6 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
 
             for i, target_name in enumerate(type_targets):  # Show targets of this type
                 reduction_array = reduction_arrays[target_name]
-                global_mean = global_means[target_name]
                 gdp_weighted_mean = gdp_weighted_means[target_name]
                 data_range = data_ranges[target_name]
                 target_info = target_results[target_name]

@@ -526,7 +526,8 @@ def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
     # This makes it general for any grid structure
     lat_coords = ref_gdp.lat
     lon_coords = ref_gdp.lon
-    lat_rad = np.deg2rad(lat_coords)
+    lat_values = lat_coords.values
+    lat_rad = np.deg2rad(lat_values)
 
     # Create 2D area weights array by broadcasting cos(lat) across longitude
     area_weights_2d = np.cos(lat_rad)[:, np.newaxis] * np.ones(len(lon_coords))

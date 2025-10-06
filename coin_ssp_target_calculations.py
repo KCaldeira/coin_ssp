@@ -39,7 +39,8 @@ def _weighted_sums(
         mask = mask & np.isfinite(extra_weight)
 
     # Broadcast weights to 3D and apply mask
-    w = (area * gdp) if extra_weight is None else (area * gdp * extra_weight)
+    # Multiply gdp first to preserve [time, lat, lon] dimension order
+    w = (gdp * area) if extra_weight is None else (gdp * area * extra_weight)
     w = w.where(mask).astype("float64")
 
     t = tas.where(mask).astype("float64")
@@ -64,9 +65,7 @@ def _weighted_sums(
         S4 = (t4 * w).sum(dims, skipna=True)
         outs.append(S4)
 
-    # Compute all at once if dask-backed
-    outs = xr.compute(*outs)
-    return outs  # tuple of 0-D DataArrays
+    return tuple(outs)  # tuple of 0-D DataArrays
 
 
 def fit_linear_A_xr(

@@ -294,27 +294,14 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     for target_name, calc_result in calculation_results.items():
         target_shape = calc_result['target_shape']
         reduction_array = calc_result['reduction_array']
-        
-        # Calculate achieved GDP-weighted global mean
-        if calc_result['constraint_verification'] and 'global_mean_constraint' in calc_result['constraint_verification']:
-            global_mean_achieved = calc_result['constraint_verification']['global_mean_constraint']['achieved']
-        elif 'global_statistics' in calc_result:
-            global_mean_achieved = calc_result['global_statistics']['gdp_weighted_mean']
-        else:
-            # For constant case, calculate directly
-            global_mean_achieved = calculate_global_mean(gdp_target * (1 + reduction_array), valid_mask) / global_gdp_target - 1
-        
+
         target_results[target_name] = {
             'target_shape': target_shape,
             'reduction_array': reduction_array,
-            'global_mean_achieved': float(global_mean_achieved),
-            'constraint_satisfied': True,
-            'economic_bounds_valid': True,
-            'coefficients': calc_result['coefficients'],
-            'constraint_verification': calc_result['constraint_verification']
+            'coefficients': calc_result['coefficients']
         }
-        
-        print(f"  {target_name} ({target_shape}): GDP-weighted mean = {global_mean_achieved:.6f}")
+
+        print(f"  {target_name} ({target_shape})")
     
     # Store coordinate and metadata information
     target_results['_metadata'] = {
