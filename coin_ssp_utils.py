@@ -505,17 +505,20 @@ def load_all_data(config: Dict[str, Any], output_dir: str) -> Dict[str, Any]:
     ref_pop = all_data[reference_ssp]['pop']  # xr.DataArray [time, lat, lon]
 
     # Check if GDP and population are positive at ALL time points (vectorized)
-    valid_mask = (ref_gdp > 0).all(dim='time') & (ref_pop > 0).all(dim='time')
+    valid_mask_xr = (ref_gdp > 0).all(dim='time') & (ref_pop > 0).all(dim='time')
+
+    # Convert to numpy array for use in indexing and storage
+    valid_mask = valid_mask_xr.values
 
     # Count valid cells
-    final_valid_count = int(valid_mask.sum().values)
+    final_valid_count = int(valid_mask.sum())
     total_cells = valid_mask.size
 
     print(f"  Grid cell validation results:")
     print(f"    Total cells: {total_cells}")
     print(f"    Valid economic grid cells (non-zero GDP and population for all years): {final_valid_count} / {total_cells} ({100*final_valid_count/total_cells:.1f}%)")
 
-    # Add valid mask to metadata
+    # Add valid mask to metadata (as numpy array)
     all_data['_metadata']['valid_mask'] = valid_mask
     all_data['_metadata']['valid_count'] = final_valid_count
 

@@ -1231,7 +1231,8 @@ def calculate_variability_scaling_parameters(
 
         # Calculate GDP-weighted mean temperature using only valid economic cells
         total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
-        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d[valid_mask]) / total_gdp
+        tas0_2d_values = tas0_2d.values if hasattr(tas0_2d, 'values') else tas0_2d
+        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]) / total_gdp
 
         # Calculate coefficients for linear relationship: g(T) = a0 + a1 * T
         a1 = (amount_at_reference_temp - global_mean_amount) / (reference_temperature - gdp_weighted_tas)
@@ -1254,8 +1255,9 @@ def calculate_variability_scaling_parameters(
 
         # Calculate GDP-weighted mean temperature using only valid economic cells
         total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
-        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d[valid_mask]) / total_gdp
-        gdp_weighted_tas2 = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d[valid_mask]**2) / total_gdp
+        tas0_2d_values = tas0_2d.values if hasattr(tas0_2d, 'values') else tas0_2d
+        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]) / total_gdp
+        gdp_weighted_tas2 = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]**2) / total_gdp
 
         T0 = zero_amount_temperature
         T_mean = gdp_weighted_tas

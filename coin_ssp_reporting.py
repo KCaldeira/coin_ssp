@@ -271,9 +271,9 @@ def create_forward_model_visualization(forward_results, config, output_dir, all_
                         baseline_t = baseline_gdp[t, :, :]  # Note: baseline is [time, lat, lon]
 
                         # Calculate global means
-                        y_climate_series[t] = calculate_global_mean(gdp_climate_t, lat, valid_mask)
-                        y_weather_series[t] = calculate_global_mean(gdp_weather_t, lat, valid_mask)
-                        baseline_series[t] = calculate_global_mean(baseline_t, lat, valid_mask)
+                        y_climate_series[t] = calculate_global_mean(gdp_climate_t, valid_mask)
+                        y_weather_series[t] = calculate_global_mean(gdp_weather_t, valid_mask)
+                        baseline_series[t] = calculate_global_mean(baseline_t, valid_mask)
 
                     # Plot the time series
                     ax.plot(years, y_climate_series, 'r-', linewidth=2, label='GDP with Climate Effects')
@@ -393,7 +393,7 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                 baseline_global = []
                 for t_idx in range(len(years)):
                     baseline_slice = baseline_gdp[t_idx, :, :]  # [lat, lon]
-                    baseline_global.append(calculate_global_mean(baseline_slice, lat, valid_mask))
+                    baseline_global.append(calculate_global_mean(baseline_slice, valid_mask))
                 baseline_global = np.array(baseline_global)
 
                 # Plot each target on this page
@@ -412,8 +412,8 @@ def create_forward_model_ratio_visualization(forward_results, config, output_dir
                         climate_slice = gdp_climate_combo[t_idx, :, :]  # [lat, lon]
                         weather_slice = gdp_weather_combo[t_idx, :, :]  # [lat, lon]
 
-                        climate_global.append(calculate_global_mean(climate_slice, lat, valid_mask))
-                        weather_global.append(calculate_global_mean(weather_slice, lat, valid_mask))
+                        climate_global.append(calculate_global_mean(climate_slice, valid_mask))
+                        weather_global.append(calculate_global_mean(weather_slice, valid_mask))
 
                     climate_global = np.array(climate_global)
                     weather_global = np.array(weather_global)
@@ -815,8 +815,8 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             # Use calculate_global_mean with GDP*scaling data to get proper area+GDP weighted mean
             # Since GDP is in units per km², calculate_global_mean will properly handle the spatial weighting
             gdp_weighted_scaling_data = gdp_target_period * scale_data
-            total_weighted_scaling = calculate_global_mean(gdp_weighted_scaling_data, lat_values, valid_mask)
-            total_gdp = calculate_global_mean(gdp_target_period, lat_values, valid_mask)
+            total_weighted_scaling = calculate_global_mean(gdp_weighted_scaling_data, valid_mask)
+            total_gdp = calculate_global_mean(gdp_target_period, valid_mask)
 
             # GDP-weighted mean = area_weighted_mean(GDP * scaling) / area_weighted_mean(GDP)
             if total_gdp > 0:
@@ -1061,8 +1061,8 @@ def write_variability_calibration_summary(variability_results: Dict[str, Any], c
 
         # GDP-weighted mean
         gdp_weighted_slopes_data = gdp_hist_period * regression_slopes
-        total_weighted_slopes = calculate_global_mean(gdp_weighted_slopes_data, lat_values, valid_regression_mask)
-        total_gdp = calculate_global_mean(gdp_hist_period, lat_values, valid_regression_mask)
+        total_weighted_slopes = calculate_global_mean(gdp_weighted_slopes_data, valid_regression_mask)
+        total_gdp = calculate_global_mean(gdp_hist_period, valid_regression_mask)
         gdp_weighted_mean_slope = total_weighted_slopes / total_gdp if total_gdp > 0 else np.nan
 
         # Calculate GDP-weighted median for slopes
@@ -1185,7 +1185,12 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     all_reduction_values = []
     for target_name, result in target_results.items():
         if target_name != '_metadata':
-            reduction_data = result['reduction_array'][valid_mask]
+            reduction_array = result['reduction_array']
+            # Convert to numpy and extract valid values
+            if hasattr(reduction_array, 'values'):
+                reduction_data = reduction_array.values[valid_mask]
+            else:
+                reduction_data = reduction_array[valid_mask]
             all_reduction_values.extend(reduction_data.flatten())
 
     if len(all_reduction_values) > 0:
@@ -1205,14 +1210,14 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     target_period_start = config['time_periods']['target_period']['start_year']
     target_period_end = config['time_periods']['target_period']['end_year']
     gdp_weighted_tas_target = calculate_gdp_weighted_mean(
-        tas_series, gdp_series, years, lat, valid_mask, target_period_start, target_period_end
+        tas_series, gdp_series, valid_mask, target_period_start, target_period_end
     )
 
     # Calculate GDP-weighted temperature for historical period (1861-2014)
     historical_period_start = config['time_periods']['historical_period']['start_year']
     historical_period_end = config['time_periods']['historical_period']['end_year']
     gdp_weighted_tas_historical = calculate_gdp_weighted_mean(
-        tas_series, gdp_series, years, lat, valid_mask, historical_period_start, historical_period_end
+        tas_series, gdp_series, valid_mask, historical_period_start, historical_period_end
     )
 
     # Extract reduction arrays and calculate statistics
@@ -1244,7 +1249,10 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         global_means[target_name] = global_mean
 
         # Calculate ranges using only valid cells
-        valid_reduction_data = reduction_array[valid_mask]
+        if hasattr(reduction_array, 'values'):
+            valid_reduction_data = reduction_array.values[valid_mask]
+        else:
+            valid_reduction_data = reduction_array[valid_mask]
         data_ranges[target_name] = {
             'min': float(np.min(valid_reduction_data)),
             'max': float(np.max(valid_reduction_data))
@@ -1266,9 +1274,16 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             period_end = target_period_end
 
         # GDP-weighted mean calculation using time series: mean_over_time[sum(GDP × (1+reduction)) / sum(GDP)] - 1
+        # Create a broadcast-compatible reduction array
+        # Convert reduction_array to numpy if needed for broadcasting
+        if hasattr(reduction_array, 'values'):
+            reduction_values = reduction_array.values
+        else:
+            reduction_values = reduction_array
+        # Broadcast (1 + reduction) across time dimension: [time, lat, lon]
+        reduction_broadcast = xr.ones_like(tas_series) * (1 + reduction_values)[np.newaxis, :, :]
         gdp_weighted_mean = calculate_gdp_weighted_mean(
-            np.ones_like(tas_series) * (1 + reduction_array)[np.newaxis, :, :],  # Broadcast reduction to time dimension
-            gdp_series, years, lat, valid_mask, period_start, period_end
+            reduction_broadcast, gdp_series, valid_mask, period_start, period_end
         ) - 1
         gdp_weighted_means[target_name] = gdp_weighted_mean
 
@@ -1281,7 +1296,11 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             # Calculate color scale for this target type only
             type_reduction_values = []
             for target_name in type_targets:
-                reduction_data = reduction_arrays[target_name][valid_mask]
+                reduction_array = reduction_arrays[target_name]
+                if hasattr(reduction_array, 'values'):
+                    reduction_data = reduction_array.values[valid_mask]
+                else:
+                    reduction_data = reduction_array[valid_mask]
                 type_reduction_values.extend(reduction_data.flatten())
 
             if len(type_reduction_values) > 0:
@@ -2022,7 +2041,10 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
 
             for t_idx, year in enumerate(years):
                 tfp_slice = tfp_timeseries[t_idx]  # [lat, lon]
-                valid_values = tfp_slice[valid_mask]
+                if hasattr(tfp_slice, 'values'):
+                    valid_values = tfp_slice.values[valid_mask]
+                else:
+                    valid_values = tfp_slice[valid_mask]
 
                 # Diagnostic output for first few time steps
                 if t_idx < 3:
@@ -2055,7 +2077,9 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                 print(f"    {percentile_name} percentile range over time: {percentile_range:.6e}")
 
             # Determine color scale for maps (TFP values are always positive, use log scale)
-            all_tfp_values = np.concatenate([tfp_ref_mean[valid_mask], tfp_target_mean[valid_mask]])
+            tfp_ref_valid = tfp_ref_mean.values[valid_mask] if hasattr(tfp_ref_mean, 'values') else tfp_ref_mean[valid_mask]
+            tfp_target_valid = tfp_target_mean.values[valid_mask] if hasattr(tfp_target_mean, 'values') else tfp_target_mean[valid_mask]
+            all_tfp_values = np.concatenate([tfp_ref_valid, tfp_target_valid])
             vmin = np.percentile(all_tfp_values, 5)  # Use 5th percentile for log scale lower bound
             vmax = np.percentile(all_tfp_values, 95)  # Use 95th percentile to handle outliers
 
@@ -2182,7 +2206,10 @@ def create_baseline_tfp_visualization(tfp_results, config, output_dir, all_data)
                     valid_mask = all_data['_metadata']['valid_mask']
 
                     # Flatten and find top 3, bottom 3, and median 3 indices among valid cells
-                    valid_mean_log_tfp = mean_log_tfp_spatial[valid_mask]
+                    if hasattr(mean_log_tfp_spatial, 'values'):
+                        valid_mean_log_tfp = mean_log_tfp_spatial.values[valid_mask]
+                    else:
+                        valid_mean_log_tfp = mean_log_tfp_spatial[valid_mask]
                     valid_indices = np.where(valid_mask)
 
                     # Calculate median log(TFP) value

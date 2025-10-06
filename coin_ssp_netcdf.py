@@ -307,7 +307,11 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
 
     for target_name, target_data in target_results.items():
         if target_name != '_metadata':
-            target_arrays.append(target_data['reduction_array'])
+            reduction_array = target_data['reduction_array']
+            # Convert xarray DataArray to numpy if needed
+            if hasattr(reduction_array, 'values'):
+                reduction_array = reduction_array.values
+            target_arrays.append(reduction_array)
             target_names.append(target_name)
 
     # Stack arrays: (target_name, lat, lon)
@@ -317,8 +321,8 @@ def save_step1_results_netcdf(target_results: Dict[str, Any], output_path: str, 
     ds = xr.Dataset(
         {
             'target_gdp_amounts': (['target_name', 'lat', 'lon'], target_reductions),
-            'tas_ref': (['lat', 'lon'], metadata['tas_ref']),
-            'gdp_target': (['lat', 'lon'], metadata['gdp_target'])
+            'tas_ref': (['lat', 'lon'], metadata['tas_ref'].values),
+            'gdp_target': (['lat', 'lon'], metadata['gdp_target'].values)
         },
         coords={
             'target_name': target_names,
@@ -822,10 +826,11 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
     # Fill arrays
     for i, ssp_name in enumerate(ssp_names):
         ssp_data = all_data[ssp_name]
-        tas_all[i] = ssp_data['tas']      # [time, lat, lon]
-        pr_all[i] = ssp_data['pr']  # [time, lat, lon]
-        gdp_all[i] = ssp_data['gdp']                      # [time, lat, lon]
-        pop_all[i] = ssp_data['pop']        # [time, lat, lon]
+        # Convert xarray DataArrays to numpy arrays
+        tas_all[i] = ssp_data['tas'].values if hasattr(ssp_data['tas'], 'values') else ssp_data['tas']
+        pr_all[i] = ssp_data['pr'].values if hasattr(ssp_data['pr'], 'values') else ssp_data['pr']
+        gdp_all[i] = ssp_data['gdp'].values if hasattr(ssp_data['gdp'], 'values') else ssp_data['gdp']
+        pop_all[i] = ssp_data['pop'].values if hasattr(ssp_data['pop'], 'values') else ssp_data['pop']
 
     # Create xarray Dataset
     ds = xr.Dataset(

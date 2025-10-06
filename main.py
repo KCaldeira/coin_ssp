@@ -257,12 +257,12 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     
     # Calculate temporal means
     print("Calculating temporal means...")
-    tas_ref = calculate_time_means(data['tas'], data['years'], 
+    tas_ref = calculate_time_means(data['tas'],
                                    time_periods['reference_period']['start_year'],
                                    time_periods['reference_period']['end_year'])
-    
-    gdp_target = calculate_time_means(data['gdp'], data['years'],
-                                     time_periods['target_period']['start_year'], 
+
+    gdp_target = calculate_time_means(data['gdp'],
+                                     time_periods['target_period']['start_year'],
                                      time_periods['target_period']['end_year'])
     
     # Get valid mask from metadata
@@ -276,8 +276,8 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
     }
     
     # Calculate global means for verification using valid mask
-    global_tas_ref = calculate_global_mean(tas_ref, data['lat'], valid_mask)
-    global_gdp_target = calculate_global_mean(gdp_target, data['lat'], valid_mask)
+    global_tas_ref = calculate_global_mean(tas_ref, valid_mask)
+    global_gdp_target = calculate_global_mean(gdp_target, valid_mask)
     
     print(f"Global mean reference temperature: {global_tas_ref:.2f}°C")
     print(f"Global mean target GDP: {global_gdp_target:.2e}")
@@ -302,7 +302,7 @@ def step1_calculate_target_gdp_changes(config: Dict[str, Any], output_dir: str, 
             global_mean_achieved = calc_result['global_statistics']['gdp_weighted_mean']
         else:
             # For constant case, calculate directly
-            global_mean_achieved = calculate_global_mean(gdp_target * (1 + reduction_array), data['lat'], valid_mask) / global_gdp_target - 1
+            global_mean_achieved = calculate_global_mean(gdp_target * (1 + reduction_array), valid_mask) / global_gdp_target - 1
         
         target_results[target_name] = {
             'target_shape': target_shape,
