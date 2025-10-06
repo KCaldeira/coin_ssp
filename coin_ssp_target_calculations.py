@@ -272,10 +272,11 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
         return_diagnostics=True
     )
 
-    # The function gives us exactly what we want: reduction(T) = a0 + a1*T
+    # The function gives us A(T) = a0 + a1*T where A represents (1 + reduction)
+    # So reduction(T) = A(T) - 1
 
     # Calculate linear reduction array (automatic broadcasting)
-    linear_response = a0 + a1 * tas_period
+    linear_response = (a0 + a1 * tas_period) - 1.0
 
     return {
         'reduction_array': linear_response.astype(np.float64),
@@ -360,10 +361,11 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
         return_diagnostics=True
     )
 
-    # The function gives us exactly what we want: reduction(T) = a0 + a1*T + a2*T²
+    # The function gives us A(T) = a0 + a1*T + a2*T² where A represents (1 + reduction)
+    # So reduction(T) = A(T) - 1
 
     # Calculate quadratic reduction array (automatic broadcasting)
-    quadratic_response = a0 + a1 * tas_period + a2 * tas_period**2
+    quadratic_response = (a0 + a1 * tas_period + a2 * tas_period**2) - 1.0
 
     return {
         'reduction_array': quadratic_response.astype(np.float64),

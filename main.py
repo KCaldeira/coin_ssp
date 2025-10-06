@@ -407,8 +407,9 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
             for lon_idx in range(nlon):
                 if valid_mask[lat_idx, lon_idx]:
                     # Extract time series for this valid grid cell (data is [time, lat, lon])
-                    pop_timeseries = pop_data[:, lat_idx, lon_idx]
-                    gdp_timeseries = gdp_data[:, lat_idx, lon_idx]
+                    # Convert to numpy for fast computation in calculate_tfp_coin_ssp
+                    pop_timeseries = pop_data[:, lat_idx, lon_idx].values
+                    gdp_timeseries = gdp_data[:, lat_idx, lon_idx].values
 
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
