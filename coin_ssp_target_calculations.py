@@ -89,8 +89,14 @@ def fit_linear_A_xr(
       a0, a1  (Python floats)
       If return_diagnostics=True, also returns a dict with simple checks.
     """
+    print(f"DEBUG fit_linear_A_xr: Computing weighted sums...")
     S0, S1, S2 = _weighted_sums(tas, gdp, area, dims, max_k=2, extra_weight=extra_weight)
     S0v, S1v, S2v = S0.item(), S1.item(), S2.item()
+
+    print(f"DEBUG fit_linear_A_xr: Weighted sums:")
+    print(f"  S0 (sum of weights) = {S0v:.6e}")
+    print(f"  S1 (sum of T*weights) = {S1v:.6e}")
+    print(f"  S2 (sum of T²*weights) = {S2v:.6e}")
 
     if abs(S0v) < eps:
         raise ValueError("sum(area*gdp[*(extra_weight)]) ~ 0; weighted mean undefined.")
@@ -98,22 +104,40 @@ def fit_linear_A_xr(
     t0 = float(tas_zero)
     target = (1.0 + float(response)) * S0v
 
+    print(f"DEBUG fit_linear_A_xr: Constraint setup:")
+    print(f"  tas_zero (t0) = {t0}")
+    print(f"  response = {response}")
+    print(f"  target = (1 + response) * S0 = {target:.6e}")
+    print(f"  Constraint: mean(A) = sum(A*T*w)/sum(w) = 1 + response = {1.0 + float(response)}")
+
     denom = S2v - t0 * S1v
+    print(f"DEBUG fit_linear_A_xr: Solving for coefficients:")
+    print(f"  denom = S2 - t0*S1 = {S2v:.6e} - {t0}*{S1v:.6e} = {denom:.6e}")
+
     if abs(denom) < eps:
         if not np.isclose(target, 0.0, rtol=1e-12, atol=1e-12):
             raise ValueError("Constraints inconsistent (S2 - t0*S1 ≈ 0 but target ≠ 0).")
         # Infinite family; choose simplest member
         a1 = 0.0
         a0 = 0.0
+        print(f"DEBUG fit_linear_A_xr: Degenerate case, setting a0=a1=0")
     else:
         a1 = target / denom
         a0 = -a1 * t0
+        print(f"DEBUG fit_linear_A_xr: Solution:")
+        print(f"  a1 = target / denom = {target:.6e} / {denom:.6e} = {a1}")
+        print(f"  a0 = -a1 * t0 = -{a1} * {t0} = {a0}")
 
     if not return_diagnostics:
         return float(a0), float(a1)
 
     # Diagnostics using existing sums (no extra passes)
     num_check = a0 * S1v + a1 * S2v
+    print(f"DEBUG fit_linear_A_xr: Verification:")
+    print(f"  Weighted mean of A(T) = (a0*S1 + a1*S2)/S0 = {num_check/S0v}")
+    print(f"  Should equal 1 + response = {1.0 + float(response)}")
+    print(f"  Zero anchor: A(t0) = a0 + a1*t0 = {a0 + a1 * t0} (should be ~0)")
+
     diagnostics = {
         "zero_anchor_residual": a0 + a1 * t0,  # should be ~ 0
         "mean_target": 1.0 + float(response),
@@ -241,22 +265,50 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
         - 'coefficients': {'a0': intercept, 'a1': slope}
         - 'diagnostics': Diagnostic information from fitting function
     """
+    print("\n" + "="*80)
+    print("DEBUG: calculate_linear_target_response")
+    print("="*80)
+
     # Extract configuration parameters
     global_mean_amount = linear_config['global_mean_amount']
     zero_amount_temperature = linear_config['zero_amount_temperature']
+
+    print(f"DEBUG: Config parameters:")
+    print(f"  global_mean_amount = {global_mean_amount}")
+    print(f"  zero_amount_temperature = {zero_amount_temperature}")
+    print(f"  period_start = {period_start}, period_end = {period_end}")
 
     # Get time series data as xarray DataArrays
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
     area_weights = all_data['_metadata']['area_weights']
 
+    print(f"DEBUG: Input data shapes:")
+    print(f"  tas_series.shape = {tas_series.shape}")
+    print(f"  gdp_series.shape = {gdp_series.shape}")
+    print(f"  area_weights.shape = {area_weights.shape}")
+    print(f"  valid_mask.shape = {valid_mask.shape}, sum = {np.sum(valid_mask)}")
+
     # Calculate time-averaged temperature for constraint period
     from coin_ssp_math_utils import calculate_time_means
     tas_period = calculate_time_means(tas_series, period_start, period_end)
 
+    print(f"DEBUG: Time-averaged temperature:")
+    print(f"  tas_period.shape = {tas_period.shape}")
+    print(f"  tas_period range = [{float(tas_period.min()):.2f}, {float(tas_period.max()):.2f}]")
+    print(f"  tas_period mean = {float(tas_period.mean()):.2f}")
+
     # Select constraint period data using coordinate-based slicing
     tas_period_series = tas_series.sel(time=slice(period_start, period_end))
     gdp_period_series = gdp_series.sel(time=slice(period_start, period_end))
+
+    print(f"DEBUG: Constraint period data:")
+    print(f"  tas_period_series.shape = {tas_period_series.shape}")
+    print(f"  gdp_period_series.shape = {gdp_period_series.shape}")
+
+    print(f"DEBUG: Calling fit_linear_A_xr with:")
+    print(f"  tas_zero = {zero_amount_temperature}")
+    print(f"  response = {global_mean_amount}")
 
     # Use fit_linear_A_xr with valid_mask as extra_weight
     # The function solves for A(T) = a0 + a1*T where:
@@ -272,11 +324,26 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
         return_diagnostics=True
     )
 
-    # The function gives us A(T) = a0 + a1*T where A represents (1 + reduction)
-    # So reduction(T) = A(T) - 1
+    print(f"DEBUG: Fitting results:")
+    print(f"  a0 = {a0}")
+    print(f"  a1 = {a1}")
+    print(f"DEBUG: Diagnostics:")
+    for key, value in diagnostics.items():
+        print(f"  {key} = {value}")
+
+    # The function gives us A(T) = a0 + a1*T which directly represents reduction(T)
 
     # Calculate linear reduction array (automatic broadcasting)
-    linear_response = (a0 + a1 * tas_period) - 1.0
+    linear_response = a0 + a1 * tas_period
+
+    print(f"DEBUG: Final reduction array:")
+    print(f"  linear_response.shape = {linear_response.shape}")
+    print(f"  linear_response range = [{float(linear_response.min()):.6f}, {float(linear_response.max()):.6f}]")
+    print(f"  linear_response mean (all) = {float(linear_response.mean()):.6f}")
+    valid_reductions = linear_response.values[valid_mask]
+    print(f"  linear_response mean (valid cells) = {float(np.mean(valid_reductions)):.6f}")
+    print(f"  Check at zero_temp: a0 + a1*{zero_amount_temperature} = {a0 + a1*zero_amount_temperature:.6f}")
+    print("="*80 + "\n")
 
     return {
         'reduction_array': linear_response.astype(np.float64),
@@ -361,11 +428,10 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
         return_diagnostics=True
     )
 
-    # The function gives us A(T) = a0 + a1*T + a2*T² where A represents (1 + reduction)
-    # So reduction(T) = A(T) - 1
+    # The function gives us A(T) = a0 + a1*T + a2*T² which directly represents reduction(T)
 
     # Calculate quadratic reduction array (automatic broadcasting)
-    quadratic_response = (a0 + a1 * tas_period + a2 * tas_period**2) - 1.0
+    quadratic_response = a0 + a1 * tas_period + a2 * tas_period**2
 
     return {
         'reduction_array': quadratic_response.astype(np.float64),
