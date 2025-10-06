@@ -993,7 +993,7 @@ def step5_processing_summary(config: Dict[str, Any], target_results: Dict[str, A
     print(f"  ✅ Calculated {len(gdp_targets)} target reduction patterns")
     for target_name, target_data in target_results.items():
         if target_name != '_metadata':
-            print(f"     • {target_name}: GDP-weighted mean = {target_data['global_mean_achieved']:.6f}")
+            print(f"     • {target_name}")
     
     # Step 2 Summary  
     print(f"\nStep 2 - Baseline TFP Calculation:")
