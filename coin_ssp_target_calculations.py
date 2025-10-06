@@ -4,6 +4,188 @@ from typing import Dict, Any
 
 from coin_ssp_math_utils import calculate_gdp_weighted_mean
 
+import numpy as np
+import xarray as xr
+from typing import Tuple, Sequence, Optional, Dict, Any
+
+def _check_dims(t: xr.DataArray, g: xr.DataArray, a: xr.DataArray,
+                dims: Sequence[str]) -> None:
+    for d in dims:
+        if d not in t.dims or d not in g.dims:
+            raise ValueError(f"tas and gdp must both have dim '{d}'.")
+    # area must cover the spatial dims; broadcasting across time is fine
+    for d in dims[1:]:
+        if d not in a.dims:
+            raise ValueError(f"area must have spatial dim '{d}'.")
+
+def _weighted_sums(
+    tas: xr.DataArray,
+    gdp: xr.DataArray,
+    area: xr.DataArray,
+    dims: Sequence[str],
+    max_k: int,
+    extra_weight: Optional[xr.DataArray] = None,
+) -> Tuple[xr.DataArray, ...]:
+    """
+    Return (S0, S1, ..., Smax_k) where Sk = sum(t^k * w) over 'dims',
+    with w = area * gdp * (extra_weight if provided) and a *common mask*
+    applied so all Sk use the same sample.
+    """
+    _check_dims(tas, gdp, area, dims)
+
+    # Common finite mask across tas, gdp, area, (and extra_weight if supplied)
+    mask = np.isfinite(tas) & np.isfinite(gdp) & np.isfinite(area)
+    if extra_weight is not None:
+        mask = mask & np.isfinite(extra_weight)
+
+    # Broadcast weights to 3D and apply mask
+    w = (area * gdp) if extra_weight is None else (area * gdp * extra_weight)
+    w = w.where(mask).astype("float64")
+
+    t = tas.where(mask).astype("float64")
+
+    outs = []
+    S0 = w.sum(dims, skipna=True)
+    outs.append(S0)
+
+    if max_k >= 1:
+        S1 = (t * w).sum(dims, skipna=True)
+        outs.append(S1)
+    if max_k >= 2:
+        t2 = t * t
+        S2 = (t2 * w).sum(dims, skipna=True)
+        outs.append(S2)
+    if max_k >= 3:
+        t3 = t * t * t
+        S3 = (t3 * w).sum(dims, skipna=True)
+        outs.append(S3)
+    if max_k >= 4:
+        t4 = (t * t) * (t * t)
+        S4 = (t4 * w).sum(dims, skipna=True)
+        outs.append(S4)
+
+    # Compute all at once if dask-backed
+    outs = xr.compute(*outs)
+    return outs  # tuple of 0-D DataArrays
+
+
+def fit_linear_A_xr(
+    tas: xr.DataArray,
+    gdp: xr.DataArray,
+    area: xr.DataArray,
+    tas_zero: float,
+    response: float,
+    *,
+    dims: Sequence[str] = ("time", "lat", "lon"),
+    extra_weight: Optional[xr.DataArray] = None,
+    eps: float = 1e-12,
+    return_diagnostics: bool = False,
+) -> Tuple[float, float] | Tuple[float, float, Dict[str, Any]]:
+    """
+    Solve for (a0, a1) in A(t) = a0 + a1*t under:
+      (a) A(tas_zero) = 0
+      (b) sum(A(t)*t*area*gdp) / sum(area*gdp) = 1 + response
+
+    Returns:
+      a0, a1  (Python floats)
+      If return_diagnostics=True, also returns a dict with simple checks.
+    """
+    S0, S1, S2 = _weighted_sums(tas, gdp, area, dims, max_k=2, extra_weight=extra_weight)
+    S0v, S1v, S2v = S0.item(), S1.item(), S2.item()
+
+    if abs(S0v) < eps:
+        raise ValueError("sum(area*gdp[*(extra_weight)]) ~ 0; weighted mean undefined.")
+
+    t0 = float(tas_zero)
+    target = (1.0 + float(response)) * S0v
+
+    denom = S2v - t0 * S1v
+    if abs(denom) < eps:
+        if not np.isclose(target, 0.0, rtol=1e-12, atol=1e-12):
+            raise ValueError("Constraints inconsistent (S2 - t0*S1 ≈ 0 but target ≠ 0).")
+        # Infinite family; choose simplest member
+        a1 = 0.0
+        a0 = 0.0
+    else:
+        a1 = target / denom
+        a0 = -a1 * t0
+
+    if not return_diagnostics:
+        return float(a0), float(a1)
+
+    # Diagnostics using existing sums (no extra passes)
+    num_check = a0 * S1v + a1 * S2v
+    diagnostics = {
+        "zero_anchor_residual": a0 + a1 * t0,  # should be ~ 0
+        "mean_target": 1.0 + float(response),
+        "mean_actual": num_check / S0v,
+        "mean_abs_error": abs(num_check / S0v - (1.0 + float(response))),
+        "S0": S0v, "S1": S1v, "S2": S2v,
+    }
+    return float(a0), float(a1), diagnostics
+
+
+def fit_quadratic_A_xr(
+    tas: xr.DataArray,
+    gdp: xr.DataArray,
+    area: xr.DataArray,
+    tas_zero: float,
+    tas_zero_deriv: float,
+    response: float,
+    *,
+    dims: Sequence[str] = ("time", "lat", "lon"),
+    extra_weight: Optional[xr.DataArray] = None,
+    eps: float = 1e-12,
+    return_diagnostics: bool = False,
+) -> Tuple[float, float, float] | Tuple[float, float, float, Dict[str, Any]]:
+    """
+    Solve for (a0, a1, a2) in A(t) = a0 + a1*t + a2*t**2 under:
+      (a) A(tas_zero) = 0
+      (b) dA/dt(tas_zero_deriv) = 0
+      (c) sum(A(t)*t*area*gdp) / sum(area*gdp) = 1 + response
+
+    Returns:
+      a0, a1, a2  (Python floats)
+      If return_diagnostics=True, also returns a dict with simple checks.
+    """
+    S0, S1, S2, S3 = _weighted_sums(tas, gdp, area, dims, max_k=3, extra_weight=extra_weight)
+    S0v, S1v, S2v, S3v = S0.item(), S1.item(), S2.item(), S3.item()
+
+    if abs(S0v) < eps:
+        raise ValueError("sum(area*gdp[*(extra_weight)]) ~ 0; weighted mean undefined.")
+
+    t0 = float(tas_zero)
+    td = float(tas_zero_deriv)
+    target = (1.0 + float(response)) * S0v
+
+    denom = (2.0 * td * t0 - t0 * t0) * S1v - 2.0 * td * S2v + S3v
+    if abs(denom) < eps:
+        if not np.isclose(target, 0.0, rtol=1e-12, atol=1e-12):
+            raise ValueError("Constraints inconsistent (quadratic denominator ≈ 0 but target ≠ 0).")
+        # Infinite family; choose the trivial member
+        a2 = 0.0
+        a1 = 0.0
+        a0 = 0.0
+    else:
+        a2 = target / denom
+        a1 = -2.0 * a2 * td
+        a0 = a2 * (2.0 * td * t0 - t0 * t0)
+
+    if not return_diagnostics:
+        return float(a0), float(a1), float(a2)
+
+    # Diagnostics using existing sums (no extra passes)
+    num_check = a0 * S1v + a1 * S2v + a2 * S3v
+    diagnostics = {
+        "zero_anchor_residual": a0 + a1 * t0 + a2 * t0 * t0,  # should be ~ 0
+        "derivative_anchor_residual": a1 + 2.0 * a2 * td,     # should be ~ 0
+        "mean_target": 1.0 + float(response),
+        "mean_actual": num_check / S0v,
+        "mean_abs_error": abs(num_check / S0v - (1.0 + float(response))),
+        "S0": S0v, "S1": S1v, "S2": S2v, "S3": S3v,
+    }
+    return float(a0), float(a1), float(a2), diagnostics
+
 
 def calculate_constant_target_reduction(gdp_amount_value, tas_ref_template):
     """
