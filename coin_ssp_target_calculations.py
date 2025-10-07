@@ -18,196 +18,74 @@ def _check_dims(t: xr.DataArray, g: xr.DataArray, a: xr.DataArray,
         if d not in a.dims:
             raise ValueError(f"area must have spatial dim '{d}'.")
 
-def _weighted_sums(
-    tas: xr.DataArray,
-    gdp: xr.DataArray,
-    area: xr.DataArray,
-    dims: Sequence[str],
-    max_k: int,
-    extra_weight: Optional[xr.DataArray] = None,
-) -> Tuple[xr.DataArray, ...]:
-    """
-    Return (S0, S1, ..., Smax_k) where Sk = sum(t^k * w) over 'dims',
-    with w = area * gdp * (extra_weight if provided) and a *common mask*
-    applied so all Sk use the same sample.
-    """
-    _check_dims(tas, gdp, area, dims)
+import numpy as np
+import xarray as xr
+from typing import Tuple
 
-    # Common finite mask across tas, gdp, area, (and extra_weight if supplied)
-    mask = np.isfinite(tas) & np.isfinite(gdp) & np.isfinite(area)
-    if extra_weight is not None:
-        mask = mask & np.isfinite(extra_weight)
-
-    # Broadcast weights to 3D and apply mask
-    # Multiply gdp first to preserve [time, lat, lon] dimension order
-    w = (gdp * area) if extra_weight is None else (gdp * area * extra_weight)
+def _tw_moments(t: xr.DataArray, w: xr.DataArray, max_k: int):
+    """Return T1, T2[, T3] with a common finite mask; each is a 0-D DataArray."""
+    mask = np.isfinite(t) & np.isfinite(w)
+    t = t.where(mask).astype("float64")
     w = w.where(mask).astype("float64")
 
-    t = tas.where(mask).astype("float64")
+    dims = (t * w).dims  # union of dims; xarray will broadcast automatically
 
-    outs = []
-    S0 = w.sum(dims, skipna=True)
-    outs.append(S0)
-
-    if max_k >= 1:
-        S1 = (t * w).sum(dims, skipna=True)
-        outs.append(S1)
+    T1 = (t * w).sum(dims, skipna=True)
+    outs = [T1]
     if max_k >= 2:
-        t2 = t * t
-        S2 = (t2 * w).sum(dims, skipna=True)
-        outs.append(S2)
+        T2 = ((t * t) * w).sum(dims, skipna=True); outs.append(T2)
     if max_k >= 3:
-        t3 = t * t * t
-        S3 = (t3 * w).sum(dims, skipna=True)
-        outs.append(S3)
-    if max_k >= 4:
-        t4 = (t * t) * (t * t)
-        S4 = (t4 * w).sum(dims, skipna=True)
-        outs.append(S4)
+        T3 = ((t * t * t) * w).sum(dims, skipna=True); outs.append(T3)
 
-    return tuple(outs)  # tuple of 0-D DataArrays
-
+    return xr.compute(*outs)  # compute together (dask-friendly)
 
 def fit_linear_A_xr(
-    tas: xr.DataArray,
-    gdp: xr.DataArray,
-    area: xr.DataArray,
-    tas_zero: float,
-    response: float,
-    *,
-    dims: Sequence[str] = ("time", "lat", "lon"),
-    extra_weight: Optional[xr.DataArray] = None,
-    eps: float = 1e-12,
-    return_diagnostics: bool = False,
-) -> Tuple[float, float] | Tuple[float, float, Dict[str, Any]]:
+    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12
+) -> Tuple[float, float]:
     """
-    Solve for (a0, a1) in A(t) = a0 + a1*t under:
-      (a) A(tas_zero) = 0
-      (b) sum(A(t)*area*gdp) / sum(area*gdp) = 1 + response
-
-    Returns:
-      a0, a1  (Python floats)
-      If return_diagnostics=True, also returns a dict with simple checks.
+    Find a0, a1 for A(t)=a0+a1*t subject to:
+      A(t0)=1  and  sum(A*t*w) / sum(t*w) = 1 + response
     """
-    print(f"DEBUG fit_linear_A_xr: Computing weighted sums...")
-    S0, S1, S2 = _weighted_sums(tas, gdp, area, dims, max_k=2, extra_weight=extra_weight)
-    S0v, S1v, S2v = S0.item(), S1.item(), S2.item()
+    T1, T2 = _tw_moments(t, w, max_k=2)
+    T1, T2 = T1.item(), T2.item()
 
-    print(f"DEBUG fit_linear_A_xr: Weighted sums:")
-    print(f"  S0 (sum of weights) = {S0v:.6e}")
-    print(f"  S1 (sum of T*weights) = {S1v:.6e}")
-    print(f"  S2 (sum of T²*weights) = {S2v:.6e}")
-
-    if abs(S0v) < eps:
-        raise ValueError("sum(area*gdp[*(extra_weight)]) ~ 0; weighted mean undefined.")
-
-    t0 = float(tas_zero)
-    target = (1.0 + float(response)) * S0v
-
-    print(f"DEBUG fit_linear_A_xr: Constraint setup:")
-    print(f"  tas_zero (t0) = {t0}")
-    print(f"  response = {response}")
-    print(f"  target = (1 + response) * S0 = {target:.6e}")
-    print(f"  Constraint: mean(A) = sum(A*T*w)/sum(w) = 1 + response = {1.0 + float(response)}")
-
-    denom = S2v - t0 * S1v
-    print(f"DEBUG fit_linear_A_xr: Solving for coefficients:")
-    print(f"  denom = S2 - t0*S1 = {S2v:.6e} - {t0}*{S1v:.6e} = {denom:.6e}")
-
+    denom = T2 - t0 * T1
     if abs(denom) < eps:
-        if not np.isclose(target, 0.0, rtol=1e-12, atol=1e-12):
-            raise ValueError("Constraints inconsistent (S2 - t0*S1 ≈ 0 but target ≠ 0).")
-        # Infinite family; choose simplest member
+        # Consistent only if response*T1 ~ 0; choose simplest solution then.
+        if not np.isclose(response * T1, 0.0, rtol=1e-12, atol=1e-12):
+            raise ValueError("Inconsistent linear constraints (denominator ~ 0 but response*T1 ≠ 0).")
         a1 = 0.0
-        a0 = 0.0
-        print(f"DEBUG fit_linear_A_xr: Degenerate case, setting a0=a1=0")
+        a0 = 1.0
     else:
-        a1 = target / denom
-        a0 = -a1 * t0
-        print(f"DEBUG fit_linear_A_xr: Solution:")
-        print(f"  a1 = target / denom = {target:.6e} / {denom:.6e} = {a1}")
-        print(f"  a0 = -a1 * t0 = -{a1} * {t0} = {a0}")
+        a1 = (response * T1) / denom
+        a0 = 1.0 - a1 * t0
 
-    if not return_diagnostics:
-        return float(a0), float(a1)
-
-    # Diagnostics using existing sums (no extra passes)
-    num_check = a0 * S0v + a1 * S1v  # sum(A(T)*w) = sum((a0 + a1*T)*w) = a0*S0 + a1*S1
-    print(f"DEBUG fit_linear_A_xr: Verification:")
-    print(f"  Weighted mean of A(T) = (a0*S0 + a1*S1)/S0 = {num_check/S0v}")
-    print(f"  Should equal 1 + response = {1.0 + float(response)}")
-    print(f"  Zero anchor: A(t0) = a0 + a1*t0 = {a0 + a1 * t0} (should be ~0)")
-
-    diagnostics = {
-        "zero_anchor_residual": a0 + a1 * t0,  # should be ~ 0
-        "mean_target": 1.0 + float(response),
-        "mean_actual": num_check / S0v,
-        "mean_abs_error": abs(num_check / S0v - (1.0 + float(response))),
-        "S0": S0v, "S1": S1v, "S2": S2v,
-    }
-    return float(a0), float(a1), diagnostics
-
+    return float(a0), float(a1)
 
 def fit_quadratic_A_xr(
-    tas: xr.DataArray,
-    gdp: xr.DataArray,
-    area: xr.DataArray,
-    tas_zero: float,
-    tas_zero_deriv: float,
-    response: float,
-    *,
-    dims: Sequence[str] = ("time", "lat", "lon"),
-    extra_weight: Optional[xr.DataArray] = None,
-    eps: float = 1e-12,
-    return_diagnostics: bool = False,
-) -> Tuple[float, float, float] | Tuple[float, float, float, Dict[str, Any]]:
+    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12
+) -> Tuple[float, float, float]:
     """
-    Solve for (a0, a1, a2) in A(t) = a0 + a1*t + a2*t**2 under:
-      (a) A(tas_zero) = 0
-      (b) dA/dt(tas_zero_deriv) = 0
-      (c) sum(A(t)*t*area*gdp) / sum(area*gdp) = 1 + response
-
-    Returns:
-      a0, a1, a2  (Python floats)
-      If return_diagnostics=True, also returns a dict with simple checks.
+    Find a0, a1, a2 for A(t)=a0+a1*t+a2*t**2 subject to:
+      A(t0)=1,  dA/dt|_{t=td}=0,  and  sum(A*t*w) / sum(t*w) = 1 + response
     """
-    S0, S1, S2, S3 = _weighted_sums(tas, gdp, area, dims, max_k=3, extra_weight=extra_weight)
-    S0v, S1v, S2v, S3v = S0.item(), S1.item(), S2.item(), S3.item()
+    T1, T2, T3 = _tw_moments(t, w, max_k=3)
+    T1, T2, T3 = T1.item(), T2.item(), T3.item()
 
-    if abs(S0v) < eps:
-        raise ValueError("sum(area*gdp[*(extra_weight)]) ~ 0; weighted mean undefined.")
-
-    t0 = float(tas_zero)
-    td = float(tas_zero_deriv)
-    target = (1.0 + float(response)) * S0v
-
-    denom = (2.0 * td * t0 - t0 * t0) * S1v - 2.0 * td * S2v + S3v
+    denom = T3 - 2.0 * td * T2 + (2.0 * td * t0 - t0 * t0) * T1
     if abs(denom) < eps:
-        if not np.isclose(target, 0.0, rtol=1e-12, atol=1e-12):
-            raise ValueError("Constraints inconsistent (quadratic denominator ≈ 0 but target ≠ 0).")
-        # Infinite family; choose the trivial member
+        if not np.isclose(response * T1, 0.0, rtol=1e-12, atol=1e-12):
+            raise ValueError("Inconsistent quadratic constraints (denominator ~ 0 but response*T1 ≠ 0).")
+        # Simplest valid member: constant A(t)=1 (a2=a1=0) satisfies all constraints when response*T1=0
         a2 = 0.0
         a1 = 0.0
-        a0 = 0.0
+        a0 = 1.0
     else:
-        a2 = target / denom
+        a2 = (response * T1) / denom
         a1 = -2.0 * a2 * td
-        a0 = a2 * (2.0 * td * t0 - t0 * t0)
+        a0 = 1.0 - a2 * (t0 * t0 - 2.0 * td * t0)
 
-    if not return_diagnostics:
-        return float(a0), float(a1), float(a2)
-
-    # Diagnostics using existing sums (no extra passes)
-    num_check = a0 * S1v + a1 * S2v + a2 * S3v
-    diagnostics = {
-        "zero_anchor_residual": a0 + a1 * t0 + a2 * t0 * t0,  # should be ~ 0
-        "derivative_anchor_residual": a1 + 2.0 * a2 * td,     # should be ~ 0
-        "mean_target": 1.0 + float(response),
-        "mean_actual": num_check / S0v,
-        "mean_abs_error": abs(num_check / S0v - (1.0 + float(response))),
-        "S0": S0v, "S1": S1v, "S2": S2v, "S3": S3v,
-    }
-    return float(a0), float(a1), float(a2), diagnostics
+    return float(a0), float(a1), float(a2)
 
 
 def calculate_constant_target_response(gdp_amount_value, tas_ref_template):
