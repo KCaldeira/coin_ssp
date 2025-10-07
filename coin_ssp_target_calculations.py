@@ -40,13 +40,16 @@ def _tw_moments(t: xr.DataArray, w: xr.DataArray, max_k: int):
     return xr.compute(*outs)  # compute together (dask-friendly)
 
 def fit_linear_A_xr(
-    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12
+    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12
 ) -> Tuple[float, float]:
     """
     Find a0, a1 for A(t)=a0+a1*t subject to:
       A(t0)=1  and  sum(A*t*w) / sum(t*w) = 1 + response
+
+    valid_mask is applied to weights to exclude invalid grid cells.
     """
-    T1, T2 = _tw_moments(t, w, max_k=2)
+    w_masked = w.where(valid_mask, 0.0)
+    T1, T2 = _tw_moments(t, w_masked, max_k=2)
     T1, T2 = T1.item(), T2.item()
 
     denom = T2 - t0 * T1
@@ -63,13 +66,16 @@ def fit_linear_A_xr(
     return float(a0), float(a1)
 
 def fit_quadratic_A_xr(
-    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12
+    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12
 ) -> Tuple[float, float, float]:
     """
     Find a0, a1, a2 for A(t)=a0+a1*t+a2*t**2 subject to:
       A(t0)=1,  dA/dt|_{t=td}=0,  and  sum(A*t*w) / sum(t*w) = 1 + response
+
+    valid_mask is applied to weights to exclude invalid grid cells.
     """
-    T1, T2, T3 = _tw_moments(t, w, max_k=3)
+    w_masked = w.where(valid_mask, 0.0)
+    T1, T2, T3 = _tw_moments(t, w_masked, max_k=3)
     T1, T2, T3 = T1.item(), T2.item(), T3.item()
 
     denom = T3 - 2.0 * td * T2 + (2.0 * td * t0 - t0 * t0) * T1
@@ -190,24 +196,21 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
 
     # Use fit_linear_A_xr with valid_mask as extra_weight
     # The function solves for A(T) = a0 + a1*T where:
-    # - A(tas_zero) = 0 (zero anchor constraint at zero_amount_temperature)
+    # - A(tas_zero) = 1 (zero anchor constraint at zero_amount_temperature)
     # - sum(A(T)*area*gdp) / sum(area*gdp) = 1 + response
-    a0, a1, diagnostics = fit_linear_A_xr(
+    # def fit_linear_A_xr(
+    # t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12) -> Tuple[float, float]:
+    a0, a1 = fit_linear_A_xr(
         tas_period_series,
-        gdp_period_series,
-        area_weights,
-        tas_zero=zero_amount_temperature,
-        response=global_mean_amount,
-        extra_weight=valid_mask.astype(float),
-        return_diagnostics=True
+        gdp_period_series * area_weights,
+        zero_amount_temperature,
+        global_mean_amount,
+        valid_mask
     )
 
     print(f"DEBUG: Fitting results:")
     print(f"  a0 = {a0}")
     print(f"  a1 = {a1}")
-    print(f"DEBUG: Diagnostics:")
-    for key, value in diagnostics.items():
-        print(f"  {key} = {value}")
 
     # The function gives us A(T) = a0 + a1*T which directly represents reduction(T)
 
@@ -229,8 +232,7 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
             'a0': float(a0),
             'a1': float(a1),
             'a2': 0.0
-        },
-        'diagnostics': diagnostics
+        }
     }
 
 
@@ -295,15 +297,15 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
     # - A(tas_zero) = 0 (zero anchor constraint at zero_amount_temperature)
     # - dA/dt(tas_zero_deriv) = 0 (derivative is zero at zero_derivative_temperature)
     # - sum(A(T)*area*gdp) / sum(area*gdp) = 1 + response
-    a0, a1, a2, diagnostics = fit_quadratic_A_xr(
+    # def fit_quadratic_A_xr(
+    # t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12 ) -> Tuple[float, float, float]:
+    a0, a1, a2 = fit_quadratic_A_xr(
         tas_period_series,
-        gdp_period_series,
-        area_weights,
-        tas_zero=zero_amount_temperature,
-        tas_zero_deriv=zero_derivative_temperature,
-        response=global_mean_quad,
-        extra_weight=valid_mask.astype(float),
-        return_diagnostics=True
+        area_weights * gdp_period_series,
+        zero_amount_temperature,
+        zero_derivative_temperature,
+        global_mean_quad,
+        valid_mask
     )
 
     print(f"DEBUG: QUadratic fitting results:")
@@ -321,8 +323,7 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
             'a0': float(a0),
             'a1': float(a1),
             'a2': float(a2)
-        },
-        'diagnostics': diagnostics
+        }
     }
 
 
