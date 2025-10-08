@@ -85,7 +85,7 @@ def fit_quadratic_A_xr(
         # Simplest valid member: constant A(t)=1 (a2=a1=0) satisfies all constraints when response*T1=0
         a2 = 0.0
         a1 = 0.0
-        a0 = 1.0
+        a0 = 0.0
     else:
         a2 = (response * T1) / denom
         a1 = -2.0 * a2 * td
