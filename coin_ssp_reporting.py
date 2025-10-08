@@ -1610,7 +1610,7 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, al
                                  cmap='RdBu_r', norm=norm, shading='auto')
 
                 # Add coastlines (basic grid)
-                ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
+                ax.contour(lon_grid, lat_grid, valid_mask_values.astype(float),
                           levels=[0.5], colors='black', linewidths=0.5, alpha=0.3)
 
                 # Labels and formatting (larger fonts for better visibility)
@@ -1739,12 +1739,16 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
                 # Extract objective function map for this combination
                 obj_map = optimization_errors[response_idx, target_idx, :, :]
 
+                # Convert to numpy for masking operations
+                obj_map_values = obj_map.values if hasattr(obj_map, 'values') else obj_map
+                valid_mask_values = valid_mask.values if hasattr(valid_mask, 'values') else valid_mask
+
                 # Mask invalid cells and ocean
-                obj_map_masked = np.copy(obj_map)
-                obj_map_masked[~valid_mask] = np.nan
+                obj_map_masked = np.copy(obj_map_values)
+                obj_map_masked[~valid_mask_values] = np.nan
 
                 # Calculate range for this map (objective function values are always >= 0)
-                valid_values = obj_map[valid_mask & np.isfinite(obj_map)]
+                valid_values = obj_map_values[valid_mask_values & np.isfinite(obj_map_values)]
                 if len(valid_values) > 0:
                     actual_min = np.min(valid_values)
                     actual_max = np.max(valid_values)
@@ -1757,8 +1761,8 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
                 obj_map_log = np.copy(obj_map_masked)
 
                 # Replace values below threshold with threshold, and zeros/negatives with threshold
-                valid_finite_mask = valid_mask & np.isfinite(obj_map) & (obj_map > 0)
-                obj_map_log[valid_finite_mask] = np.maximum(obj_map[valid_finite_mask], min_threshold)
+                valid_finite_mask = valid_mask_values & np.isfinite(obj_map_values) & (obj_map_values > 0)
+                obj_map_log[valid_finite_mask] = np.maximum(obj_map_values[valid_finite_mask], min_threshold)
                 obj_map_log[~valid_finite_mask] = np.nan
 
                 # Take log10
@@ -1774,7 +1778,7 @@ def create_objective_function_visualization(scaling_results, config, output_dir,
                                  cmap=cmap, vmin=vmin_log, vmax=vmax_log, shading='auto')
 
                 # Add coastlines (basic grid)
-                ax.contour(lon_grid, lat_grid, valid_mask.astype(float),
+                ax.contour(lon_grid, lat_grid, valid_mask_values.astype(float),
                           levels=[0.5], colors='white', linewidths=0.5, alpha=0.7)
 
                 # Labels and formatting (larger fonts for better visibility)
