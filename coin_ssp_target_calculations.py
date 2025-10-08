@@ -58,10 +58,10 @@ def fit_linear_A_xr(
         if not np.isclose(response * T1, 0.0, rtol=1e-12, atol=1e-12):
             raise ValueError("Inconsistent linear constraints (denominator ~ 0 but response*T1 ≠ 0).")
         a1 = 0.0
-        a0 = 1.0
+        a0 = 0.0
     else:
         a1 = (response * T1) / denom
-        a0 = 1.0 - a1 * t0
+        a0 =  - a1 * t0
 
     return float(a0), float(a1)
 
@@ -89,7 +89,7 @@ def fit_quadratic_A_xr(
     else:
         a2 = (response * T1) / denom
         a1 = -2.0 * a2 * td
-        a0 = 1.0 - a2 * (t0 * t0 - 2.0 * td * t0)
+        a0 = - a2 * (t0 * t0 - 2.0 * td * t0)
 
     return float(a0), float(a1), float(a2)
 
