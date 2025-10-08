@@ -647,7 +647,7 @@ def calculate_weather_gdp_regression_slopes(
                     if not valid_mask.sel(lat=lat_val, lon=lon_val):
                         continue
 
-                    scaling_factor = scaling_factors.sel(response_func=response_name, target=target_name, lat=lat_val, lon=lon_val)
+                    scaling_factor = float(scaling_factors.sel(response_func=response_name, target=target_name, lat=lat_val, lon=lon_val))
                     if not np.isfinite(scaling_factor):
                         continue
 
@@ -658,20 +658,20 @@ def calculate_weather_gdp_regression_slopes(
                         s=base_params['s'],
                         alpha=base_params['alpha'],
                         delta=base_params['delta'],
-                        tas0=float(tas0_2d.sel(lat=lat_val, lon=lon_val).values),
-                        pr0=float(pr0_2d.sel(lat=lat_val, lon=lon_val).values),
-                        k_tas1=response_config.get('k_tas1', 0.0) * scaling_factor,
-                        k_tas2=response_config.get('k_tas2', 0.0) * scaling_factor,
-                        k_pr1=response_config.get('k_pr1', 0.0) * scaling_factor,
-                        k_pr2=response_config.get('k_pr2', 0.0) * scaling_factor,
-                        tfp_tas1=response_config.get('tfp_tas1', 0.0) * scaling_factor,
-                        tfp_tas2=response_config.get('tfp_tas2', 0.0) * scaling_factor,
-                        tfp_pr1=response_config.get('tfp_pr1', 0.0) * scaling_factor,
-                        tfp_pr2=response_config.get('tfp_pr2', 0.0) * scaling_factor,
-                        y_tas1=response_config.get('y_tas1', 0.0) * scaling_factor,
-                        y_tas2=response_config.get('y_tas2', 0.0) * scaling_factor,
-                        y_pr1=response_config.get('y_pr1', 0.0) * scaling_factor,
-                        y_pr2=response_config.get('y_pr2', 0.0) * scaling_factor
+                        tas0=float(tas0_2d.sel(lat=lat_val, lon=lon_val)),
+                        pr0=float(pr0_2d.sel(lat=lat_val, lon=lon_val)),
+                        k_tas1=float(response_config.get('k_tas1', 0.0) * scaling_factor),
+                        k_tas2=float(response_config.get('k_tas2', 0.0) * scaling_factor),
+                        k_pr1=float(response_config.get('k_pr1', 0.0) * scaling_factor),
+                        k_pr2=float(response_config.get('k_pr2', 0.0) * scaling_factor),
+                        tfp_tas1=float(response_config.get('tfp_tas1', 0.0) * scaling_factor),
+                        tfp_tas2=float(response_config.get('tfp_tas2', 0.0) * scaling_factor),
+                        tfp_pr1=float(response_config.get('tfp_pr1', 0.0) * scaling_factor),
+                        tfp_pr2=float(response_config.get('tfp_pr2', 0.0) * scaling_factor),
+                        y_tas1=float(response_config.get('y_tas1', 0.0) * scaling_factor),
+                        y_tas2=float(response_config.get('y_tas2', 0.0) * scaling_factor),
+                        y_pr1=float(response_config.get('y_pr1', 0.0) * scaling_factor),
+                        y_pr2=float(response_config.get('y_pr2', 0.0) * scaling_factor)
                     )
 
                     # Extract baseline TFP for this cell
