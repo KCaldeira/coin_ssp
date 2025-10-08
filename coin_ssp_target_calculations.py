@@ -37,7 +37,7 @@ def _tw_moments(t: xr.DataArray, w: xr.DataArray, max_k: int):
     if max_k >= 3:
         T3 = ((t * t * t) * w).sum(dims, skipna=True); outs.append(T3)
 
-    return xr.compute(*outs)  # compute together (dask-friendly)
+    return tuple(outs)
 
 def fit_linear_A_xr(
     t: xr.DataArray, w: xr.DataArray, t0: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12

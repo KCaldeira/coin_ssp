@@ -409,7 +409,8 @@ def save_step2_results_netcdf(tfp_results: Dict[str, Any], output_path: str, con
     for i, ssp_name in enumerate(ssp_names):
         tfp_all_ssps[i] = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
         k_all_ssps[i] = tfp_results[ssp_name]['k_baseline']      # [time, lat, lon]
-        valid_masks[i] = all_data['_metadata']['valid_mask']
+        vm = all_data['_metadata']['valid_mask']
+        valid_masks[i] = vm.values if hasattr(vm, 'values') else vm
 
     # Create coordinate arrays (assuming annual time steps starting from year 0)
     time_coords = np.arange(ntime)
@@ -537,7 +538,7 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         'optimization_errors': (['response_func', 'target', 'lat', 'lon'], optimization_errors_t),
         'convergence_flags': (['response_func', 'target', 'lat', 'lon'], convergence_flags_t),
         'scaled_parameters': (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters_t),
-        'valid_mask': (['lat', 'lon'], valid_mask)
+        'valid_mask': (['lat', 'lon'], valid_mask.values if hasattr(valid_mask, 'values') else valid_mask)
     }
 
     # Add regression slopes if available
@@ -697,7 +698,7 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
                 {
                     f'{var_base}_climate': (['target', 'response_func', 'time', 'lat', 'lon'], climate_data),
                     f'{var_base}_weather': (['target', 'response_func', 'time', 'lat', 'lon'], weather_data),
-                    'valid_mask': (['lat', 'lon'], valid_mask)
+                    'valid_mask': (['lat', 'lon'], valid_mask.values if hasattr(valid_mask, 'values') else valid_mask)
                 },
                 coords={
                     'target': target_names,
@@ -839,7 +840,7 @@ def write_all_loaded_data_netcdf(all_data: Dict[str, Any], config: Dict[str, Any
             'pr': (['ssp', 'time', 'lat', 'lon'], pr_all),
             'gdp': (['ssp', 'time', 'lat', 'lon'], gdp_all),
             'pop': (['ssp', 'time', 'lat', 'lon'], pop_all),
-            'valid_mask': (['lat', 'lon'], valid_mask)
+            'valid_mask': (['lat', 'lon'], valid_mask.values if hasattr(valid_mask, 'values') else valid_mask)
         },
         coords={
             'ssp': ssp_names,
