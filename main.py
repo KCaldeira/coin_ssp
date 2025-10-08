@@ -836,14 +836,44 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")
 
-        # Initialize result arrays for this SSP
+        # Initialize result arrays for this SSP as xarray DataArrays
         # [response_func, target, time, lat, lon]
-        gdp_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
-        gdp_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
-        tfp_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
-        tfp_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
-        k_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
-        k_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
+        gdp_climate = xr.DataArray(
+            np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'time': years, 'lat': lat_coords, 'lon': lon_coords},
+            dims=['response_func', 'target', 'time', 'lat', 'lon']
+        )
+        gdp_weather = xr.DataArray(
+            np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'time': years, 'lat': lat_coords, 'lon': lon_coords},
+            dims=['response_func', 'target', 'time', 'lat', 'lon']
+        )
+        tfp_climate = xr.DataArray(
+            np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'time': years, 'lat': lat_coords, 'lon': lon_coords},
+            dims=['response_func', 'target', 'time', 'lat', 'lon']
+        )
+        tfp_weather = xr.DataArray(
+            np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'time': years, 'lat': lat_coords, 'lon': lon_coords},
+            dims=['response_func', 'target', 'time', 'lat', 'lon']
+        )
+        k_climate = xr.DataArray(
+            np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'time': years, 'lat': lat_coords, 'lon': lon_coords},
+            dims=['response_func', 'target', 'time', 'lat', 'lon']
+        )
+        k_weather = xr.DataArray(
+            np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'time': years, 'lat': lat_coords, 'lon': lon_coords},
+            dims=['response_func', 'target', 'time', 'lat', 'lon']
+        )
 
         successful_forward_runs = 0
         total_forward_runs = 0
