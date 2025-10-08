@@ -513,72 +513,51 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
     has_regression_slopes = 'regression_slopes' in scaling_results
     if has_regression_slopes:
         regression_data = scaling_results['regression_slopes']
-        # Convert nested dictionaries to arrays [response_func, target, lat, lon]
-        regression_slopes = np.zeros((n_response_func, n_target, nlat, nlon))
-        regression_success_mask = np.zeros((n_response_func, n_target, nlat, nlon), dtype=bool)
-        gdp_weighted_means = np.zeros((n_response_func, n_target))
-
-        for resp_idx, resp_name in enumerate(response_function_names):
-            if resp_name in regression_data['slopes']:
-                for target_idx, target_name in enumerate(target_names):
-                    if target_name in regression_data['slopes'][resp_name]:
-                        regression_slopes[resp_idx, target_idx, :, :] = regression_data['slopes'][resp_name][target_name]
-                        regression_success_mask[resp_idx, target_idx, :, :] = regression_data['success_mask'][resp_name][target_name]
-                        gdp_weighted_means[resp_idx, target_idx] = regression_data['gdp_weighted_means'][resp_name][target_name]
-
-    # Create xarray dataset - if inputs are DataArrays, pass them directly
-    # If they're numpy arrays, specify dimensions
-    data_vars = {}
-
-    if hasattr(scaling_factors, 'dims'):
-        # It's already a DataArray, use it directly
-        data_vars['scaling_factors'] = scaling_factors
-    else:
-        data_vars['scaling_factors'] = (['response_func', 'target', 'lat', 'lon'], scaling_factors)
-
-    if hasattr(optimization_errors, 'dims'):
-        data_vars['optimization_errors'] = optimization_errors
-    else:
-        data_vars['optimization_errors'] = (['response_func', 'target', 'lat', 'lon'], optimization_errors)
-
-    if hasattr(convergence_flags, 'dims'):
-        data_vars['convergence_flags'] = convergence_flags
-    else:
-        data_vars['convergence_flags'] = (['response_func', 'target', 'lat', 'lon'], convergence_flags)
-
-    if hasattr(scaled_parameters, 'dims'):
-        data_vars['scaled_parameters'] = scaled_parameters
-    else:
-        data_vars['scaled_parameters'] = (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters)
-
-    if hasattr(valid_mask, 'dims'):
-        data_vars['valid_mask'] = valid_mask
-    else:
-        data_vars['valid_mask'] = (['lat', 'lon'], valid_mask)
-
-    # Add regression slopes if available
-    if has_regression_slopes:
-        data_vars['regression_slopes'] = (['response_func', 'target', 'lat', 'lon'], regression_slopes)
-        data_vars['regression_success_mask'] = (['response_func', 'target', 'lat', 'lon'], regression_success_mask)
-        data_vars['gdp_weighted_means'] = (['response_func', 'target'], gdp_weighted_means)
-
-    # Create Dataset - if DataArrays are passed, their coords are used automatically
-    # Only add coords for numpy arrays
-    if hasattr(scaling_factors, 'dims'):
-        # DataArrays were passed, don't specify coords
-        ds = xr.Dataset(data_vars)
-    else:
-        # Numpy arrays were passed, need to specify coords
-        ds = xr.Dataset(
-            data_vars,
-            coords={
-                'response_func': response_function_names,
-                'target': target_names,
-                'param': scaled_param_names,
-                'lat': coordinates['lat'],
-                'lon': coordinates['lon']
-            }
+        # Create xarray DataArrays [response_func, target, lat, lon]
+        regression_slopes = xr.DataArray(
+            np.zeros((n_response_func, n_target, nlat, nlon)),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'lat': coordinates['lat'], 'lon': coordinates['lon']},
+            dims=['response_func', 'target', 'lat', 'lon']
         )
+        regression_success_mask = xr.DataArray(
+            np.zeros((n_response_func, n_target, nlat, nlon), dtype=bool),
+            coords={'response_func': response_function_names, 'target': target_names,
+                    'lat': coordinates['lat'], 'lon': coordinates['lon']},
+            dims=['response_func', 'target', 'lat', 'lon']
+        )
+        gdp_weighted_means = xr.DataArray(
+            np.zeros((n_response_func, n_target)),
+            coords={'response_func': response_function_names, 'target': target_names},
+            dims=['response_func', 'target']
+        )
+
+        for resp_name in response_function_names:
+            if resp_name in regression_data['slopes']:
+                for target_name in target_names:
+                    if target_name in regression_data['slopes'][resp_name]:
+                        regression_slopes.loc[dict(response_func=resp_name, target=target_name)] = regression_data['slopes'][resp_name][target_name]
+                        regression_success_mask.loc[dict(response_func=resp_name, target=target_name)] = regression_data['success_mask'][resp_name][target_name]
+                        gdp_weighted_means.loc[dict(response_func=resp_name, target=target_name)] = regression_data['gdp_weighted_means'][resp_name][target_name]
+
+    # Create xarray dataset directly from DataArrays
+    # All arrays with lat/lon dimensions are xarray DataArrays
+    data_vars = {
+        'scaling_factors': scaling_factors,
+        'optimization_errors': optimization_errors,
+        'convergence_flags': convergence_flags,
+        'scaled_parameters': scaled_parameters,
+        'valid_mask': valid_mask
+    }
+
+    # Add regression slopes if available (these are xarray DataArrays too)
+    if has_regression_slopes:
+        data_vars['regression_slopes'] = regression_slopes
+        data_vars['regression_success_mask'] = regression_success_mask
+        data_vars['gdp_weighted_means'] = gdp_weighted_means
+
+    # Create Dataset from DataArrays (coords are inherited automatically)
+    ds = xr.Dataset(data_vars)
 
     # Add attributes
     ds.scaling_factors.attrs = {
@@ -710,26 +689,18 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
         ssp_result = forward_results[ssp_name]
 
         for climate_var, weather_var, var_base in variable_pairs:
-            # Reorder coordinates from [response_func, target, time, lat, lon]
+            # Reorder dimensions from [response_func, target, time, lat, lon]
             # to [target, response_func, time, lat, lon]
-            climate_data = ssp_result[climate_var].transpose(1, 0, 2, 3, 4)  # [target, response_func, time, lat, lon]
-            weather_data = ssp_result[weather_var].transpose(1, 0, 2, 3, 4)  # [target, response_func, time, lat, lon]
+            # Use dimension names for transpose (all data with lat/lon are xarray DataArrays)
+            climate_data = ssp_result[climate_var].transpose('target', 'response_func', 'time', 'lat', 'lon')
+            weather_data = ssp_result[weather_var].transpose('target', 'response_func', 'time', 'lat', 'lon')
 
-            # Create dataset for this SSP/variable combination
-            ds = xr.Dataset(
-                {
-                    f'{var_base}_climate': (['target', 'response_func', 'time', 'lat', 'lon'], climate_data),
-                    f'{var_base}_weather': (['target', 'response_func', 'time', 'lat', 'lon'], weather_data),
-                    'valid_mask': (['lat', 'lon'], valid_mask.values if hasattr(valid_mask, 'values') else valid_mask)
-                },
-                coords={
-                    'target': target_names,
-                    'response_func': response_function_names,
-                    'time': coordinates['years'],  # Use actual years
-                    'lat': coordinates['lat'],
-                    'lon': coordinates['lon']
-                }
-            )
+            # Create dataset directly from DataArrays
+            ds = xr.Dataset({
+                f'{var_base}_climate': climate_data,
+                f'{var_base}_weather': weather_data,
+                'valid_mask': valid_mask
+            })
 
             # Add comprehensive attributes
             serializable_config = create_serializable_config(config)

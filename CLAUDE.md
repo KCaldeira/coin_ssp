@@ -159,6 +159,17 @@ if not is_valid_economic_grid_cell(gdp_cell, pop_cell):
 
 ## Current Status (December 2025)
 
+### 🚧 **In Progress: xarray Migration**
+Converting all spatial/temporal arrays from numpy to xarray DataArrays for improved dimension safety and coordinate-based indexing.
+
+**Remaining Tasks:**
+1. Convert regression slopes initialization in `coin_ssp_netcdf.py` (lines 517-519) to xarray DataArrays
+2. Remove any remaining numpy fallback branches throughout the codebase
+3. Verify all arrays with lat/lon/time dimensions are xarray DataArrays
+
+### 🔍 **Investigation Needed**
+Step 1 mean reductions printed on reports are not consistent with values requested in config JSON file - requires debugging of target calculation functions.
+
 ### ✅ **Production Ready**
 Complete 5-step integrated processing pipeline with adaptive optimization and standardized visualization.
 

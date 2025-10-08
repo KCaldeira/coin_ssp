@@ -82,7 +82,7 @@ def fit_quadratic_A_xr(
     if abs(denom) < eps:
         if not np.isclose(response * T1, 0.0, rtol=1e-12, atol=1e-12):
             raise ValueError("Inconsistent quadratic constraints (denominator ~ 0 but response*T1 ≠ 0).")
-        # Simplest valid member: constant A(t)=1 (a2=a1=0) satisfies all constraints when response*T1=0
+        # Simplest valid member: constant A(t)=0 (a2=a1=0) satisfies all constraints when response*T1=0
         a2 = 0.0
         a1 = 0.0
         a0 = 0.0

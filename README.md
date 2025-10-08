@@ -301,6 +301,21 @@ data/output/output_{model}_{timestamp}/{json_id}_{timestamp}/
 - **`CLAUDE.md`**: Code style guide and architecture decisions
 - **`README.md`**: This file - usage and reference documentation
 
+## Next Steps
+
+### Immediate Priorities
+
+1. **Complete xarray DataArray Migration**
+   - Finish removing all legacy code that used to work with numpy arrays
+   - Convert remaining numpy array initializations to xarray DataArrays (e.g., regression slopes in coin_ssp_netcdf.py)
+   - All arrays with time, lat, or lon dimensions MUST be xarray DataArrays with properly labeled coordinates
+   - Remove any remaining numpy fallback branches
+
+2. **Step 1 Mean Reduction Verification**
+   - Investigate why mean reductions printed on Step 1 reports are not consistent with values requested in config JSON file
+   - Verify target calculation functions are correctly implementing requested reduction percentages
+   - Check GDP-weighted mean calculations for accuracy
+
 ## Contributing
 
 This project follows elegant, fail-fast coding principles:
