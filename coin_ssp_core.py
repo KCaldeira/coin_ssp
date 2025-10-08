@@ -918,13 +918,13 @@ def calculate_variability_climate_response_parameters(
     )
 
     # Extract optimized parameters (Step 1 results) for ALL response functions
-    # scaled_parameters shape: [n_response_functions, n_targets, n_params, nlat, nlon]
-    # Store parameters for each response function
+    # Store parameters for each response function as [lat, lon, param] xarray DataArrays
     all_step1_parameters = {}
-    for resp_idx, response_config in enumerate(response_scalings):
+    for response_config in response_scalings:
         response_name = response_config['scaling_name']
-        # Extract and transpose: [n_params, nlat, nlon] -> [nlat, nlon, n_params]
-        all_step1_parameters[response_name] = np.transpose(scaled_parameters[resp_idx, 0, :, :, :], (1, 2, 0))
+        # Select and transpose: [param, lat, lon] -> [lat, lon, param]
+        params_for_response = scaled_parameters.sel(response_func=response_name, target='variability_reference')
+        all_step1_parameters[response_name] = params_for_response.transpose('lat', 'lon', 'param')
 
     valid_cells = np.sum(valid_mask)
     print(f"Phase 1 complete: {valid_cells}/{valid_cells} valid grid cells for {n_response_functions} response functions")
