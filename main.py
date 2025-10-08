@@ -389,14 +389,24 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
         
         # Get dimensions
         # GDP data is [time, lat, lon] = (137, 64, 128)
-        ntime, nlat, nlon = gdp_data.shape
+        ntime = gdp_data.sizes['time']
+        nlat = gdp_data.sizes['lat']
+        nlon = gdp_data.sizes['lon']
 
         print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Calculating baseline TFP for each grid cell...")
 
-        # Initialize output arrays [time, lat, lon] for results storage
-        tfp_baseline = np.full((ntime, nlat, nlon), np.nan)
-        k_baseline = np.full((ntime, nlat, nlon), np.nan)
+        # Initialize output arrays [time, lat, lon] as xarray DataArrays
+        tfp_baseline = xr.DataArray(
+            np.full((ntime, nlat, nlon), np.nan),
+            coords={'time': gdp_data.coords['time'], 'lat': gdp_data.coords['lat'], 'lon': gdp_data.coords['lon']},
+            dims=['time', 'lat', 'lon']
+        )
+        k_baseline = xr.DataArray(
+            np.full((ntime, nlat, nlon), np.nan),
+            coords={'time': gdp_data.coords['time'], 'lat': gdp_data.coords['lat'], 'lon': gdp_data.coords['lon']},
+            dims=['time', 'lat', 'lon']
+        )
 
         # Use the global valid mask computed during data loading
         valid_mask = all_data['_metadata']['valid_mask']
@@ -404,13 +414,16 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
         grid_cells_processed = 0
         
         # Process each grid cell using the pre-computed valid mask
-        for lat_idx in range(nlat):
-            for lon_idx in range(nlon):
-                if valid_mask[lat_idx, lon_idx]:
+        lat_coords = gdp_data.coords['lat'].values
+        lon_coords = gdp_data.coords['lon'].values
+
+        for lat_val in lat_coords:
+            for lon_val in lon_coords:
+                if valid_mask.sel(lat=lat_val, lon=lon_val):
                     # Extract time series for this valid grid cell (data is [time, lat, lon])
                     # Convert to numpy for fast computation in calculate_tfp_coin_ssp
-                    pop_timeseries = pop_data[:, lat_idx, lon_idx].values
-                    gdp_timeseries = gdp_data[:, lat_idx, lon_idx].values
+                    pop_timeseries = pop_data.sel(lat=lat_val, lon=lon_val).values
+                    gdp_timeseries = gdp_data.sel(lat=lat_val, lon=lon_val).values
 
                     # Calculate baseline TFP and capital stock (no climate effects)
                     tfp_cell, k_cell = calculate_tfp_coin_ssp(pop_timeseries, gdp_timeseries, params)
@@ -420,7 +433,7 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
                         print(f"\n{'='*80}")
                         print(f"NaN DETECTED AFTER TFP CALCULATION - GRID CELL DIAGNOSIS")
                         print(f"{'='*80}")
-                        print(f"Grid cell location: lat_idx={lat_idx}, lon_idx={lon_idx}")
+                        print(f"Grid cell location: lat={lat_val}, lon={lon_val}")
                         print(f"SSP scenario: {ssp_name}")
                         print(f"Grid cells processed so far: {grid_cells_processed}")
 
@@ -440,12 +453,12 @@ def step2_calculate_baseline_tfp(config: Dict[str, Any], output_dir: str, all_da
                             print(f"  Capital NaN indices: {np.where(np.isnan(k_cell))[0].tolist()}")
 
                         print(f"{'='*80}")
-                        raise RuntimeError(f"NaN detected in TFP results at grid cell ({lat_idx}, {lon_idx})")
+                        raise RuntimeError(f"NaN detected in TFP results at grid cell (lat={lat_val}, lon={lon_val})")
 
-                    # Store results (output arrays are [time, lat, lon])
-                    tfp_baseline[:, lat_idx, lon_idx] = tfp_cell
-                    k_baseline[:, lat_idx, lon_idx] = k_cell
-                    
+                    # Store results using coordinate-based assignment
+                    tfp_baseline.loc[dict(lat=lat_val, lon=lon_val)] = tfp_cell
+                    k_baseline.loc[dict(lat=lat_val, lon=lon_val)] = k_cell
+
                     grid_cells_processed += 1
         
         # grid_cells_processed should equal the pre-computed valid count

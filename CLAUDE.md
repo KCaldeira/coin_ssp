@@ -62,6 +62,11 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 - **`main.py`**: Complete 5-step processing pipeline
 
 ### Key Technical Requirements
+- **xarray DataArrays for Spatial/Temporal Data**: ALL arrays containing `time`, `lat`, or `lon` dimensions MUST be xarray DataArrays with properly labeled coordinates
+  - Use coordinate-based indexing: `.sel(lat=lat_val, lon=lon_val)` NOT positional indexing with `lat_idx`
+  - Iterate over coordinate values: `for lat_val in lat_coords:` NOT `for lat_idx in range(nlat):`
+  - Assignment with coordinates: `.loc[dict(lat=lat_val, lon=lon_val)] = value`
+  - This ensures dimension safety and enables proper broadcasting between arrays
 - **NetCDF Convention**: Arrays follow `[time, lat, lon]` dimension order - always use `data[time_idx, lat_idx, lon_idx]`
 - **Grid Cell Validation**: Skip ocean/ice cells where `gdp_value <= 0` or `population_value <= 0`
 - **Configuration Management**: Use `resolve_netcdf_filepath()` - NEVER hardcode file prefixes like `gridRaw_`

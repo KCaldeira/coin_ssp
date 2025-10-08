@@ -873,10 +873,40 @@ def calculate_variability_climate_response_parameters(
     n_response_functions = len(response_scalings)
     n_targets = 1
     n_params = 12
-    scaling_factors = np.zeros((n_response_functions, n_targets, nlat, nlon))
-    optimization_errors = np.zeros((n_response_functions, n_targets, nlat, nlon))
-    convergence_flags = np.zeros((n_response_functions, n_targets, nlat, nlon), dtype=bool)
-    scaled_parameters = np.zeros((n_response_functions, n_targets, n_params, nlat, nlon))
+
+    # Extract coordinate lists
+    lat_coords = valid_mask.coords['lat']
+    lon_coords = valid_mask.coords['lon']
+    response_func_names = [rs['scaling_name'] for rs in response_scalings]
+    target_names_list = ['variability_reference']
+    param_names = ['y_tas1', 'y_tas2', 'y_pr1', 'y_pr2', 'k_tas1', 'k_tas2', 'k_pr1', 'k_pr2',
+                   'tfp_tas1', 'tfp_tas2', 'tfp_pr1', 'tfp_pr2']
+
+    # Create xarray DataArrays with named dimensions
+    scaling_factors = xr.DataArray(
+        np.zeros((n_response_functions, n_targets, nlat, nlon)),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'lat', 'lon']
+    )
+    optimization_errors = xr.DataArray(
+        np.zeros((n_response_functions, n_targets, nlat, nlon)),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'lat', 'lon']
+    )
+    convergence_flags = xr.DataArray(
+        np.zeros((n_response_functions, n_targets, nlat, nlon), dtype=bool),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'lat', 'lon']
+    )
+    scaled_parameters = xr.DataArray(
+        np.zeros((n_response_functions, n_targets, n_params, nlat, nlon)),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'param': param_names, 'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'param', 'lat', 'lon']
+    )
 
     # Run optimization to find scaling factors for uniform 10% GDP loss
     # Uses full climate data (tas_data, pr_data) for optimization
