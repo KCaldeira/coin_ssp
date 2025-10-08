@@ -832,7 +832,8 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], scale_data.shape)
 
             # Flatten arrays and apply valid mask (convert xarray to numpy for flatten)
-            flat_scale = scale_data.flatten()
+            scale_data_values = scale_data.values if hasattr(scale_data, 'values') else scale_data
+            flat_scale = scale_data_values.flatten()
             flat_gdp = gdp_target_period.values.flatten()
             flat_area_weights = area_weights_2d.flatten()
             flat_valid = (valid_mask.values if hasattr(valid_mask, 'values') else valid_mask).flatten()
@@ -947,8 +948,9 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                         valid_slope_indices = valid_mask & success_mask & np.isfinite(slope_data)
 
                         if np.sum(valid_slope_indices) > 0:
-                            # Flatten and filter
-                            flat_slope = slope_data.flatten()
+                            # Flatten and filter (convert xarray to numpy first)
+                            slope_data_values = slope_data.values if hasattr(slope_data, 'values') else slope_data
+                            flat_slope = slope_data_values.flatten()
                             flat_gdp_hist = gdp_hist_period.values.flatten()  # Use historical period GDP for slopes
                             flat_area_weights = area_weights_2d.flatten()
                             flat_valid = (valid_slope_indices.values if hasattr(valid_slope_indices, 'values') else valid_slope_indices).flatten()
@@ -1074,8 +1076,9 @@ def write_variability_calibration_summary(variability_results: Dict[str, Any], c
         area_weights = calculate_area_weights(lat_values)
         area_weights_2d = np.broadcast_to(area_weights[:, np.newaxis], regression_slopes.shape)
 
-        # Flatten and filter
-        flat_slopes = regression_slopes.flatten()
+        # Flatten and filter (convert xarray to numpy first)
+        regression_slopes_values = regression_slopes.values if hasattr(regression_slopes, 'values') else regression_slopes
+        flat_slopes = regression_slopes_values.flatten()
         flat_gdp = gdp_hist_period.values.flatten()
         flat_area_weights = area_weights_2d.flatten()
         flat_valid = (valid_regression_mask.values if hasattr(valid_regression_mask, 'values') else valid_regression_mask).flatten()

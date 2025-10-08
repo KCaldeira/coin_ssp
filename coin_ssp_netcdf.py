@@ -526,20 +526,35 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
                         regression_success_mask[resp_idx, target_idx, :, :] = regression_data['success_mask'][resp_name][target_name]
                         gdp_weighted_means[resp_idx, target_idx] = regression_data['gdp_weighted_means'][resp_name][target_name]
 
-    # Arrays are already in the correct format [response_func, target, lat, lon]
-    scaling_factors_t = scaling_factors  # [response_func, target, lat, lon]
-    optimization_errors_t = optimization_errors  # [response_func, target, lat, lon]
-    convergence_flags_t = convergence_flags  # [response_func, target, lat, lon]
-    scaled_parameters_t = scaled_parameters  # [response_func, target, param, lat, lon]
+    # Create xarray dataset - if inputs are DataArrays, pass them directly
+    # If they're numpy arrays, specify dimensions
+    data_vars = {}
 
-    # Create xarray dataset with lat,lon as last dimensions
-    data_vars = {
-        'scaling_factors': (['response_func', 'target', 'lat', 'lon'], scaling_factors_t),
-        'optimization_errors': (['response_func', 'target', 'lat', 'lon'], optimization_errors_t),
-        'convergence_flags': (['response_func', 'target', 'lat', 'lon'], convergence_flags_t),
-        'scaled_parameters': (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters_t),
-        'valid_mask': (['lat', 'lon'], valid_mask.values if hasattr(valid_mask, 'values') else valid_mask)
-    }
+    if hasattr(scaling_factors, 'dims'):
+        # It's already a DataArray, use it directly
+        data_vars['scaling_factors'] = scaling_factors
+    else:
+        data_vars['scaling_factors'] = (['response_func', 'target', 'lat', 'lon'], scaling_factors)
+
+    if hasattr(optimization_errors, 'dims'):
+        data_vars['optimization_errors'] = optimization_errors
+    else:
+        data_vars['optimization_errors'] = (['response_func', 'target', 'lat', 'lon'], optimization_errors)
+
+    if hasattr(convergence_flags, 'dims'):
+        data_vars['convergence_flags'] = convergence_flags
+    else:
+        data_vars['convergence_flags'] = (['response_func', 'target', 'lat', 'lon'], convergence_flags)
+
+    if hasattr(scaled_parameters, 'dims'):
+        data_vars['scaled_parameters'] = scaled_parameters
+    else:
+        data_vars['scaled_parameters'] = (['response_func', 'target', 'param', 'lat', 'lon'], scaled_parameters)
+
+    if hasattr(valid_mask, 'dims'):
+        data_vars['valid_mask'] = valid_mask
+    else:
+        data_vars['valid_mask'] = (['lat', 'lon'], valid_mask)
 
     # Add regression slopes if available
     if has_regression_slopes:
@@ -547,16 +562,23 @@ def save_step3_results_netcdf(scaling_results: Dict[str, Any], output_path: str,
         data_vars['regression_success_mask'] = (['response_func', 'target', 'lat', 'lon'], regression_success_mask)
         data_vars['gdp_weighted_means'] = (['response_func', 'target'], gdp_weighted_means)
 
-    ds = xr.Dataset(
-        data_vars,
-        coords={
-            'response_func': response_function_names,
-            'target': target_names,
-            'param': scaled_param_names,
-            'lat': coordinates['lat'],
-            'lon': coordinates['lon']
-        }
-    )
+    # Create Dataset - if DataArrays are passed, their coords are used automatically
+    # Only add coords for numpy arrays
+    if hasattr(scaling_factors, 'dims'):
+        # DataArrays were passed, don't specify coords
+        ds = xr.Dataset(data_vars)
+    else:
+        # Numpy arrays were passed, need to specify coords
+        ds = xr.Dataset(
+            data_vars,
+            coords={
+                'response_func': response_function_names,
+                'target': target_names,
+                'param': scaled_param_names,
+                'lat': coordinates['lat'],
+                'lon': coordinates['lon']
+            }
+        )
 
     # Add attributes
     ds.scaling_factors.attrs = {

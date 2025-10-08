@@ -870,20 +870,24 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
                         total_forward_runs += 1
 
                         # Extract time series for this grid cell using coordinate-based selection
-                        cell_tas = tas_data.sel(lat=lat_val, lon=lon_val)  # [time]
-                        cell_pr = pr_data.sel(lat=lat_val, lon=lon_val)  # [time]
-                        cell_pop = pop_data.sel(lat=lat_val, lon=lon_val)  # [time]
-                        cell_gdp = gdp_data.sel(lat=lat_val, lon=lon_val)  # [time]
-                        cell_tfp_baseline = tfp_baseline.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_tas_xr = tas_data.sel(lat=lat_val, lon=lon_val)  # [time] xarray
+                        cell_pr_xr = pr_data.sel(lat=lat_val, lon=lon_val)  # [time] xarray
+                        cell_pop = pop_data.sel(lat=lat_val, lon=lon_val).values  # [time] numpy
+                        cell_gdp = gdp_data.sel(lat=lat_val, lon=lon_val).values  # [time] numpy
+                        cell_tfp_baseline = tfp_baseline.sel(lat=lat_val, lon=lon_val).values  # [time] numpy
 
                         # Get pre-computed weather (filtered) time series
-                        cell_tas_weather = tas_weather_data.sel(lat=lat_val, lon=lon_val)  # [time]
-                        cell_pr_weather = pr_weather_data.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_tas_weather = tas_weather_data.sel(lat=lat_val, lon=lon_val).values  # [time] numpy
+                        cell_pr_weather = pr_weather_data.sel(lat=lat_val, lon=lon_val).values  # [time] numpy
 
                         # Create ModelParams with scaled response function parameters
                         params_scaled = copy.deepcopy(base_params)
-                        params_scaled.tas0 = float(cell_tas.sel(time=slice(ref_start_year, ref_end_year)).mean())
-                        params_scaled.pr0 = float(cell_pr.sel(time=slice(ref_start_year, ref_end_year)).mean())
+                        params_scaled.tas0 = float(cell_tas_xr.sel(time=slice(ref_start_year, ref_end_year)).mean())
+                        params_scaled.pr0 = float(cell_pr_xr.sel(time=slice(ref_start_year, ref_end_year)).mean())
+
+                        # Convert to numpy for forward model
+                        cell_tas = cell_tas_xr.values
+                        cell_pr = cell_pr_xr.values
 
                         # Set scaled response function parameters from Step 3 results using coordinate-based selection
                         params_scaled.k_tas1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='k_tas1', lat=lat_val, lon=lon_val))
