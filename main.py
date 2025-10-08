@@ -22,6 +22,7 @@ import shutil
 import sys
 import time
 import numpy as np
+import xarray as xr
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Tuple
@@ -563,21 +564,46 @@ def step3_calculate_scaling_factors_per_cell(config: Dict[str, Any], target_resu
     
     # Get dimensions (tas_data is [time, lat, lon])
     ntime, nlat, nlon = tas_data.shape
-    
-    # Initialize scaling factor arrays
-    scaling_factors = np.full((n_response_functions, n_gdp_targets, nlat, nlon), np.nan)
-    optimization_errors = np.full((n_response_functions, n_gdp_targets, nlat, nlon), np.nan)
-    convergence_flags = np.full((n_response_functions, n_gdp_targets, nlat, nlon), False)
-    
-    # Initialize arrays for scaled response function parameters [response_func, target, param, lat, lon]
-    # The 12 parameters are: k_tas1, k_tas2, k_pr1, k_pr2, tfp_tas1, tfp_tas2, tfp_pr1, tfp_pr2, y_tas1, y_tas2, y_pr1, y_pr2
-    n_scaled_params = 12
-    scaled_parameters = np.full((n_response_functions, n_gdp_targets, n_scaled_params, nlat, nlon), np.nan)
-    
+
+    # Get coordinate values for xarray DataArrays
+    lat_coords = tas_data.coords['lat'].values
+    lon_coords = tas_data.coords['lon'].values
+    response_func_names = [df['scaling_name'] for df in response_scalings]
+    target_names_list = [tgt['target_name'] for tgt in gdp_targets]
+
     # Define parameter names for NetCDF output
-    scaled_param_names = ['k_tas1', 'k_tas2', 'k_pr1', 'k_pr2', 
+    scaled_param_names = ['k_tas1', 'k_tas2', 'k_pr1', 'k_pr2',
                          'tfp_tas1', 'tfp_tas2', 'tfp_pr1', 'tfp_pr2',
                          'y_tas1', 'y_tas2', 'y_pr1', 'y_pr2']
+    n_scaled_params = 12
+
+    # Initialize scaling factor arrays as xarray DataArrays
+    scaling_factors = xr.DataArray(
+        np.full((n_response_functions, n_gdp_targets, nlat, nlon), np.nan),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'lat', 'lon']
+    )
+    optimization_errors = xr.DataArray(
+        np.full((n_response_functions, n_gdp_targets, nlat, nlon), np.nan),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'lat', 'lon']
+    )
+    convergence_flags = xr.DataArray(
+        np.full((n_response_functions, n_gdp_targets, nlat, nlon), False),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'lat', 'lon']
+    )
+
+    # Initialize arrays for scaled response function parameters [response_func, target, param, lat, lon]
+    scaled_parameters = xr.DataArray(
+        np.full((n_response_functions, n_gdp_targets, n_scaled_params, nlat, nlon), np.nan),
+        coords={'response_func': response_func_names, 'target': target_names_list,
+                'param': scaled_param_names, 'lat': lat_coords, 'lon': lon_coords},
+        dims=['response_func', 'target', 'param', 'lat', 'lon']
+    )
     
     # Create base ModelParams instance using factory
     params = config['model_params_factory'].create_base()
@@ -784,19 +810,19 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         # Get baseline TFP for this SSP from Step 2
         tfp_baseline = tfp_results[ssp_name]['tfp_baseline']  # [time, lat, lon]
 
-        ntime = tas_data.shape[0]  # Time is first dimension
+        ntime = tas_data.sizes['time']
         years = all_data['years']
+        lat_coords = tas_data.coords['lat'].values
+        lon_coords = tas_data.coords['lon'].values
 
-        # Calculate reference period indices for tas0/pr0 baseline calculation
+        # Calculate reference period for tas0/pr0 baseline calculation
         ref_start_year = time_periods['reference_period']['start_year']
         ref_end_year = time_periods['reference_period']['end_year']
-        ref_start_idx = np.where(years == ref_start_year)[0][0]
-        ref_end_idx = np.where(years == ref_end_year)[0][0]
 
-        
+
         print(f"  Grid dimensions: {ntime} time x {nlat} lat x {nlon} lon")
         print(f"  Running forward model for {total_combinations} combinations per valid grid cell")
-        
+
         # Initialize result arrays for this SSP
         # [response_func, target, time, lat, lon]
         gdp_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
@@ -805,10 +831,10 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
         tfp_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
         k_climate = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
         k_weather = np.full((n_response_functions, n_gdp_targets, ntime, nlat, nlon), np.nan)
-        
+
         successful_forward_runs = 0
         total_forward_runs = 0
-        
+
         # Standard computational loop structure: target → damage → spatial
         for target_idx in range(n_gdp_targets):
             target_name = target_names[target_idx]
@@ -816,49 +842,49 @@ def step4_forward_integration_all_ssps(config: Dict[str, Any], scaling_results: 
 
             for response_idx in range(n_response_functions):
                 response_name = response_function_names[response_idx]
-                
-                for lat_idx in range(nlat):
-                    for lon_idx in range(nlon):
-                        
+
+                for lat_idx, lat_val in enumerate(lat_coords):
+                    for lon_idx, lon_val in enumerate(lon_coords):
+
                         # Check if grid cell is valid and has optimization results
-                        if not valid_mask[lat_idx, lon_idx]:
+                        if not valid_mask.sel(lat=lat_val, lon=lon_val):
                             continue
-                        
+
                         # Check if scaling factor optimization was successful for this combination
-                        if np.isnan(scaling_factors[response_idx, target_idx, lat_idx, lon_idx]):
+                        if np.isnan(scaling_factors.sel(response_func=response_name, target=target_name, lat=lat_val, lon=lon_val)):
                             continue
-                            
+
                         total_forward_runs += 1
-                        
-                        # Extract time series for this grid cell (climate data is [time, lat, lon])
-                        cell_tas = tas_data[:, lat_idx, lon_idx]  # [time]
-                        cell_pr = pr_data[:, lat_idx, lon_idx]  # [time]
-                        cell_pop = pop_data[:, lat_idx, lon_idx]  # [time]
-                        cell_gdp = gdp_data[:, lat_idx, lon_idx]  # [time]
-                        cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]  # [time] (data is [time, lat, lon])
-                        
+
+                        # Extract time series for this grid cell using coordinate-based selection
+                        cell_tas = tas_data.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_pr = pr_data.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_pop = pop_data.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_gdp = gdp_data.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_tfp_baseline = tfp_baseline.sel(lat=lat_val, lon=lon_val)  # [time]
+
                         # Get pre-computed weather (filtered) time series
-                        cell_tas_weather = tas_weather_data[:, lat_idx, lon_idx]  # [time]
-                        cell_pr_weather = pr_weather_data[:, lat_idx, lon_idx]    # [time]
-                        
+                        cell_tas_weather = tas_weather_data.sel(lat=lat_val, lon=lon_val)  # [time]
+                        cell_pr_weather = pr_weather_data.sel(lat=lat_val, lon=lon_val)  # [time]
+
                         # Create ModelParams with scaled response function parameters
                         params_scaled = copy.deepcopy(base_params)
-                        params_scaled.tas0 = np.mean(cell_tas[ref_start_idx:ref_end_idx+1])
-                        params_scaled.pr0 = np.mean(cell_pr[ref_start_idx:ref_end_idx+1])
-                        
-                        # Set scaled response function parameters from Step 3 results
-                        params_scaled.k_tas1 = scaled_parameters[response_idx, target_idx, 0, lat_idx, lon_idx]
-                        params_scaled.k_tas2 = scaled_parameters[response_idx, target_idx, 1, lat_idx, lon_idx]
-                        params_scaled.k_pr1 = scaled_parameters[response_idx, target_idx, 2, lat_idx, lon_idx]
-                        params_scaled.k_pr2 = scaled_parameters[response_idx, target_idx, 3, lat_idx, lon_idx]
-                        params_scaled.tfp_tas1 = scaled_parameters[response_idx, target_idx, 4, lat_idx, lon_idx]
-                        params_scaled.tfp_tas2 = scaled_parameters[response_idx, target_idx, 5, lat_idx, lon_idx]
-                        params_scaled.tfp_pr1 = scaled_parameters[response_idx, target_idx, 6, lat_idx, lon_idx]
-                        params_scaled.tfp_pr2 = scaled_parameters[response_idx, target_idx, 7, lat_idx, lon_idx]
-                        params_scaled.y_tas1 = scaled_parameters[response_idx, target_idx, 8, lat_idx, lon_idx]
-                        params_scaled.y_tas2 = scaled_parameters[response_idx, target_idx, 9, lat_idx, lon_idx]
-                        params_scaled.y_pr1 = scaled_parameters[response_idx, target_idx, 10, lat_idx, lon_idx]
-                        params_scaled.y_pr2 = scaled_parameters[response_idx, target_idx, 11, lat_idx, lon_idx]
+                        params_scaled.tas0 = float(cell_tas.sel(time=slice(ref_start_year, ref_end_year)).mean())
+                        params_scaled.pr0 = float(cell_pr.sel(time=slice(ref_start_year, ref_end_year)).mean())
+
+                        # Set scaled response function parameters from Step 3 results using coordinate-based selection
+                        params_scaled.k_tas1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='k_tas1', lat=lat_val, lon=lon_val))
+                        params_scaled.k_tas2 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='k_tas2', lat=lat_val, lon=lon_val))
+                        params_scaled.k_pr1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='k_pr1', lat=lat_val, lon=lon_val))
+                        params_scaled.k_pr2 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='k_pr2', lat=lat_val, lon=lon_val))
+                        params_scaled.tfp_tas1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='tfp_tas1', lat=lat_val, lon=lon_val))
+                        params_scaled.tfp_tas2 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='tfp_tas2', lat=lat_val, lon=lon_val))
+                        params_scaled.tfp_pr1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='tfp_pr1', lat=lat_val, lon=lon_val))
+                        params_scaled.tfp_pr2 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='tfp_pr2', lat=lat_val, lon=lon_val))
+                        params_scaled.y_tas1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='y_tas1', lat=lat_val, lon=lon_val))
+                        params_scaled.y_tas2 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='y_tas2', lat=lat_val, lon=lon_val))
+                        params_scaled.y_pr1 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='y_pr1', lat=lat_val, lon=lon_val))
+                        params_scaled.y_pr2 = float(scaled_parameters.sel(response_func=response_name, target=target_name, param='y_pr2', lat=lat_val, lon=lon_val))
                         
                         # Run forward model with climate data
                         y_climate, a_climate, k_climate_values, _, _, _ = calculate_coin_ssp_forward_model(

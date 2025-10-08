@@ -833,7 +833,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
             flat_scale = scale_data.flatten()
             flat_gdp = gdp_target_period.values.flatten()
             flat_area_weights = area_weights_2d.flatten()
-            flat_valid = valid_mask.flatten()
+            flat_valid = (valid_mask.values if hasattr(valid_mask, 'values') else valid_mask).flatten()
 
             # Keep only valid entries
             valid_indices = flat_valid & ~np.isnan(flat_scale) & ~np.isnan(flat_gdp)
@@ -946,7 +946,7 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                             flat_slope = slope_data.flatten()
                             flat_gdp_hist = gdp_hist_period.values.flatten()  # Use historical period GDP for slopes
                             flat_area_weights = area_weights_2d.flatten()
-                            flat_valid = valid_slope_indices.flatten()
+                            flat_valid = (valid_slope_indices.values if hasattr(valid_slope_indices, 'values') else valid_slope_indices).flatten()
 
                             valid_slope = flat_slope[flat_valid]
                             valid_gdp_slope = flat_gdp_hist[flat_valid]  # Historical period GDP
@@ -1073,7 +1073,7 @@ def write_variability_calibration_summary(variability_results: Dict[str, Any], c
         flat_slopes = regression_slopes.flatten()
         flat_gdp = gdp_hist_period.values.flatten()
         flat_area_weights = area_weights_2d.flatten()
-        flat_valid = valid_regression_mask.flatten()
+        flat_valid = (valid_regression_mask.values if hasattr(valid_regression_mask, 'values') else valid_regression_mask).flatten()
 
         valid_indices = flat_valid & ~np.isnan(flat_slopes) & ~np.isnan(flat_gdp)
         if np.sum(valid_indices) > 0:

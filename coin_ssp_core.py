@@ -35,6 +35,7 @@
 #  This makes it so that all of the year(0) values are known.
 #
 import numpy as np
+import xarray as xr
 from dataclasses import dataclass
 import copy
 from scipy.optimize import minimize
@@ -68,6 +69,11 @@ def create_scaled_params(params, scaling, scale_factor):
     return params_scaled
 
 def calculate_coin_ssp_forward_model(tfp, pop, tas, pr, params: ModelParams):
+    # Convert xarray DataArrays to numpy for consistent indexing
+    tfp = np.asarray(tfp)
+    pop = np.asarray(pop)
+    tas = np.asarray(tas)
+    pr = np.asarray(pr)
 
     # This function calculates the forward model for the COIN-SSP economic model.
     # It takes in total factor productivity (tfp), population (pop), 
@@ -392,8 +398,9 @@ def process_response_target_optimization(
     ref_start_year = time_periods['reference_period']['start_year']
     ref_end_year = time_periods['reference_period']['end_year']
 
-    # Get dimensions
-    nlat, nlon = valid_mask.shape
+    # Get coordinate values
+    lat_coords = valid_mask.coords['lat'].values
+    lon_coords = valid_mask.coords['lon'].values
     n_response_functions = len(response_scalings)
 
     for response_idx, response_scaling in enumerate(response_scalings):
@@ -404,36 +411,36 @@ def process_response_target_optimization(
         scaling_config = filter_scaling_params(response_scaling)
         scaling_params = ScalingParams(**scaling_config)
 
-        for lat_idx in range(nlat):
+        for lat_idx, lat_val in enumerate(lat_coords):
             # Progress indicator: print dot for each latitude band
             print(".", end="", flush=True)
 
-            for lon_idx in range(nlon):
+            for lon_idx, lon_val in enumerate(lon_coords):
 
                 # Check if grid cell is valid (has economic activity)
-                if not valid_mask[lat_idx, lon_idx]:
+                if not valid_mask.sel(lat=lat_val, lon=lon_val):
                     continue
 
                 total_grid_cells += 1
 
-                # Extract time series for this grid cell using xarray selection
-                cell_tas = tas_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_pr = pr_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_pop = pop_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_gdp = gdp_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
+                # Extract time series for this grid cell using coordinate-based selection
+                cell_tas = tas_data.sel(lat=lat_val, lon=lon_val).values
+                cell_pr = pr_data.sel(lat=lat_val, lon=lon_val).values
+                cell_pop = pop_data.sel(lat=lat_val, lon=lon_val).values
+                cell_gdp = gdp_data.sel(lat=lat_val, lon=lon_val).values
+                cell_tfp_baseline = tfp_baseline.sel(lat=lat_val, lon=lon_val).values
 
                 # Get target reduction for this grid cell
-                target_response = target_response_array[lat_idx, lon_idx]
+                target_response = target_response_array.sel(lat=lat_val, lon=lon_val)
 
                 # Get weather (filtered) time series from pre-computed arrays
-                cell_tas_weather = tas_weather_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_pr_weather = pr_weather_data.isel(lat=lat_idx, lon=lon_idx).values
+                cell_tas_weather = tas_weather_data.sel(lat=lat_val, lon=lon_val).values
+                cell_pr_weather = pr_weather_data.sel(lat=lat_val, lon=lon_val).values
 
                 # Create parameters for this grid cell using factory
                 # Calculate reference means using coordinate-based selection
-                tas_ref_mean = float(tas_data.sel(time=slice(ref_start_year, ref_end_year)).isel(lat=lat_idx, lon=lon_idx).mean().values)
-                pr_ref_mean = float(pr_data.sel(time=slice(ref_start_year, ref_end_year)).isel(lat=lat_idx, lon=lon_idx).mean().values)
+                tas_ref_mean = float(tas_data.sel(time=slice(ref_start_year, ref_end_year), lat=lat_val, lon=lon_val).mean().values)
+                pr_ref_mean = float(pr_data.sel(time=slice(ref_start_year, ref_end_year), lat=lat_val, lon=lon_val).mean().values)
 
                 params_cell = config['model_params_factory'].create_for_step(
                     "grid_cell_optimization",
@@ -458,24 +465,24 @@ def process_response_target_optimization(
                     cell_data, params_cell, scaling_params, config, gdp_target
                 )
 
-                # Store results
-                scaling_factors[response_idx, target_idx, lat_idx, lon_idx] = optimal_scale
-                optimization_errors[response_idx, target_idx, lat_idx, lon_idx] = final_error
-                convergence_flags[response_idx, target_idx, lat_idx, lon_idx] = True
+                # Store results using coordinate-based assignment
+                scaling_factors.loc[dict(response_func=scaling_name, target=target_name, lat=lat_val, lon=lon_val)] = optimal_scale
+                optimization_errors.loc[dict(response_func=scaling_name, target=target_name, lat=lat_val, lon=lon_val)] = final_error
+                convergence_flags.loc[dict(response_func=scaling_name, target=target_name, lat=lat_val, lon=lon_val)] = True
 
-                # Store scaled response function parameters
-                scaled_parameters[response_idx, target_idx, 0, lat_idx, lon_idx] = params_scaled.k_tas1
-                scaled_parameters[response_idx, target_idx, 1, lat_idx, lon_idx] = params_scaled.k_tas2
-                scaled_parameters[response_idx, target_idx, 2, lat_idx, lon_idx] = params_scaled.k_pr1
-                scaled_parameters[response_idx, target_idx, 3, lat_idx, lon_idx] = params_scaled.k_pr2
-                scaled_parameters[response_idx, target_idx, 4, lat_idx, lon_idx] = params_scaled.tfp_tas1
-                scaled_parameters[response_idx, target_idx, 5, lat_idx, lon_idx] = params_scaled.tfp_tas2
-                scaled_parameters[response_idx, target_idx, 6, lat_idx, lon_idx] = params_scaled.tfp_pr1
-                scaled_parameters[response_idx, target_idx, 7, lat_idx, lon_idx] = params_scaled.tfp_pr2
-                scaled_parameters[response_idx, target_idx, 8, lat_idx, lon_idx] = params_scaled.y_tas1
-                scaled_parameters[response_idx, target_idx, 9, lat_idx, lon_idx] = params_scaled.y_tas2
-                scaled_parameters[response_idx, target_idx, 10, lat_idx, lon_idx] = params_scaled.y_pr1
-                scaled_parameters[response_idx, target_idx, 11, lat_idx, lon_idx] = params_scaled.y_pr2
+                # Store scaled response function parameters using coordinate-based assignment
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='k_tas1', lat=lat_val, lon=lon_val)] = params_scaled.k_tas1
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='k_tas2', lat=lat_val, lon=lon_val)] = params_scaled.k_tas2
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='k_pr1', lat=lat_val, lon=lon_val)] = params_scaled.k_pr1
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='k_pr2', lat=lat_val, lon=lon_val)] = params_scaled.k_pr2
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='tfp_tas1', lat=lat_val, lon=lon_val)] = params_scaled.tfp_tas1
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='tfp_tas2', lat=lat_val, lon=lon_val)] = params_scaled.tfp_tas2
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='tfp_pr1', lat=lat_val, lon=lon_val)] = params_scaled.tfp_pr1
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='tfp_pr2', lat=lat_val, lon=lon_val)] = params_scaled.tfp_pr2
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='y_tas1', lat=lat_val, lon=lon_val)] = params_scaled.y_tas1
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='y_tas2', lat=lat_val, lon=lon_val)] = params_scaled.y_tas2
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='y_pr1', lat=lat_val, lon=lon_val)] = params_scaled.y_pr1
+                scaled_parameters.loc[dict(response_func=scaling_name, target=target_name, param='y_pr2', lat=lat_val, lon=lon_val)] = params_scaled.y_pr2
 
                 successful_optimizations += 1
 
@@ -614,22 +621,33 @@ def calculate_weather_gdp_regression_slopes(
         for target_idx, target_name in enumerate(target_names):
             print(f"  Target: {target_name}")
 
-            # Initialize arrays for this response-target combination
-            regression_slopes = np.zeros((nlat, nlon))
-            regression_success_mask = np.zeros((nlat, nlon), dtype=bool)
+            # Initialize arrays for this response-target combination as xarray
+            lat_coords = valid_mask.coords['lat'].values
+            lon_coords = valid_mask.coords['lon'].values
+
+            regression_slopes = xr.DataArray(
+                np.zeros((nlat, nlon)),
+                coords={'lat': lat_coords, 'lon': lon_coords},
+                dims=['lat', 'lon']
+            )
+            regression_success_mask = xr.DataArray(
+                np.zeros((nlat, nlon), dtype=bool),
+                coords={'lat': lat_coords, 'lon': lon_coords},
+                dims=['lat', 'lon']
+            )
             error_count = 0  # Track errors for debugging
 
             # Extract scaling factors for this response-target combination
-            scaling_factors = scaling_results['scaling_factors']  # [response_func, target, lat, lon]
+            scaling_factors = scaling_results['scaling_factors']  # xarray DataArray
 
             # Process each grid cell
             successful_regressions = 0
-            for lat_idx in range(nlat):
-                for lon_idx in range(nlon):
-                    if not valid_mask[lat_idx, lon_idx]:
+            for lat_val in lat_coords:
+                for lon_val in lon_coords:
+                    if not valid_mask.sel(lat=lat_val, lon=lon_val):
                         continue
 
-                    scaling_factor = scaling_factors[response_idx, target_idx, lat_idx, lon_idx]
+                    scaling_factor = scaling_factors.sel(response_func=response_name, target=target_name, lat=lat_val, lon=lon_val)
                     if not np.isfinite(scaling_factor):
                         continue
 
@@ -640,8 +658,8 @@ def calculate_weather_gdp_regression_slopes(
                         s=base_params['s'],
                         alpha=base_params['alpha'],
                         delta=base_params['delta'],
-                        tas0=float(tas0_2d[lat_idx, lon_idx].values),
-                        pr0=float(pr0_2d[lat_idx, lon_idx].values),
+                        tas0=float(tas0_2d.sel(lat=lat_val, lon=lon_val).values),
+                        pr0=float(pr0_2d.sel(lat=lat_val, lon=lon_val).values),
                         k_tas1=response_config.get('k_tas1', 0.0) * scaling_factor,
                         k_tas2=response_config.get('k_tas2', 0.0) * scaling_factor,
                         k_pr1=response_config.get('k_pr1', 0.0) * scaling_factor,
@@ -657,10 +675,10 @@ def calculate_weather_gdp_regression_slopes(
                     )
 
                     # Extract baseline TFP for this cell
-                    cell_tfp_baseline = reference_tfp[reference_ssp]['tfp_baseline'][:, lat_idx, lon_idx]
-                    cell_pop = pop_data.isel(lat=lat_idx, lon=lon_idx).values
-                    cell_tas = tas_data.isel(lat=lat_idx, lon=lon_idx).values
-                    cell_pr = pr_data.isel(lat=lat_idx, lon=lon_idx).values
+                    cell_tfp_baseline = reference_tfp[reference_ssp]['tfp_baseline'].sel(lat=lat_val, lon=lon_val).values
+                    cell_pop = pop_data.sel(lat=lat_val, lon=lon_val).values
+                    cell_tas = tas_data.sel(lat=lat_val, lon=lon_val).values
+                    cell_pr = pr_data.sel(lat=lat_val, lon=lon_val).values
 
                     # Run forward model to get GDP projections
                     try:
@@ -671,8 +689,8 @@ def calculate_weather_gdp_regression_slopes(
 
                         # Extract historical period data using coordinate-based selection
                         tas_weather_hist = tas_weather_data.sel(
-                            time=slice(hist_start_year, hist_end_year)
-                        ).isel(lat=lat_idx, lon=lon_idx).values
+                            time=slice(hist_start_year, hist_end_year), lat=lat_val, lon=lon_val
+                        ).values
 
                         # gdp_forward is already numpy array from forward model
                         # Select historical period
@@ -695,13 +713,13 @@ def calculate_weather_gdp_regression_slopes(
                         # Linear regression: GDP_ratio ~ tas_weather
                         if np.std(tas_weather_valid) > 1e-6:  # Check for sufficient variation
                             slope, intercept = np.polyfit(tas_weather_valid, gdp_ratio_valid, 1)
-                            regression_slopes[lat_idx, lon_idx] = slope
-                            regression_success_mask[lat_idx, lon_idx] = True
+                            regression_slopes.loc[dict(lat=lat_val, lon=lon_val)] = slope
+                            regression_success_mask.loc[dict(lat=lat_val, lon=lon_val)] = True
                             successful_regressions += 1
 
                             # Debug first successful regression
                             if successful_regressions == 1:
-                                print(f"      First successful regression at [{lat_idx},{lon_idx}]:")
+                                print(f"      First successful regression at lat={lat_val}, lon={lon_val}:")
                                 print(f"        Slope: {slope:.6f}")
                                 print(f"        TAS weather std: {np.std(tas_weather_valid):.6f}")
                                 print(f"        GDP ratio std: {np.std(gdp_ratio_valid):.6f}")
@@ -709,7 +727,7 @@ def calculate_weather_gdp_regression_slopes(
                     except Exception as e:
                         # Skip cells where forward model fails
                         if error_count < 5:  # Print first 5 errors for debugging
-                            print(f"      Error in cell [{lat_idx},{lon_idx}]: {type(e).__name__}: {e}")
+                            print(f"      Error in cell [lat={lat_val}, lon={lon_val}]: {type(e).__name__}: {e}")
                             error_count += 1
                         continue
 
