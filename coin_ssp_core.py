@@ -845,8 +845,9 @@ def calculate_variability_climate_response_parameters(
 
     # Extract TFP data
     valid_mask = all_data['_metadata']['valid_mask']
-    tfp_baseline = reference_tfp['tfp_baseline']
-    nlat, nlon = valid_mask.shape
+    tfp_baseline = reference_tfp['tfp_baseline']  # reference_tfp is already SSP-specific
+    nlat = len(valid_mask.coords['lat'])
+    nlon = len(valid_mask.coords['lon'])
 
     # Create dummy GDP target for optimization (uniform 10% loss)
     dummy_gdp_target = {
@@ -856,7 +857,12 @@ def calculate_variability_climate_response_parameters(
         'target_name': 'variability_reference'
     }
 
-    constant_response = np.full((nlat, nlon), -0.10)
+    # Create constant response as xarray DataArray
+    constant_response = xr.DataArray(
+        np.full((nlat, nlon), -0.10),
+        coords={'lat': valid_mask.coords['lat'], 'lon': valid_mask.coords['lon']},
+        dims=['lat', 'lon']
+    )
     dummy_target_results = {
         'variability_reference': {
             'reduction_array': constant_response
