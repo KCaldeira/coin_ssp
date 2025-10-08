@@ -735,14 +735,19 @@ def calculate_weather_gdp_regression_slopes(
 
             # Calculate GDP-weighted mean slope
             if successful_regressions > 0:
+                # Convert xarray DataArrays to numpy for boolean indexing
                 gdp_weights = gdp_data.sel(time=slice(hist_start_year, hist_end_year)).mean(dim='time').values
-                weighted_slopes = regression_slopes * regression_success_mask * gdp_weights
-                total_weight = np.sum(gdp_weights[valid_mask] * regression_success_mask[valid_mask])
-                gdp_weighted_mean = np.sum(weighted_slopes[valid_mask]) / total_weight if total_weight > 0 else 0.0
+                regression_slopes_values = regression_slopes.values
+                regression_success_mask_values = regression_success_mask.values
+                valid_mask_values = valid_mask.values
+
+                weighted_slopes = regression_slopes_values * regression_success_mask_values * gdp_weights
+                total_weight = np.sum(gdp_weights[valid_mask_values] * regression_success_mask_values[valid_mask_values])
+                gdp_weighted_mean = np.sum(weighted_slopes[valid_mask_values]) / total_weight if total_weight > 0 else 0.0
 
                 # Debug GDP-weighted mean calculation
                 print(f"    GDP-weighted mean slope: {gdp_weighted_mean:.6f}")
-                print(f"    Slope range: {np.min(regression_slopes[regression_success_mask]):.6f} to {np.max(regression_slopes[regression_success_mask]):.6f}")
+                print(f"    Slope range: {np.min(regression_slopes_values[regression_success_mask_values]):.6f} to {np.max(regression_slopes_values[regression_success_mask_values]):.6f}")
             else:
                 gdp_weighted_mean = 0.0
 
