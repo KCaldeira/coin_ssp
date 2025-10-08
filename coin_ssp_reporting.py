@@ -1587,11 +1587,15 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, al
                 sf_map = scaling_factors[response_idx, target_idx, :, :]
 
                 # Mask invalid cells and ocean
-                sf_map_masked = np.copy(sf_map)
-                sf_map_masked[~valid_mask] = np.nan
+                # Convert to numpy for masking operations
+                sf_map_values = sf_map.values if hasattr(sf_map, 'values') else sf_map
+                valid_mask_values = valid_mask.values if hasattr(valid_mask, 'values') else valid_mask
+
+                sf_map_masked = np.copy(sf_map_values)
+                sf_map_masked[~valid_mask_values] = np.nan
 
                 # Calculate independent zero-biased range for this map
-                valid_values = sf_map[valid_mask & np.isfinite(sf_map)]
+                valid_values = sf_map_values[valid_mask_values & np.isfinite(sf_map_values)]
                 if len(valid_values) > 0:
                     vmin, vmax = calculate_zero_biased_range(valid_values)
                     actual_min = np.min(valid_values)

@@ -961,36 +961,46 @@ def calculate_variability_climate_response_parameters(
 
         print(f"Running forward model for {np.sum(valid_mask)} grid cells...")
 
-        # Run forward model for each valid grid cell
-        for lat_idx in range(nlat):
-            for lon_idx in range(nlon):
-                if not valid_mask[lat_idx, lon_idx]:
+        # Run forward model for each valid grid cell using coordinate-based indexing
+        lat_coords = valid_mask.coords['lat']
+        lon_coords = valid_mask.coords['lon']
+
+        for lat_idx, lat_val in enumerate(lat_coords):
+            for lon_idx, lon_val in enumerate(lon_coords):
+                if not valid_mask.sel(lat=lat_val, lon=lon_val):
                     continue
 
-                # Extract model parameters for this cell from Step 1
-                cell_params = step1_parameters[lat_idx, lon_idx, :]
+                # Extract model parameters for this cell from Step 1 using coordinate selection
+                cell_params = step1_parameters.sel(lat=lat_val, lon=lon_val)
 
                 # Create ModelParams object with optimized climate response parameters
+                # Convert xarray scalars to float
                 model_params = ModelParams(
                     s=config['model_params']['s'],
                     alpha=config['model_params']['alpha'],
                     delta=config['model_params']['delta'],
-                    tas0=float(tas0_2d[lat_idx, lon_idx].values),
-                    pr0=float(pr0_2d[lat_idx, lon_idx].values),
-                    k_tas1=cell_params[0], k_tas2=cell_params[1],
-                    k_pr1=cell_params[2], k_pr2=cell_params[3],
-                    tfp_tas1=cell_params[4], tfp_tas2=cell_params[5],
-                    tfp_pr1=cell_params[6], tfp_pr2=cell_params[7],
-                    y_tas1=cell_params[8], y_tas2=cell_params[9],
-                    y_pr1=cell_params[10], y_pr2=cell_params[11]
+                    tas0=float(tas0_2d.sel(lat=lat_val, lon=lon_val)),
+                    pr0=float(pr0_2d.sel(lat=lat_val, lon=lon_val)),
+                    k_tas1=float(cell_params.sel(param='k_tas1')),
+                    k_tas2=float(cell_params.sel(param='k_tas2')),
+                    k_pr1=float(cell_params.sel(param='k_pr1')),
+                    k_pr2=float(cell_params.sel(param='k_pr2')),
+                    tfp_tas1=float(cell_params.sel(param='tfp_tas1')),
+                    tfp_tas2=float(cell_params.sel(param='tfp_tas2')),
+                    tfp_pr1=float(cell_params.sel(param='tfp_pr1')),
+                    tfp_pr2=float(cell_params.sel(param='tfp_pr2')),
+                    y_tas1=float(cell_params.sel(param='y_tas1')),
+                    y_tas2=float(cell_params.sel(param='y_tas2')),
+                    y_pr1=float(cell_params.sel(param='y_pr1')),
+                    y_pr2=float(cell_params.sel(param='y_pr2'))
                 )
 
-                # Extract time series for this grid cell using xarray selection
+                # Extract time series for this grid cell using coordinate selection
                 # Use WEATHER COMPONENTS for forward simulation to isolate variability effects
-                cell_tas_weather = tas_weather_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_pr_weather = pr_weather_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_pop = pop_data.isel(lat=lat_idx, lon=lon_idx).values
-                cell_tfp_baseline = tfp_baseline[:, lat_idx, lon_idx]
+                cell_tas_weather = tas_weather_data.sel(lat=lat_val, lon=lon_val).values
+                cell_pr_weather = pr_weather_data.sel(lat=lat_val, lon=lon_val).values
+                cell_pop = pop_data.sel(lat=lat_val, lon=lon_val).values
+                cell_tfp_baseline = tfp_baseline.sel(lat=lat_val, lon=lon_val).values
 
                 # Run forward model with weather components
                 y_forward, _, _, _, _, _ = calculate_coin_ssp_forward_model(
@@ -1012,13 +1022,13 @@ def calculate_variability_climate_response_parameters(
 
         print(f"Computing y_weather ~ tas_weather regression for {np.sum(valid_mask)} cells...")
 
-        for lat_idx in range(nlat):
-            for lon_idx in range(nlon):
-                if not valid_mask[lat_idx, lon_idx]:
+        for lat_idx, lat_val in enumerate(lat_coords):
+            for lon_idx, lon_val in enumerate(lon_coords):
+                if not valid_mask.sel(lat=lat_val, lon=lon_val):
                     continue
 
                 # Extract weather variables for historical period
-                tas_weather_hist = tas_weather_data.sel(time=slice(hist_start_year, hist_end_year)).isel(lat=lat_idx, lon=lon_idx).values
+                tas_weather_hist = tas_weather_data.sel(time=slice(hist_start_year, hist_end_year), lat=lat_val, lon=lon_val).values
                 # gdp_forward is numpy array, use boolean mask for historical period
                 hist_mask = (years >= hist_start_year) & (years <= hist_end_year)
                 gdp_forward_hist = gdp_forward[hist_mask, lat_idx, lon_idx]
@@ -1048,18 +1058,25 @@ def calculate_variability_climate_response_parameters(
         # =================================================================================
         print(f"\n--- Phase 4: Parameter normalization for {response_name} ---")
 
-        # Initialize final normalized parameters
-        final_parameters = np.zeros_like(step1_parameters)
-        final_success_mask = valid_mask & regression_success_mask
+        # Initialize final normalized parameters as xarray DataArray with same structure as step1_parameters
+        final_parameters = step1_parameters.copy()
+        # Convert regression masks to xarray for proper broadcasting
+        regression_success_xr = xr.DataArray(
+            regression_success_mask,
+            coords={'lat': lat_coords, 'lon': lon_coords},
+            dims=['lat', 'lon']
+        )
+        final_success_mask = valid_mask & regression_success_xr
 
-        for lat_idx in range(nlat):
-            for lon_idx in range(nlon):
-                if not final_success_mask[lat_idx, lon_idx]:
+        for lat_idx, lat_val in enumerate(lat_coords):
+            for lon_idx, lon_val in enumerate(lon_coords):
+                if not final_success_mask.sel(lat=lat_val, lon=lon_val):
                     continue
 
                 slope = regression_slopes[lat_idx, lon_idx]
 
-                final_parameters[lat_idx, lon_idx, :] = step1_parameters[lat_idx, lon_idx, :] / slope
+                # Divide all parameters by regression slope
+                final_parameters.loc[dict(lat=lat_val, lon=lon_val)] = step1_parameters.sel(lat=lat_val, lon=lon_val) / slope
 
         final_success = np.sum(final_success_mask)
         print(f"Phase 4 complete: {final_success} final calibrated parameters for {response_name}")
@@ -1162,12 +1179,10 @@ def calculate_variability_scaling_parameters(
     # Calculate GDP variability scaling parameters (g0, g1, g2) based on target shape
     if target_shape == 'constant':
         # For constant targets: g(T) = g0, g1 = 0, g2 = 0
-        g0_value = gdp_target.get('global_mean_amount', 1.0)
-        print(f"  Constant GDP variability scaling: g0={g0_value}")
-
-        g0_array = np.full((nlat, nlon), g0_value)
-        g1_array = np.zeros((nlat, nlon))
-        g2_array = np.zeros((nlat, nlon))
+        g0 = gdp_target.get('global_mean_amount', 1.0)
+        g1 = 0.0
+        g2 = 0.0
+        print(f"  Constant GDP variability scaling: g0={g0}")
 
     elif target_shape == 'linear':
         # Linear case: g(T) = a0 + a1 * T, so g0 = a0, g1 = a1, g2 = 0
@@ -1178,24 +1193,21 @@ def calculate_variability_scaling_parameters(
         print(f"  Linear target: global_mean={global_mean_amount}, zero_temp={zero_amount_temperature}")
 
         # Calculate GDP-weighted mean temperature using only valid economic cells
-        total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
-        tas0_2d_values = tas0_2d.values if hasattr(tas0_2d, 'values') else tas0_2d
-        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]) / total_gdp
+        total_gdp = np.sum(mean_gdp_per_cell[valid_mask.values])
+        tas0_2d_values = tas0_2d.values
+        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask.values] * tas0_2d_values[valid_mask.values]) / total_gdp
 
         # Calculate coefficients for linear relationship: g(T) = a0 + a1 * T
         # From constraints: g(T_zero) = 0 => a0 + a1*T_zero = 0 => a0 = -a1*T_zero
         # mean(g(T)) = global_mean => a0 + a1*mean(T) = global_mean
         # Substituting: -a1*T_zero + a1*mean(T) = global_mean
         # => a1*(mean(T) - T_zero) = global_mean
-        a1 = global_mean_amount / (gdp_weighted_tas - zero_amount_temperature)
-        a0 = -a1 * zero_amount_temperature
+        g1 = global_mean_amount / (gdp_weighted_tas - zero_amount_temperature)
+        g0 = -g1 * zero_amount_temperature
+        g2 = 0.0
 
-        print(f"  Linear coefficients: g0={a0:.6f}, g1={a1:.6f}")
+        print(f"  Linear coefficients: g0={g0:.6f}, g1={g1:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
-
-        g0_array = np.full((nlat, nlon), a0)
-        g1_array = np.full((nlat, nlon), a1)
-        g2_array = np.zeros((nlat, nlon))
 
     elif target_shape == 'quadratic':
         # Quadratic case: g(T) = a0 + a1*T + a2*T^2, so g0 = a0, g1 = a1, g2 = a2
@@ -1206,10 +1218,10 @@ def calculate_variability_scaling_parameters(
         print(f"  Quadratic target: global_mean={global_mean_amount}, zero_temp={zero_amount_temperature}, deriv_at_zero={zero_derivative_temperature}")
 
         # Calculate GDP-weighted mean temperature using only valid economic cells
-        total_gdp = np.sum(mean_gdp_per_cell[valid_mask])
-        tas0_2d_values = tas0_2d.values if hasattr(tas0_2d, 'values') else tas0_2d
-        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]) / total_gdp
-        gdp_weighted_tas2 = np.sum(mean_gdp_per_cell[valid_mask] * tas0_2d_values[valid_mask]**2) / total_gdp
+        total_gdp = np.sum(mean_gdp_per_cell[valid_mask.values])
+        tas0_2d_values = tas0_2d.values
+        gdp_weighted_tas = np.sum(mean_gdp_per_cell[valid_mask.values] * tas0_2d_values[valid_mask.values]) / total_gdp
+        gdp_weighted_tas2 = np.sum(mean_gdp_per_cell[valid_mask.values] * tas0_2d_values[valid_mask.values]**2) / total_gdp
 
         T0 = zero_amount_temperature
         T_mean = gdp_weighted_tas
@@ -1230,22 +1242,18 @@ def calculate_variability_scaling_parameters(
         #              [1,         2*T0         ] [a2]   [zero_derivative_temperature]
 
         det = (T_mean - T0) * 2 * T0 - (T2_mean - T0**2) * 1
-        a1 = (global_mean_amount * 2 * T0 - zero_derivative_temperature * (T2_mean - T0**2)) / det
-        a2 = (zero_derivative_temperature * (T_mean - T0) - global_mean_amount * 1) / det
-        a0 = -a1 * T0 - a2 * T0**2
+        g1 = (global_mean_amount * 2 * T0 - zero_derivative_temperature * (T2_mean - T0**2)) / det
+        g2 = (zero_derivative_temperature * (T_mean - T0) - global_mean_amount * 1) / det
+        g0 = -g1 * T0 - g2 * T0**2
 
-        print(f"  Quadratic coefficients: g0={a0:.6f}, g1={a1:.6f}, g2={a2:.6f}")
+        print(f"  Quadratic coefficients: g0={g0:.6f}, g1={g1:.6f}, g2={g2:.6f}")
         print(f"  GDP-weighted mean temperature: {gdp_weighted_tas:.2f}°C")
-
-        g0_array = np.full((nlat, nlon), a0)
-        g1_array = np.full((nlat, nlon), a1)
-        g2_array = np.full((nlat, nlon), a2)
 
     else:
         raise ValueError(f"Unknown target_shape: {target_shape}")
 
     # Compute GDP variability scaling factors at reference temperature for each grid cell
-    target_scaling_factors_array = g0_array + g1_array * tas0_2d + g2_array * tas0_2d**2
+    target_scaling_factors_array = g0 + g1 * tas0_2d + g2 * tas0_2d**2
 
     print(f"  Variability scaling at reference temperature range: {np.nanmin(target_scaling_factors_array):.6f} to {np.nanmax(target_scaling_factors_array):.6f}")
 
@@ -1261,45 +1269,52 @@ def calculate_variability_scaling_parameters(
         scaling_name = response_scaling['scaling_name']
         print(f"  Response function: {scaling_name} ({response_idx+1}/{n_response_functions})")
 
-        # Get response-function-specific baseline parameters
+        # Get response-function-specific baseline parameters (keep as xarray)
         baseline_climate_parameters = all_baseline_parameters[scaling_name]
 
-        # Progress indicator: print dots for each latitude band (like optimization function)
-        for lat_idx in range(nlat):
+        # Get coordinate values for iteration
+        lat_coords = valid_mask.coords['lat']
+        lon_coords = valid_mask.coords['lon']
+
+        # Progress indicator and counting: iterate over coordinates
+        for lat_idx, lat_val in enumerate(lat_coords):
             print(".", end="", flush=True)
 
-            for lon_idx in range(nlon):
+            for lon_idx, lon_val in enumerate(lon_coords):
                 # Count valid cells where we have finite scaling factors
-                if np.isfinite(target_scaling_factors_array[lat_idx, lon_idx]) and np.isfinite(baseline_climate_parameters[lat_idx, lon_idx, 0]):
+                scaling_val = target_scaling_factors_array.sel(lat=lat_val, lon=lon_val)
+                baseline_val = baseline_climate_parameters.sel(lat=lat_val, lon=lon_val, param='y_tas1')
+                if np.isfinite(scaling_val) and np.isfinite(baseline_val):
                     total_grid_cells += 1
                     successful_optimizations += 1
 
         # Calculate scaling factors by applying target scaling to reference scaled parameters
         # scaling_factor = target_scaling_factor (no optimization, direct application)
-        scaling_factors[response_idx, target_idx, :, :] = target_scaling_factors_array
+        scaling_factors[response_idx, target_idx, :, :] = target_scaling_factors_array.values
 
         # For variability targets, set optimization error to zero (no optimization performed)
         optimization_errors[response_idx, target_idx, :, :] = 0.0
 
         # Mark as converged where we have valid baseline parameters and finite scaling factors
         convergence_flags[response_idx, target_idx, :, :] = (
-            np.isfinite(baseline_climate_parameters[:, :, 0]) &
-            np.isfinite(target_scaling_factors_array)
+            np.isfinite(baseline_climate_parameters.sel(param='y_tas1').values) &
+            np.isfinite(target_scaling_factors_array.values)
         )
 
         # Store scaled parameters by applying target scaling to baseline parameters
         # For variability targets, we scale the baseline parameters by the target scaling factor
-        for param_idx in range(baseline_climate_parameters.shape[2]):
+        for param_name in baseline_climate_parameters.coords['param'].values:
+            param_idx = list(baseline_climate_parameters.coords['param'].values).index(param_name)
             scaled_parameters[response_idx, target_idx, param_idx, :, :] = (
-                baseline_climate_parameters[:, :, param_idx] * target_scaling_factors_array
+                baseline_climate_parameters.sel(param=param_name).values * target_scaling_factors_array.values
             )
 
         # Newline after each response function completes its latitude bands
         print()
 
     # Summary statistics
-    valid_cells = np.sum(np.isfinite(baseline_climate_parameters[:, :, 0]))
-    applied_cells = np.sum(np.isfinite(target_scaling_factors_array))
+    valid_cells = np.sum(np.isfinite(baseline_climate_parameters.sel(param='y_tas1').values))
+    applied_cells = np.sum(np.isfinite(target_scaling_factors_array.values))
 
     print(f"  Applied to {applied_cells}/{valid_cells} valid grid cells")
     if applied_cells > 0:
@@ -1309,9 +1324,9 @@ def calculate_variability_scaling_parameters(
         print(f"  Scaling factors range: {np.min(scaling_range):.6f} to {np.max(scaling_range):.6f}")
 
     return {
-        'g0_array': g0_array,
-        'g1_array': g1_array,
-        'g2_array': g2_array,
+        'g0': g0,
+        'g1': g1,
+        'g2': g2,
         'total_grid_cells': total_grid_cells,
         'successful_optimizations': successful_optimizations
     }
