@@ -579,13 +579,15 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     target_end_idx = np.where(time_coords == target_end)[0][0] + 1
 
                     # Calculate mean ratios over target period for each grid cell
-                    nlat, nlon = valid_mask.shape
+                    # Convert valid_mask to numpy for indexing
+                    valid_mask_values = valid_mask.values if hasattr(valid_mask, 'values') else valid_mask
+                    nlat, nlon = valid_mask_values.shape
                     impact_ratio_linear = np.full((nlat, nlon), np.nan)  # (climate/weather) - 1
                     impact_ratio_log10 = np.full((nlat, nlon), np.nan)   # log10(climate/weather)
 
                     for lat_idx in range(nlat):
                         for lon_idx in range(nlon):
-                            if valid_mask[lat_idx, lon_idx]:
+                            if valid_mask_values[lat_idx, lon_idx]:
                                 # Extract target period time series for this grid cell
                                 climate_target = gdp_climate_combo[target_start_idx:target_end_idx, lat_idx, lon_idx]
                                 weather_target = gdp_weather_combo[target_start_idx:target_end_idx, lat_idx, lon_idx]
@@ -609,7 +611,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     linear_ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                     # Determine color scale for linear using zero-biased range
-                    valid_linear = impact_ratio_linear[valid_mask & np.isfinite(impact_ratio_linear)]
+                    valid_linear = impact_ratio_linear[valid_mask_values & np.isfinite(impact_ratio_linear)]
                     if len(valid_linear) > 0:
                         lin_vmin, lin_vmax = calculate_zero_biased_range(valid_linear)
                         lin_actual_min = np.min(valid_linear)
@@ -657,7 +659,7 @@ def create_forward_model_maps_visualization(forward_results, config, output_dir,
                     log10_ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
                     # Determine color scale for log10 - use FULL data range to show outliers
-                    valid_log10 = impact_ratio_log10[valid_mask & np.isfinite(impact_ratio_log10)]
+                    valid_log10 = impact_ratio_log10[valid_mask_values & np.isfinite(impact_ratio_log10)]
                     if len(valid_log10) > 0:
                         log_actual_min = np.min(valid_log10)
                         log_actual_max = np.max(valid_log10)
@@ -865,7 +867,9 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
                 gdp_weighted_median = np.nan
 
             # Calculate scaling factor max/min statistics
-            valid_scaling = scale_data[valid_mask & np.isfinite(scale_data)]
+            scale_data_values = scale_data.values if hasattr(scale_data, 'values') else scale_data
+            valid_mask_values = valid_mask.values if hasattr(valid_mask, 'values') else valid_mask
+            valid_scaling = scale_data_values[valid_mask_values & np.isfinite(scale_data_values)]
             if len(valid_scaling) > 0:
                 scaling_max = np.max(valid_scaling)
                 scaling_min = np.min(valid_scaling)
@@ -874,7 +878,8 @@ def print_gdp_weighted_scaling_summary(scaling_results: Dict[str, Any], config: 
 
             # Calculate objective function statistics
             error_data = optimization_errors[resp_idx, target_idx, :, :]  # [lat, lon]
-            valid_errors = error_data[valid_mask & np.isfinite(error_data)]
+            error_data_values = error_data.values if hasattr(error_data, 'values') else error_data
+            valid_errors = error_data_values[valid_mask_values & np.isfinite(error_data_values)]
 
             if len(valid_errors) > 0:
                 obj_func_max = np.max(valid_errors)
@@ -1907,12 +1912,18 @@ def create_regression_slopes_visualization(scaling_results, config, output_dir, 
                 # Create subplot
                 ax = plt.subplot(subplot_rows, subplot_cols, subplot_idx)
 
+                # Convert to numpy for boolean indexing operations
+                slope_data_values = slope_data.values if hasattr(slope_data, 'values') else slope_data
+                valid_mask_values = valid_mask.values if hasattr(valid_mask, 'values') else valid_mask
+                success_mask_values = success_mask.values if hasattr(success_mask, 'values') else success_mask
+
                 # Create plot data (set invalid/unsuccessful cells to NaN for white color)
-                plot_data = np.full_like(slope_data, np.nan)
-                plot_data[valid_mask & success_mask] = slope_data[valid_mask & success_mask]
+                plot_data = np.full_like(slope_data_values, np.nan)
+                combined_mask = valid_mask_values & success_mask_values
+                plot_data[combined_mask] = slope_data_values[combined_mask]
 
                 # Calculate panel-specific color scale
-                valid_slopes = slope_data[valid_mask & success_mask]
+                valid_slopes = slope_data_values[combined_mask]
                 if len(valid_slopes) > 0:
                     data_min, data_max = np.min(valid_slopes), np.max(valid_slopes)
                     vmin, vmax = calculate_zero_biased_range(valid_slopes)
