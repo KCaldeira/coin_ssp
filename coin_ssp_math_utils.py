@@ -302,19 +302,21 @@ def calculate_global_mean(data, valid_mask):
     return float(weighted_mean.values)
 
 
-def calculate_gdp_weighted_mean(variable_series, gdp_series, valid_mask, start_year, end_year):
+def calculate_gdp_weighted_mean(variable_series, gdp_series, area_weights, valid_mask, start_year, end_year):
     """
     Calculate GDP-weighted mean of a variable over a specified time period.
 
-    Correctly computes mean over time of [sum(GDP×variable) / sum(GDP)] for each year,
-    rather than incorrectly using mean(GDP) × mean(variable).
+    Correctly computes mean over time of [sum(area×GDP×variable) / sum(area×GDP)] for each year,
+    accounting for grid cell area to get proper weighting by total GDP rather than GDP density.
 
     Parameters
     ----------
     variable_series : xr.DataArray
         Variable time series with time, lat, lon coordinates
     gdp_series : xr.DataArray
-        GDP time series with time, lat, lon coordinates
+        GDP density time series with time, lat, lon coordinates (GDP per unit area)
+    area_weights : xr.DataArray
+        Grid cell area weights [lat, lon]
     valid_mask : xr.DataArray
         Boolean mask for valid economic grid cells [lat, lon]
     start_year : int
@@ -335,10 +337,14 @@ def calculate_gdp_weighted_mean(variable_series, gdp_series, valid_mask, start_y
     var_masked = var_period.where(valid_mask)
     gdp_masked = gdp_period.where(valid_mask)
 
+    # Multiply GDP by area to get total GDP (not density)
+    # area_weights [lat, lon] broadcasts across time dimension
+    gdp_total = gdp_masked * area_weights
+
     # Calculate GDP-weighted value for each time step (vectorized)
     gdp_weighted_values = (
-        (gdp_masked * var_masked).sum(dim=['lat', 'lon']) /
-        gdp_masked.sum(dim=['lat', 'lon'])
+        (gdp_total * var_masked).sum(dim=['lat', 'lon']) /
+        gdp_total.sum(dim=['lat', 'lon'])
     )
 
     # Return temporal mean

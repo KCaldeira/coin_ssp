@@ -1213,19 +1213,20 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
     years = all_data['years']
     tas_series = all_data[reference_ssp]['tas']
     gdp_series = all_data[reference_ssp]['gdp']
+    area_weights = all_data['_metadata']['area_weights']
 
     # Calculate GDP-weighted temperature for target period (2080-2100)
     target_period_start = config['time_periods']['target_period']['start_year']
     target_period_end = config['time_periods']['target_period']['end_year']
     gdp_weighted_tas_target = calculate_gdp_weighted_mean(
-        tas_series, gdp_series, valid_mask, target_period_start, target_period_end
+        tas_series, gdp_series, area_weights, valid_mask, target_period_start, target_period_end
     )
 
     # Calculate GDP-weighted temperature for historical period (1861-2014)
     historical_period_start = config['time_periods']['historical_period']['start_year']
     historical_period_end = config['time_periods']['historical_period']['end_year']
     gdp_weighted_tas_historical = calculate_gdp_weighted_mean(
-        tas_series, gdp_series, valid_mask, historical_period_start, historical_period_end
+        tas_series, gdp_series, area_weights, valid_mask, historical_period_start, historical_period_end
     )
 
     # Extract reduction arrays and calculate statistics
@@ -1279,7 +1280,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
             period_start = target_period_start
             period_end = target_period_end
 
-        # GDP-weighted mean calculation using time series: mean_over_time[sum(GDP × (1+reduction)) / sum(GDP)] - 1
+        # GDP-weighted mean calculation using time series: mean_over_time[sum(area×GDP×(1+reduction)) / sum(area×GDP)] - 1
         # Create a broadcast-compatible reduction array
         # Convert reduction_array to numpy if needed for broadcasting
         if hasattr(reduction_array, 'values'):
@@ -1289,7 +1290,7 @@ def create_target_gdp_visualization(target_results: Dict[str, Any], config: Dict
         # Broadcast (1 + reduction) across time dimension: [time, lat, lon]
         reduction_broadcast = xr.ones_like(tas_series) * (1 + reduction_values)[np.newaxis, :, :]
         gdp_weighted_mean = calculate_gdp_weighted_mean(
-            reduction_broadcast, gdp_series, valid_mask, period_start, period_end
+            reduction_broadcast, gdp_series, area_weights, valid_mask, period_start, period_end
         ) - 1
         gdp_weighted_means[target_name] = gdp_weighted_mean
 

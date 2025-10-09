@@ -1,11 +1,5 @@
 import numpy as np
 import xarray as xr
-from typing import Dict, Any
-
-from coin_ssp_math_utils import calculate_gdp_weighted_mean
-
-import numpy as np
-import xarray as xr
 from typing import Tuple, Sequence, Optional, Dict, Any
 
 def _check_dims(t: xr.DataArray, g: xr.DataArray, a: xr.DataArray,
@@ -17,10 +11,6 @@ def _check_dims(t: xr.DataArray, g: xr.DataArray, a: xr.DataArray,
     for d in dims[1:]:
         if d not in a.dims:
             raise ValueError(f"area must have spatial dim '{d}'.")
-
-import numpy as np
-import xarray as xr
-from typing import Tuple
 
 def _tw_moments(t: xr.DataArray, w: xr.DataArray, max_k: int):
     """Return T1, T2[, T3] with a common finite mask; each is a 0-D DataArray."""

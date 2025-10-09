@@ -24,10 +24,12 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
 ### Critical Mathematical Rule
 **⚠️ NEVER assume mean(X × Y) = mean(X) × mean(Y) - this is MATHEMATICALLY WRONG**
 - When calculating weighted means (e.g., GDP-weighted temperature), you MUST use the time series
-- Correct: `mean_over_time[ sum(GDP[t] × T[t]) / sum(GDP[t]) ]`
+- Correct: `mean_over_time[ sum(area × GDP[t] × T[t]) / sum(area × GDP[t]) ]`
 - WRONG: `sum(mean(GDP) × mean(T)) / sum(mean(GDP))`
 - Always pass full time series to functions that need weighted means, not time-averaged fields
-- Use `calculate_gdp_weighted_mean()` for temporal GDP-weighted calculations
+- **CRITICAL**: GDP data is in units of GDP per unit area (density), so it MUST be multiplied by area weights to get total GDP
+- Use `calculate_gdp_weighted_mean(variable_series, gdp_series, area_weights, valid_mask, start_year, end_year)` for temporal GDP-weighted calculations
+- The `area_weights` parameter is REQUIRED and must be explicitly passed from `all_data['_metadata']['area_weights']`
 
 ### Naming Conventions
 - **Consistent naming** - use the same variable/field names throughout the codebase when referring to the same concept
