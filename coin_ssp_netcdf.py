@@ -673,7 +673,8 @@ def save_step4_results_netcdf_split(step4_results: Dict[str, Any], output_dir: s
     # Get SSP names and dimensions from first SSP result
     ssp_names = list(forward_results.keys())
     first_ssp = forward_results[ssp_names[0]]
-    nlat, nlon, n_response_func, n_target, ntime = first_ssp['gdp_climate'].shape
+    # Arrays are [response_func, target, time, lat, lon] before being passed here
+    n_response_func, n_target, ntime, nlat, nlon = first_ssp['gdp_climate'].shape
 
     # Variables to process (climate and weather variants paired)
     variable_pairs = [

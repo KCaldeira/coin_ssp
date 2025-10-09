@@ -1548,8 +1548,8 @@ def create_scaling_factors_visualization(scaling_results, config, output_dir, al
     # Create meshgrid for plotting
     lon_grid, lat_grid = np.meshgrid(lon, lat)
 
-    # Get dimensions
-    nlat, nlon, n_response_functions, n_targets = scaling_factors.shape
+    # Get dimensions (scaling_factors is [response_func, target, lat, lon])
+    n_response_functions, n_targets, nlat, nlon = scaling_factors.shape
 
     # Calculate adaptive layout based on number of targets
     subplot_rows, subplot_cols, fig_size = get_adaptive_subplot_layout(n_targets)
