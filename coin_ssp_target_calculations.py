@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 from typing import Tuple, Sequence, Optional, Dict, Any
+from coin_ssp_math_utils import calculate_time_means
 
 def _check_dims(t: xr.DataArray, g: xr.DataArray, a: xr.DataArray,
                 dims: Sequence[str]) -> None:
@@ -164,7 +165,6 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
     print(f"  valid_mask.shape = {valid_mask.shape}, sum = {np.sum(valid_mask)}")
 
     # Calculate time-averaged temperature for constraint period
-    from coin_ssp_math_utils import calculate_time_means
     tas_period = calculate_time_means(tas_series, period_start, period_end)
 
     print(f"DEBUG: Time-averaged temperature:")
@@ -275,7 +275,6 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
     area_weights = all_data['_metadata']['area_weights']
 
     # Calculate time-averaged temperature for constraint period
-    from coin_ssp_math_utils import calculate_time_means
     tas_period = calculate_time_means(tas_series, period_start, period_end)
 
     # Select constraint period data using coordinate-based slicing

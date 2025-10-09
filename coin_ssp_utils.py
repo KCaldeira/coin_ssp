@@ -12,6 +12,7 @@ import xarray as xr
 from datetime import datetime
 from typing import Dict, Any, List
 from coin_ssp_models import ScalingParams
+from coin_ssp_math_utils import apply_loess_subtract
 # Import all moved functions from refactored modules
 from coin_ssp_netcdf import (
     write_all_loaded_data_netcdf, save_step4_results_netcdf_split,
@@ -669,8 +670,6 @@ def calculate_weather_vars(all_data, config):
         print(f"  Processing {ssp_name}: {len(tas_data.lat)}x{len(tas_data.lon)} grid cells...")
 
         # Apply LOESS filtering using xr.apply_ufunc for vectorization
-        from coin_ssp_math_utils import apply_loess_subtract
-
         def apply_loess_to_grid(data_array, filter_width, ref_slice):
             """Apply LOESS to each grid cell in parallel"""
             result = xr.apply_ufunc(

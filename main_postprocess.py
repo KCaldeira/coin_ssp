@@ -20,6 +20,7 @@ import os
 import sys
 import glob
 import time
+import json
 from datetime import datetime
 from pathlib import Path
 import numpy as np
@@ -145,9 +146,6 @@ def obtain_configuration_information(output_files, analysis_output_dir):
     dict
         Configuration dictionary in the same format as used by main processing code
     """
-    import xarray as xr
-    import json
-
     print("🔧 Obtaining configuration information...")
 
     # Try to read configuration from NetCDF files (prefer all_loaded_data for completeness)

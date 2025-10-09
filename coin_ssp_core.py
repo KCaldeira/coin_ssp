@@ -41,8 +41,7 @@ import copy
 from scipy.optimize import minimize
 from scipy import stats
 from coin_ssp_utils import filter_scaling_params, get_ssp_data, get_grid_metadata
-from coin_ssp_math_utils import apply_loess_divide
-
+from coin_ssp_math_utils import apply_loess_divide, calculate_time_means
 from coin_ssp_models import ScalingParams, ModelParams
 
 # Small epsilon to prevent division by zero in ratio calculations
@@ -565,8 +564,6 @@ def calculate_weather_gdp_regression_slopes(
         - success_mask[response_name][target_name]: 2D boolean array of successful regressions
         - gdp_weighted_means[response_name][target_name]: GDP-weighted mean slope
     """
-    from coin_ssp_math_utils import apply_loess_divide
-
     print("\n=== Weather-GDP Regression Analysis ===")
     print("Computing regression slopes: GDP_variability ~ temperature_variability")
 
@@ -579,7 +576,6 @@ def calculate_weather_gdp_regression_slopes(
     reference_ssp = config['ssp_scenarios']['reference_ssp']
 
     # Get data using helper function
-    from coin_ssp_utils import get_ssp_data
     tas_data = get_ssp_data(all_data, reference_ssp, 'tas')
     pr_data = get_ssp_data(all_data, reference_ssp, 'pr')
     gdp_data = get_ssp_data(all_data, reference_ssp, 'gdp')

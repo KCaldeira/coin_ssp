@@ -20,6 +20,7 @@ import pandas as pd
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.ticker as ticker
 from matplotlib.colors import TwoSlopeNorm, LogNorm
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
@@ -59,8 +60,6 @@ def format_log_colorbar_ticks(colorbar, base=10):
     >>> format_log_colorbar_ticks(cbar, base=10)  # For log10 scale
     >>> format_log_colorbar_ticks(cbar, base=np.e)  # For natural log scale
     """
-    import matplotlib.ticker as ticker
-
     def log_tick_formatter(x, pos):
         """Format tick label as linear value from log value."""
         linear_value = base ** x
