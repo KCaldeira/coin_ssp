@@ -21,9 +21,9 @@ def _moments_w(t: xr.DataArray, w: xr.DataArray, order: int):
     S0 = w.sum(dims, skipna=True)
     S1 = (t * w).sum(dims, skipna=True)
     if order == 1:
-        return xr.compute(S0, S1)
+        return (S0, S1)
     S2 = ((t * t) * w).sum(dims, skipna=True)
-    return xr.compute(S0, S1, S2)
+    return (S0, S1, S2)
 
 def fit_linear_gdp_pattern(
     t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12
