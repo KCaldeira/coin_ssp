@@ -9,7 +9,7 @@ from typing import Tuple
 def _moments_w(t: xr.DataArray, w: xr.DataArray, order: int):
     """
     Compute S0=∑w, S1=∑t w, S2=∑t^2 w with a common finite mask.
-    Returns the requested 0-D DataArrays, computed together (dask-friendly).
+    Returns the requested scalars as floats.
     """
     mask = np.isfinite(t) & np.isfinite(w)
     t = t.where(mask).astype("float64")
@@ -18,11 +18,11 @@ def _moments_w(t: xr.DataArray, w: xr.DataArray, order: int):
     # after broadcasting, product holds all dims to reduce over
     dims = (t * w).dims
 
-    S0 = w.sum(dims, skipna=True)
-    S1 = (t * w).sum(dims, skipna=True)
+    S0 = w.sum(dims, skipna=True).item()
+    S1 = (t * w).sum(dims, skipna=True).item()
     if order == 1:
         return (S0, S1)
-    S2 = ((t * t) * w).sum(dims, skipna=True)
+    S2 = ((t * t) * w).sum(dims, skipna=True).item()
     return (S0, S1, S2)
 
 def fit_linear_gdp_pattern(
@@ -33,7 +33,6 @@ def fit_linear_gdp_pattern(
       A(t0)=0  and  sum(A*w)/sum(w) = response
     """
     S0, S1 = _moments_w(t, w, order=1)
-    S0, S1 = S0.item(), S1.item()
 
     if abs(S0) < eps:
         raise ValueError("sum(w) ≈ 0; mean constraint undefined.")
@@ -60,7 +59,6 @@ def fit_quadratic_gdp_pattern(
       A(t0)=0,  A'(td)=0,  and  sum(A*w)/sum(w) = response
     """
     S0, S1, S2 = _moments_w(t, w, order=2)
-    S0, S1, S2 = S0.item(), S1.item(), S2.item()
 
     if abs(S0) < eps:
         raise ValueError("sum(w) ≈ 0; mean constraint undefined.")
