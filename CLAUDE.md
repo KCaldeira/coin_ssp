@@ -69,6 +69,7 @@ This project prioritizes **elegant, fail-fast code** that surfaces errors quickl
   - Iterate over coordinate values: `for lat_val in lat_coords:` NOT `for lat_idx in range(nlat):`
   - Assignment with coordinates: `.loc[dict(lat=lat_val, lon=lon_val)] = value`
   - This ensures dimension safety and enables proper broadcasting between arrays
+  - **No Dask**: This project does NOT use Dask for parallel computation - all xarray operations execute eagerly
 - **NetCDF Convention**: Arrays follow `[time, lat, lon]` dimension order - always use `data[time_idx, lat_idx, lon_idx]`
 - **Grid Cell Validation**: Skip ocean/ice cells where `gdp_value <= 0` or `population_value <= 0`
 - **Configuration Management**: Use `resolve_netcdf_filepath()` - NEVER hardcode file prefixes like `gridRaw_`
