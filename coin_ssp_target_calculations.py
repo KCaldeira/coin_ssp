@@ -25,7 +25,7 @@ def _moments_w(t: xr.DataArray, w: xr.DataArray, order: int):
     S2 = ((t * t) * w).sum(dims, skipna=True)
     return xr.compute(S0, S1, S2)
 
-def fit_linear_mean_xr(
+def fit_linear_gdp_pattern(
     t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12
 ) -> Tuple[float, float]:
     """
@@ -52,7 +52,7 @@ def fit_linear_mean_xr(
 
     return float(a0), float(a1)
 
-def fit_quadratic_mean_xr(
+def fit_quadratic_gdp_pattern(
     t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12
 ) -> Tuple[float, float, float]:
     """
@@ -178,17 +178,17 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
     print(f"  tas_period_series.shape = {tas_period_series.shape}")
     print(f"  gdp_period_series.shape = {gdp_period_series.shape}")
 
-    print(f"DEBUG: Calling fit_linear_A_xr with:")
+    print(f"DEBUG: Calling fit_linear_gdp_pattern with:")
     print(f"  tas_zero = {zero_amount_temperature}")
     print(f"  response = {global_mean_amount}")
 
-    # Use fit_linear_A_xr with valid_mask as extra_weight
+    # Use fit_linear_gdp_pattern with valid_mask as extra_weight
     # The function solves for A(T) = a0 + a1*T where:
     # - A(tas_zero) = 1 (zero anchor constraint at zero_amount_temperature)
     # - sum(A(T)*area*gdp) / sum(area*gdp) = 1 + response
-    # def fit_linear_A_xr(
+    # def fit_linear_gdp_pattern(
     # t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12) -> Tuple[float, float]:
-    a0, a1 = fit_linear_A_xr(
+    a0, a1 = fit_linear_gdp_pattern(
         tas_period_series,
         gdp_period_series * area_weights,
         zero_amount_temperature,
@@ -279,14 +279,14 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
     tas_period_series = tas_series.sel(time=slice(period_start, period_end))
     gdp_period_series = gdp_series.sel(time=slice(period_start, period_end))
 
-    # Use fit_quadratic_A_xr with valid_mask as extra_weight
+    # Use fit_quadratic_gdp_pattern with valid_mask as extra_weight
     # The function solves for A(T) = a0 + a1*T + a2*T² where:
     # - A(tas_zero) = 0 (zero anchor constraint at zero_amount_temperature)
     # - dA/dt(tas_zero_deriv) = 0 (derivative is zero at zero_derivative_temperature)
     # - sum(A(T)*area*gdp) / sum(area*gdp) = 1 + response
-    # def fit_quadratic_A_xr(
+    # def fit_quadratic_gdp_pattern(
     # t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12 ) -> Tuple[float, float, float]:
-    a0, a1, a2 = fit_quadratic_A_xr(
+    a0, a1, a2 = fit_quadratic_gdp_pattern(
         tas_period_series,
         area_weights * gdp_period_series,
         zero_amount_temperature,
