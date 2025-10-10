@@ -341,11 +341,11 @@ def calculate_gdp_weighted_mean(variable_series, gdp_series, area_weights, valid
     # area_weights [lat, lon] broadcasts across time dimension
     gdp_total = gdp_masked * area_weights
 
-    # Calculate GDP-weighted value for each time step (vectorized)
-    gdp_weighted_values = (
-        (gdp_total * var_masked).sum(dim=['lat', 'lon']) /
-        gdp_total.sum(dim=['lat', 'lon'])
+    # Calculate GDP-weighted mean over entire space-time period
+    # This is sum(GDP×area×variable) / sum(GDP×area) over all time and space
+    gdp_weighted_mean = (
+        (gdp_total * var_masked).sum(dim=['time', 'lat', 'lon']) /
+        gdp_total.sum(dim=['time', 'lat', 'lon'])
     )
 
-    # Return temporal mean
-    return float(gdp_weighted_values.mean(dim='time').values)
+    return float(gdp_weighted_mean.values)
