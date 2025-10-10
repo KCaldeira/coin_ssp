@@ -202,8 +202,14 @@ def calculate_linear_target_response(linear_config, valid_mask, all_data, refere
 
     # The function gives us A(T) = a0 + a1*T which directly represents reduction(T)
 
-    # Calculate linear reduction array (automatic broadcasting)
-    linear_response = a0 + a1 * tas_period
+    # Calculate linear reduction array at each grid cell as GDP-weighted mean over time
+    # reduction[lat,lon] = mean_over_time[(a0 + a1*T[t,lat,lon]) * GDP[t,lat,lon]] / mean_over_time[GDP[t,lat,lon]]
+    reduction_timeseries = a0 + a1 * tas_period_series  # [time, lat, lon]
+    gdp_masked = gdp_period_series.where(valid_mask)
+    linear_response = (
+        (reduction_timeseries * gdp_masked).sum(dim='time') /
+        gdp_masked.sum(dim='time')
+    )
 
     print(f"DEBUG: Final reduction array:")
     print(f"  linear_response.shape = {linear_response.shape}")
@@ -301,8 +307,14 @@ def calculate_quadratic_target_response(quadratic_config, valid_mask, all_data, 
     print(f"  a2 = {a2}")
     # The function gives us A(T) = a0 + a1*T + a2*T² which directly represents reduction(T)
 
-    # Calculate quadratic reduction array (automatic broadcasting)
-    quadratic_response = a0 + a1 * tas_period + a2 * tas_period**2
+    # Calculate quadratic reduction array at each grid cell as GDP-weighted mean over time
+    # reduction[lat,lon] = mean_over_time[(a0 + a1*T[t,lat,lon] + a2*T[t,lat,lon]²) * GDP[t,lat,lon]] / mean_over_time[GDP[t,lat,lon]]
+    reduction_timeseries = a0 + a1 * tas_period_series + a2 * tas_period_series**2  # [time, lat, lon]
+    gdp_masked = gdp_period_series.where(valid_mask)
+    quadratic_response = (
+        (reduction_timeseries * gdp_masked).sum(dim='time') /
+        gdp_masked.sum(dim='time')
+    )
 
     return {
         'reduction_array': quadratic_response.astype(np.float64),
