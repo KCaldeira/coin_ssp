@@ -2,87 +2,85 @@ import numpy as np
 import xarray as xr
 from typing import Tuple, Sequence, Optional, Dict, Any
 from coin_ssp_math_utils import calculate_time_means
+import numpy as np
+import xarray as xr
+from typing import Tuple
 
-def _check_dims(t: xr.DataArray, g: xr.DataArray, a: xr.DataArray,
-                dims: Sequence[str]) -> None:
-    for d in dims:
-        if d not in t.dims or d not in g.dims:
-            raise ValueError(f"tas and gdp must both have dim '{d}'.")
-    # area must cover the spatial dims; broadcasting across time is fine
-    for d in dims[1:]:
-        if d not in a.dims:
-            raise ValueError(f"area must have spatial dim '{d}'.")
-
-def _tw_moments(t: xr.DataArray, w: xr.DataArray, max_k: int):
-    """Return T1, T2[, T3] with a common finite mask; each is a 0-D DataArray."""
+def _moments_w(t: xr.DataArray, w: xr.DataArray, order: int):
+    """
+    Compute S0=∑w, S1=∑t w, S2=∑t^2 w with a common finite mask.
+    Returns the requested 0-D DataArrays, computed together (dask-friendly).
+    """
     mask = np.isfinite(t) & np.isfinite(w)
     t = t.where(mask).astype("float64")
     w = w.where(mask).astype("float64")
 
-    dims = (t * w).dims  # union of dims; xarray will broadcast automatically
+    # after broadcasting, product holds all dims to reduce over
+    dims = (t * w).dims
 
-    T1 = (t * w).sum(dims, skipna=True)
-    outs = [T1]
-    if max_k >= 2:
-        T2 = ((t * t) * w).sum(dims, skipna=True); outs.append(T2)
-    if max_k >= 3:
-        T3 = ((t * t * t) * w).sum(dims, skipna=True); outs.append(T3)
+    S0 = w.sum(dims, skipna=True)
+    S1 = (t * w).sum(dims, skipna=True)
+    if order == 1:
+        return xr.compute(S0, S1)
+    S2 = ((t * t) * w).sum(dims, skipna=True)
+    return xr.compute(S0, S1, S2)
 
-    return tuple(outs)
-
-def fit_linear_A_xr(
-    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12
+def fit_linear_mean_xr(
+    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12
 ) -> Tuple[float, float]:
     """
-    Find a0, a1 for A(t)=a0+a1*t subject to:
-      A(t0)=1  and  sum(A*t*w) / sum(t*w) = 1 + response
-
-    valid_mask is applied to weights to exclude invalid grid cells.
+    Solve a0, a1 for A(t)=a0+a1*t with:
+      A(t0)=0  and  sum(A*w)/sum(w) = response
     """
-    w_masked = w.where(valid_mask, 0.0)
-    T1, T2 = _tw_moments(t, w_masked, max_k=2)
-    T1, T2 = T1.item(), T2.item()
+    S0, S1 = _moments_w(t, w, order=1)
+    S0, S1 = S0.item(), S1.item()
 
-    denom = T2 - t0 * T1
+    if abs(S0) < eps:
+        raise ValueError("sum(w) ≈ 0; mean constraint undefined.")
+
+    denom = S1 - t0 * S0
+    rhs = response * S0
+
     if abs(denom) < eps:
-        # Consistent only if response*T1 ~ 0; choose simplest solution then.
-        if not np.isclose(response * T1, 0.0, rtol=1e-12, atol=1e-12):
-            raise ValueError("Inconsistent linear constraints (denominator ~ 0 but response*T1 ≠ 0).")
+        if not np.isclose(rhs, 0.0, rtol=1e-12, atol=1e-12):
+            raise ValueError("Inconsistent linear constraints (denominator ≈ 0 but response ≠ 0).")
         a1 = 0.0
         a0 = 0.0
     else:
-        a1 = (response * T1) / denom
-        a0 =  - a1 * t0
+        a1 = rhs / denom
+        a0 = -a1 * t0
 
     return float(a0), float(a1)
 
-def fit_quadratic_A_xr(
-    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12
+def fit_quadratic_mean_xr(
+    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12
 ) -> Tuple[float, float, float]:
     """
-    Find a0, a1, a2 for A(t)=a0+a1*t+a2*t**2 subject to:
-      A(t0)=1,  dA/dt|_{t=td}=0,  and  sum(A*t*w) / sum(t*w) = 1 + response
-
-    valid_mask is applied to weights to exclude invalid grid cells.
+    Solve a0, a1, a2 for A(t)=a0+a1*t+a2*t**2 with:
+      A(t0)=0,  A'(td)=0,  and  sum(A*w)/sum(w) = response
     """
-    w_masked = w.where(valid_mask, 0.0)
-    T1, T2, T3 = _tw_moments(t, w_masked, max_k=3)
-    T1, T2, T3 = T1.item(), T2.item(), T3.item()
+    S0, S1, S2 = _moments_w(t, w, order=2)
+    S0, S1, S2 = S0.item(), S1.item(), S2.item()
 
-    denom = T3 - 2.0 * td * T2 + (2.0 * td * t0 - t0 * t0) * T1
+    if abs(S0) < eps:
+        raise ValueError("sum(w) ≈ 0; mean constraint undefined.")
+
+    denom = (2.0 * td * t0 - t0 * t0) * S0 - 2.0 * td * S1 + S2
+    rhs = response * S0
+
     if abs(denom) < eps:
-        if not np.isclose(response * T1, 0.0, rtol=1e-12, atol=1e-12):
-            raise ValueError("Inconsistent quadratic constraints (denominator ~ 0 but response*T1 ≠ 0).")
-        # Simplest valid member: constant A(t)=0 (a2=a1=0) satisfies all constraints when response*T1=0
+        if not np.isclose(rhs, 0.0, rtol=1e-12, atol=1e-12):
+            raise ValueError("Inconsistent quadratic constraints (denominator ≈ 0 but response ≠ 0).")
         a2 = 0.0
         a1 = 0.0
         a0 = 0.0
     else:
-        a2 = (response * T1) / denom
+        a2 = rhs / denom
         a1 = -2.0 * a2 * td
-        a0 = - a2 * (t0 * t0 - 2.0 * td * t0)
+        a0 = a2 * (2.0 * td * t0 - t0 * t0)
 
     return float(a0), float(a1), float(a2)
+
 
 
 def calculate_constant_target_response(gdp_amount_value, tas_ref_template):
