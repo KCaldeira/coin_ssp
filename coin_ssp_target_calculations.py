@@ -26,12 +26,13 @@ def _moments_w(t: xr.DataArray, w: xr.DataArray, order: int):
     return (S0, S1, S2)
 
 def fit_linear_gdp_pattern(
-    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, eps: float = 1e-12
+    t: xr.DataArray, w: xr.DataArray, t0: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12
 ) -> Tuple[float, float]:
     """
     Solve a0, a1 for A(t)=a0+a1*t with:
       A(t0)=0  and  sum(A*w)/sum(w) = response
     """
+    w = w.where(valid_mask, 0.0)
     S0, S1 = _moments_w(t, w, order=1)
 
     if abs(S0) < eps:
@@ -52,12 +53,13 @@ def fit_linear_gdp_pattern(
     return float(a0), float(a1)
 
 def fit_quadratic_gdp_pattern(
-    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, eps: float = 1e-12
+    t: xr.DataArray, w: xr.DataArray, t0: float, td: float, response: float, valid_mask: xr.DataArray, eps: float = 1e-12
 ) -> Tuple[float, float, float]:
     """
     Solve a0, a1, a2 for A(t)=a0+a1*t+a2*t**2 with:
       A(t0)=0,  A'(td)=0,  and  sum(A*w)/sum(w) = response
     """
+    w = w.where(valid_mask, 0.0)
     S0, S1, S2 = _moments_w(t, w, order=2)
 
     if abs(S0) < eps:
